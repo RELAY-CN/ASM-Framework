@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.transformer
@@ -68,18 +68,19 @@ abstract class AsmTransformer {
         classNode: ClassNode,
         loader: ClassLoader? = null,
     ): ByteArray {
-        val writer = if (this.classReader != null && this.classNode == classNode) {
-            // 使用缓存的 ClassReader 优化
-            SafeClassWriter(this.classReader, loader, ClassWriter.COMPUTE_FRAMES).also {
-                this.classReader = null
+        val writer =
+            if (this.classReader != null && this.classNode == classNode) {
+                // 使用缓存的 ClassReader 优化
+                SafeClassWriter(this.classReader, loader, ClassWriter.COMPUTE_FRAMES).also {
+                    this.classReader = null
+                    this.classNode = null
+                }
+            } else {
+                // 使用 SafeClassWriter 处理类加载问题
                 this.classNode = null
+                this.classReader = null
+                SafeClassWriter(null, loader, ClassWriter.COMPUTE_FRAMES)
             }
-        } else {
-            // 使用 SafeClassWriter 处理类加载问题
-            this.classNode = null
-            this.classReader = null
-            SafeClassWriter(null, loader, ClassWriter.COMPUTE_FRAMES)
-        }
         classNode.accept(writer)
         return writer.toByteArray()
     }

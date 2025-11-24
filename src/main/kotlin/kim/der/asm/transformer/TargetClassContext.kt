@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.transformer
@@ -872,13 +872,14 @@ class TargetClassContext(
         }
 
         // 创建目标方法节点（使用目标方法的签名）
-        val targetMethod = MethodNode(
-            Opcodes.ACC_PUBLIC, // 默认 public，可以根据需要调整
-            methodName,
-            methodDesc,
-            null,
-            null,
-        )
+        val targetMethod =
+            MethodNode(
+                Opcodes.ACC_PUBLIC, // 默认 public，可以根据需要调整
+                methodName,
+                methodDesc,
+                null,
+                null,
+            )
 
         // 使用 CopyInjector 创建新方法
         val injector = AsmInjectorFactory.createCopyInjector(method, asmInfo)

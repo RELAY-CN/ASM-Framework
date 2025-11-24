@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.mixin
@@ -28,4 +28,3 @@ object ModifyArgMixin {
     @JvmStatic
     fun modifyArgC1(string: String): String = "Modified_$string"
 }
-

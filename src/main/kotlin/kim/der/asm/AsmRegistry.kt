@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm
@@ -25,11 +25,12 @@ object AsmRegistry {
     fun register(asmClass: Class<*>) {
         val annotation = asmClass.getAnnotation(AsmMixin::class.java) ?: return
 
-        val targets = when {
-            annotation.targets.isNotEmpty() -> annotation.targets.asList()
-            annotation.value.isNotEmpty() -> listOf(annotation.value)
-            else -> return
-        }
+        val targets =
+            when {
+                annotation.targets.isNotEmpty() -> annotation.targets.asList()
+                annotation.value.isNotEmpty() -> listOf(annotation.value)
+                else -> return
+            }
 
         val asmInfo = AsmInfo(asmClass = asmClass, targets = targets, pathMatcher = null)
 

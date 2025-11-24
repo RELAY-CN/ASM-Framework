@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector.impl
@@ -69,12 +69,13 @@ class ReturnInjector(
                 if (needsCallbackInfo) {
                     AsmMethodCallGenerator.generateCallbackInfoCreation(il)
                     // 存储到局部变量（确保在 returnVarIndex 之后）
-                    callbackVarIndex = if (returnVarIndex != null) {
-                        val returnVarSize = if (returnType.sort == Type.LONG || returnType.sort == Type.DOUBLE) 2 else 1
-                        returnVarIndex + returnVarSize
-                    } else {
-                        allocateLocalVariable(target, Type.getType(CallbackInfo::class.java), null)
-                    }
+                    callbackVarIndex =
+                        if (returnVarIndex != null) {
+                            val returnVarSize = if (returnType.sort == Type.LONG || returnType.sort == Type.DOUBLE) 2 else 1
+                            returnVarIndex + returnVarSize
+                        } else {
+                            allocateLocalVariable(target, Type.getType(CallbackInfo::class.java), null)
+                        }
                     il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
 
                     // 如果返回值不是 void，设置到 CallbackInfo

@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.mixin
@@ -33,4 +33,3 @@ class RemoveMethodMixin {
         // 这个方法只是标记，实际不会执行
     }
 }
-

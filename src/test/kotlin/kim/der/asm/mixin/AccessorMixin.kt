@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.mixin
@@ -27,7 +27,7 @@ import kim.der.asm.api.annotation.Mutable
  *   class MyMixin {
  *       @Shadow(prefix = "")
  *       private val dynamicString: String? = null  // 在注入方法中使用
- *       
+ *
  *       @Accessor("dynamicString")
  *       fun getDynamicString(): String { ... }     // 供外部代码使用
  *   }
@@ -70,14 +70,10 @@ object AccessorMixin {
      * ```
      */
     @Accessor("dynamicString")
-    fun getDynamicString(): String {
-        throw UnsupportedOperationException("Accessor should not be called directly")
-    }
+    fun getDynamicString(): String = throw UnsupportedOperationException("Accessor should not be called directly")
 
     @Accessor("dynamicString")
-    fun setDynamicString(value: String) {
-        throw UnsupportedOperationException("Accessor should not be called directly")
-    }
+    fun setDynamicString(value: String): Unit = throw UnsupportedOperationException("Accessor should not be called directly")
 
     /**
      * 静态字段访问器示例
@@ -97,15 +93,11 @@ object AccessorMixin {
      */
     @Accessor("staticString")
     @JvmStatic
-    fun getStaticString(): String {
-        throw UnsupportedOperationException("Accessor should not be called directly")
-    }
+    fun getStaticString(): String = throw UnsupportedOperationException("Accessor should not be called directly")
 
     @Accessor("staticString")
     @JvmStatic
-    fun setStaticString(value: String) {
-        throw UnsupportedOperationException("Accessor should not be called directly")
-    }
+    fun setStaticString(value: String): Unit = throw UnsupportedOperationException("Accessor should not be called directly")
 
     /**
      * final 字段访问器示例
@@ -129,14 +121,10 @@ object AccessorMixin {
     @Accessor("staticFinalString")
     @Mutable
     @JvmStatic
-    fun getStaticFinalString(): String {
-        throw UnsupportedOperationException("Accessor should not be called directly")
-    }
+    fun getStaticFinalString(): String = throw UnsupportedOperationException("Accessor should not be called directly")
 
     @Accessor("staticFinalString")
     @Mutable
     @JvmStatic
-    fun setStaticFinalString(value: String) {
-        throw UnsupportedOperationException("Accessor should not be called directly")
-    }
+    fun setStaticFinalString(value: String): Unit = throw UnsupportedOperationException("Accessor should not be called directly")
 }

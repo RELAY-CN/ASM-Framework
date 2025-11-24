@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector.impl
@@ -69,7 +69,7 @@ class HeadInjector(
 
             /**
              * 如果取消，直接返回（不执行方法体）
-             * 
+             *
              * 重要：这个 RETURN 指令是在 HEAD 注入中创建的，不会被 RETURN 注入处理
              * 原因：
              * 1. HEAD 注入在 RETURN 注入之后执行（见 TargetClassContext.applyAsm()）
@@ -90,14 +90,14 @@ class HeadInjector(
                         false,
                     ),
                 )
-                
+
                 // 检查返回值是否为 null
                 val hasReturnValueLabel = LabelNode()
                 val defaultReturnLabel = LabelNode()
                 val endLabel = LabelNode()
                 il.add(InsnNode(Opcodes.DUP))
                 il.add(JumpInsnNode(Opcodes.IFNULL, defaultReturnLabel))
-                
+
                 // 如果有返回值，进行类型转换
                 when (returnType.sort) {
                     Type.BOOLEAN -> {
@@ -138,7 +138,7 @@ class HeadInjector(
                     }
                 }
                 il.add(JumpInsnNode(Opcodes.GOTO, endLabel))
-                
+
                 // 如果没有返回值，弹出 DUP 的 Object，然后使用默认值
                 il.add(defaultReturnLabel)
                 il.add(InsnNode(Opcodes.POP)) // 弹出剩余的 Object（来自 DUP）
@@ -150,7 +150,7 @@ class HeadInjector(
                     Type.DOUBLE -> il.add(InsnNode(Opcodes.DCONST_0))
                     else -> il.add(InsnNode(Opcodes.ACONST_NULL))
                 }
-                
+
                 il.add(endLabel)
             }
             // 直接返回，不执行方法体

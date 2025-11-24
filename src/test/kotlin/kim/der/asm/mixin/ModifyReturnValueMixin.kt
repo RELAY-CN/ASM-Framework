@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.mixin
@@ -26,10 +26,15 @@ object ModifyReturnValueMixin {
 
     @ModifyReturnValue(method = "testC0(Ljava/lang/String;)Ljava/lang/String;")
     @JvmStatic
-    fun modifyReturnC0(original: String, string: String): String = "ModifiedReturnC0"
+    fun modifyReturnC0(
+        original: String,
+        string: String,
+    ): String = "ModifiedReturnC0"
 
     @ModifyReturnValue(method = "testC1(Ljava/lang/String;)Ljava/lang/String;")
     @JvmStatic
-    fun modifyReturnC1(original: String, string: String): String = "ModifiedReturnC1"
+    fun modifyReturnC1(
+        original: String,
+        string: String,
+    ): String = "ModifiedReturnC1"
 }
-

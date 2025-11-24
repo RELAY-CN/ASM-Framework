@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector.impl
@@ -53,34 +53,35 @@ class ModifyReturnValueInjector(
 
                 // 检查 ASM 方法的参数
                 val asmParamTypes = Type.getArgumentTypes(asmMethod)
-                
+
                 // ASM 方法的参数应该是：
                 // 1. 第一个参数（可选）：原始返回值
                 // 2. 后续参数（可选）：目标方法的参数
-                
+
                 // 确定第一个参数是否是返回值
                 val firstParamIsReturnValue = asmParamTypes.isNotEmpty() && asmParamTypes[0] == returnType
-                
+
                 // 如果第一个参数是返回值，从保存的局部变量加载返回值
                 if (firstParamIsReturnValue) {
                     loadReturnValueForModification(il, returnType, returnVar)
                 }
-                
+
                 // 计算需要加载的目标方法参数数量
-                val targetParamCount = if (firstParamIsReturnValue) {
-                    // 第一个参数是返回值，后续参数是目标方法的参数
-                    asmParamTypes.size - 1
-                } else {
-                    // 第一个参数不是返回值，所有参数都是目标方法的参数
-                    asmParamTypes.size
-                }
-                
+                val targetParamCount =
+                    if (firstParamIsReturnValue) {
+                        // 第一个参数是返回值，后续参数是目标方法的参数
+                        asmParamTypes.size - 1
+                    } else {
+                        // 第一个参数不是返回值，所有参数都是目标方法的参数
+                        asmParamTypes.size
+                    }
+
                 // 加载目标方法的参数（只加载需要的数量）
                 if (targetParamCount > 0) {
                     val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
                     var paramVarIndex = if (isStatic) 0 else 1
                     val targetParamTypes = Type.getArgumentTypes(target.desc)
-                    
+
                     // 只加载前 targetParamCount 个参数
                     for (i in 0 until minOf(targetParamCount, targetParamTypes.size)) {
                         val paramType = targetParamTypes[i]

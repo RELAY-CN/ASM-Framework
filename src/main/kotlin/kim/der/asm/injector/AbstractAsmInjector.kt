@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector
@@ -25,8 +25,8 @@ abstract class AbstractAsmInjector(
      * 获取 ASM 实例
      * 优先尝试获取 Kotlin object 的 INSTANCE 字段，否则创建新实例
      */
-    protected fun getAsmInstance(): Any {
-        return try {
+    protected fun getAsmInstance(): Any =
+        try {
             val instanceField = asmInfo.asmClass.getDeclaredField("INSTANCE")
             instanceField.isAccessible = true
             instanceField.get(null) ?: throw RuntimeException("INSTANCE is null")
@@ -38,7 +38,6 @@ abstract class AbstractAsmInjector(
                 throw RuntimeException("Cannot create instance of asm class: ${asmInfo.asmClass.name}", e2)
             }
         }
-    }
 
     /**
      * 尝试获取 Kotlin object 的 INSTANCE 字段

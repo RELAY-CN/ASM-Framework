@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.mixin
@@ -17,24 +17,16 @@ import kim.der.asm.api.annotation.Invoker
 @AsmMixin("Test")
 object InvokerMixin {
     @Invoker("testA0")
-    fun invokeTestA0(): String {
-        throw UnsupportedOperationException("Invoker should not be called directly")
-    }
+    fun invokeTestA0(): String = throw UnsupportedOperationException("Invoker should not be called directly")
 
     @Invoker("testB0")
     @JvmStatic
-    fun invokeTestB0(): String {
-        throw UnsupportedOperationException("Invoker should not be called directly")
-    }
+    fun invokeTestB0(): String = throw UnsupportedOperationException("Invoker should not be called directly")
 
     @Invoker("testC0")
-    fun invokeTestC0(string: String): String {
-        throw UnsupportedOperationException("Invoker should not be called directly")
-    }
+    fun invokeTestC0(string: String): String = throw UnsupportedOperationException("Invoker should not be called directly")
 
     @Invoker("testC1")
     @JvmStatic
-    fun invokeTestC1(string: String): String {
-        throw UnsupportedOperationException("Invoker should not be called directly")
-    }
+    fun invokeTestC1(string: String): String = throw UnsupportedOperationException("Invoker should not be called directly")
 }
