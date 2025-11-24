@@ -1,0 +1,42 @@
+# Build outputs
+build/
+*.class
+*.jar
+*.war
+*.ear
+
+# Generated resources
+src/main/resources/gradleRes/
+src/main/resources/META-INF/native-image/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# Gradle
+.gradle/
+gradle.properties
+gradle-app.setting
+local.properties
+
+# Logs and temp files
+logs/
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Java
+hs_err_pid*
+crash-report-*
