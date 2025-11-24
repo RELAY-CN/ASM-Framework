@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector.util
@@ -306,7 +306,7 @@ object InlineCodeGenerator {
         val shadowMethodMap = mutableMapOf<String, String>()
         // 构建 Copy 方法映射：ASM 方法名 -> 目标方法名（通过 @Copy 复制的方法）
         val copyMethodMap = mutableMapOf<String, String>()
-        
+
         for (method in asmInfo.asmClass.declaredMethods) {
             val shadowAnnotation = method.getAnnotation(Shadow::class.java)
             if (shadowAnnotation != null) {
@@ -323,23 +323,24 @@ object InlineCodeGenerator {
 
                 shadowMethodMap[methodName] = targetMethodName
             }
-            
+
             // 检查是否是 @Copy 方法
             val copyAnnotation = method.getAnnotation(Copy::class.java)
             if (copyAnnotation != null) {
                 val methodName = method.name
                 val methodDesc = Type.getMethodDescriptor(method)
-                
+
                 // 确定目标方法名
-                val targetMethodName = if (copyAnnotation.method.isEmpty()) {
-                    // 如果 method 为空，使用 ASM 方法名
-                    methodName
-                } else {
-                    // 解析方法签名
-                    val (name, _) = parseMethodSignature(copyAnnotation.method)
-                    name
-                }
-                
+                val targetMethodName =
+                    if (copyAnnotation.method.isEmpty()) {
+                        // 如果 method 为空，使用 ASM 方法名
+                        methodName
+                    } else {
+                        // 解析方法签名
+                        val (name, _) = parseMethodSignature(copyAnnotation.method)
+                        name
+                    }
+
                 // 使用方法名和描述符作为键，确保唯一性
                 copyMethodMap["$methodName$methodDesc"] = targetMethodName
             }

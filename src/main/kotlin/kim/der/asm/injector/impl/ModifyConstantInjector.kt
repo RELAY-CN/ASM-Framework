@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector.impl
@@ -65,7 +65,10 @@ class ModifyConstantInjector(
     /**
      * 检查常量值是否匹配
      */
-    private fun matchesConstant(constant: Any?, value: String): Boolean {
+    private fun matchesConstant(
+        constant: Any?,
+        value: String,
+    ): Boolean {
         if (constant == null) {
             return value == "null"
         }
@@ -115,7 +118,11 @@ class ModifyConstantInjector(
     /**
      * 加载常量值
      */
-    private fun loadConstant(il: InsnList, insn: AbstractInsnNode, type: Type) {
+    private fun loadConstant(
+        il: InsnList,
+        insn: AbstractInsnNode,
+        type: Type,
+    ) {
         when (insn) {
             is LdcInsnNode -> {
                 il.add(LdcInsnNode(insn.cst))
@@ -152,4 +159,3 @@ class ModifyConstantInjector(
         )
     }
 }
-

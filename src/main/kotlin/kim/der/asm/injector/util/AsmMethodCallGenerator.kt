@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm.injector.util
@@ -177,7 +177,10 @@ object AsmMethodCallGenerator {
      * 检查是否需要弹出 ASM 方法的返回值
      * 当 ASM 方法有返回值但目标方法是 void 时，需要弹出返回值
      */
-    fun needsPopReturnValue(asmMethod: Method, targetMethod: MethodNode): Boolean =
+    fun needsPopReturnValue(
+        asmMethod: Method,
+        targetMethod: MethodNode,
+    ): Boolean =
         Type.getReturnType(asmMethod) != Type.VOID_TYPE &&
             Type.getReturnType(targetMethod.desc) == Type.VOID_TYPE
 
