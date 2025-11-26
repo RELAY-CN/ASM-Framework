@@ -3,6 +3,7 @@ build/
 *.class
 *.war
 *.ear
+!src/test/resources/Test.class
 
 # Generated resources
 src/main/resources/gradleRes/
