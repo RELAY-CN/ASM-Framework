@@ -82,6 +82,25 @@ class Test {
         assertEquals("InjectedAtHeadB0", resultB0, "静态方法 HEAD 注入应该返回注入的值")
     }
 
+    // ========== INVOKE 注入测试（验证 @at 参数） ==========
+    @Test
+    fun testInvokeInject() {
+        AsmRegistry.clear()
+        AsmRegistry.register(InvokeInjectMixin::class.java)
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试 INVOKE 注入（使用 @at 参数）
+        val methodC0 = clazz.getMethod("testC0", String::class.java)
+        val resultC0 = methodC0.invoke(instance, "Test") as String
+        // 验证方法正常执行（at 参数应该能正常工作）
+        assertNotNull(resultC0, "testC0 应该返回结果")
+        assertEquals("TesttestC0", resultC0, "testC0 应该返回正确的结果")
+    }
+
     // ========== ModifyArg 测试 ==========
     @Test
     fun testModifyArg() {
@@ -334,6 +353,7 @@ class Test {
             listOf(
                 "Overwrite" to OverwriteMixin::class.java,
                 "Inject" to InjectMixin::class.java,
+                "InvokeInject" to InvokeInjectMixin::class.java,
                 "ModifyArg" to ModifyArgMixin::class.java,
                 "ModifyReturnValue" to ModifyReturnValueMixin::class.java,
                 "Redirect" to RedirectMixin::class.java,
