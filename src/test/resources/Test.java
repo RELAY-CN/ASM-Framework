@@ -14,6 +14,7 @@ public class Test {
 
     public String testC0(String string) {
         String dynamicString = string + "testC0";
+        System.out.println("testC0 called with: " + dynamicString);
         return dynamicString;
     }
 
