@@ -1138,15 +1138,20 @@ class TargetClassContext(
         methodNode.localVariables = ArrayList()
         methodNode.parameters = ArrayList()
 
+        val returnType = Type.getReturnType(methodNode.desc)
+        val useDefaultReturn = shouldUseDefaultReturn(returnType)
+
         // 处理构造函数：在 RETURN 前注入
         if (methodNode.name == "<init>" && methodNode.desc.endsWith(")V")) {
             val newInstructions = InsnList()
             for (insnNode in methodNode.instructions) {
                 if (insnNode.opcode == Opcodes.RETURN) {
-                    // 在 RETURN 前注入 RedirectionReplaceApi 调用
-                    val il = InsnList()
-                    injectRedirection(classNode, methodNode, il)
-                    newInstructions.add(il)
+                    if (!useDefaultReturn && returnType != Type.VOID_TYPE) {
+                        // 在 RETURN 前注入 RedirectionReplaceApi 调用
+                        val il = InsnList()
+                        injectRedirection(classNode, methodNode, il)
+                        newInstructions.add(il)
+                    }
                 }
                 newInstructions.add(insnNode)
             }
@@ -1155,7 +1160,11 @@ class TargetClassContext(
         } else {
             // 普通方法：完全替换方法体
             val il = InsnList()
-            val returnType = injectRedirection(classNode, methodNode, il)
+            if (useDefaultReturn) {
+                loadDefaultReturnValue(returnType, il)
+            } else if (returnType != Type.VOID_TYPE) {
+                injectRedirection(classNode, methodNode, il)
+            }
             il.add(InstructionUtil.makeReturn(returnType))
             methodNode.instructions = il
             return true
@@ -1251,6 +1260,48 @@ class TargetClassContext(
 
             il.add(InsnNode(Opcodes.AASTORE))
             v++
+        }
+    }
+
+    private fun shouldUseDefaultReturn(type: Type): Boolean {
+        if (type == Type.VOID_TYPE) {
+            return true
+        }
+        return when (type.sort) {
+            Type.BOOLEAN,
+            Type.BYTE,
+            Type.SHORT,
+            Type.INT,
+            Type.LONG,
+            Type.FLOAT,
+            Type.DOUBLE,
+            Type.CHAR -> true
+            Type.OBJECT -> type.internalName == "java/lang/String" || type.internalName == "java/lang/CharSequence"
+            else -> false
+        }
+    }
+
+    private fun loadDefaultReturnValue(
+        type: Type,
+        il: InsnList,
+    ) {
+        when (type.sort) {
+            Type.BOOLEAN,
+            Type.BYTE,
+            Type.SHORT,
+            Type.INT -> il.add(InsnNode(Opcodes.ICONST_0))
+            Type.CHAR -> il.add(LdcInsnNode('a'))
+            Type.FLOAT -> il.add(InsnNode(Opcodes.FCONST_0))
+            Type.LONG -> il.add(InsnNode(Opcodes.LCONST_0))
+            Type.DOUBLE -> il.add(InsnNode(Opcodes.DCONST_0))
+            Type.OBJECT ->
+                if (type.internalName == "java/lang/String" || type.internalName == "java/lang/CharSequence") {
+                    il.add(LdcInsnNode(""))
+                } else {
+                    throw IllegalStateException("Unsupported default object type: ${type.internalName}")
+                }
+            Type.VOID -> return
+            else -> throw IllegalStateException("Unsupported type for default return: $type")
         }
     }
 }

@@ -29,7 +29,7 @@ abstract class AbstractRedirectionManagerImpl : RedirectionReplaceManager {
         vararg args: Any?,
     ): Any? = invoke(desc, type, obj, { getFallback(desc, type) }, *args)
 
-    private fun getFallback(
+    protected fun getFallback(
         desc: String,
         type: Class<*>,
     ): RedirectionReplace =
