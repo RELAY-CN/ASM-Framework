@@ -9,6 +9,14 @@ import java.util.function.Supplier
 
 class RedirectionIgnoreManagerImpl : AbstractRedirectionManagerImpl() {
     @Throws(Throwable::class)
+    override operator fun invoke(
+        obj: Any,
+        desc: String,
+        type: Class<*>,
+        vararg args: Any?,
+    ): Any? = getFallback(desc, type).invoke(obj, desc, type, *args)
+
+    @Throws(Throwable::class)
     override fun invoke(
         desc: String,
         type: Class<*>,

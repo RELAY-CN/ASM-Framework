@@ -4,6 +4,10 @@ public class Test {
     private static final String staticFinalString = "StaticFinalString";
 
 
+    public void testVoid() {
+        System.out.println("testVoid");
+    }
+
     public String testA0() {
         return dynamicString;
     }
