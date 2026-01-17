@@ -250,6 +250,7 @@ object MultiInjectMixin {
 ### 1. 组织 Mixin 类
 
 按功能模块组织：
+
 ```
 com.example.mixins/
 ├── logging/LoggingMixin.kt
@@ -276,6 +277,7 @@ try {
 ### 4. 方法签名格式
 
 使用 JVM 内部名称格式：
+
 - `"method()V"` - 无参数，返回 void
 - `"method(Ljava/lang/String;)V"` - String 参数，返回 void
 - `"method(Ljava/lang/String;I)Ljava/lang/String;"` - String 和 int 参数，返回 String
@@ -283,6 +285,7 @@ try {
 ### 5. 静态方法处理
 
 覆盖或注入静态方法时必须使用 `@JvmStatic`：
+
 ```kotlin
 @Overwrite(method = "staticMethod()V")
 @JvmStatic
@@ -292,6 +295,7 @@ fun staticMethod() { }
 ### 6. Shadow 字段使用
 
 Shadow 字段必须在 `class` 中声明，不能在 `object` 中：
+
 ```kotlin
 @AsmMixin("Target")
 class MyMixin {  // ✅ 使用 class
@@ -326,6 +330,7 @@ fun testMixin() {
 val transformed = processor.transform(className, classBytes, classLoader)
 Files.write(Paths.get("output/$className.class"), transformed)
 ```
+
 然后使用反编译工具（如 JD-GUI）查看。
 
 ### 添加日志
@@ -340,6 +345,7 @@ fun inject(callback: CallbackInfo) {
 ### 验证方法签名
 
 使用 `javap -s` 查看实际的方法签名：
+
 ```bash
 javap -s com.example.TargetClass
 ```
@@ -380,6 +386,7 @@ A: 目前不支持，建议在注入方法中使用同步代码。
 ### 静态方法注入失败
 
 添加 `@JvmStatic` 注解：
+
 ```kotlin
 @Overwrite(method = "staticMethod()V")
 @JvmStatic
