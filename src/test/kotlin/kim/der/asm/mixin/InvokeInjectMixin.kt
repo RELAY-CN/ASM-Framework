@@ -20,13 +20,17 @@ object InvokeInjectMixin {
     @AsmInject(
         method = "testC0(Ljava/lang/String;)Ljava/lang/String;",
         target = InjectionPoint.INVOKE,
-        at = At(
-            value = InjectionPoint.INVOKE,
-            target = "java/io/PrintStream.println(Ljava/lang/String;)V",
-            shift = Shift.BEFORE
-        )
+        at =
+            At(
+                value = InjectionPoint.INVOKE,
+                target = "java/io/PrintStream.println(Ljava/lang/String;)V",
+                shift = Shift.BEFORE,
+            ),
     )
-    fun injectBeforePrintln(callback: CallbackInfo, string: String) {
+    fun injectBeforePrintln(
+        callback: CallbackInfo,
+        string: String,
+    ) {
         println("[INVOKE INJECT] Before println with param: $string")
     }
 
@@ -34,14 +38,17 @@ object InvokeInjectMixin {
     @AsmInject(
         method = "testC0(Ljava/lang/String;)Ljava/lang/String;",
         target = InjectionPoint.INVOKE,
-        at = At(
-            value = InjectionPoint.INVOKE,
-            target = "java/io/PrintStream.println(Ljava/lang/String;)V",
-            shift = Shift.AFTER
-        )
+        at =
+            At(
+                value = InjectionPoint.INVOKE,
+                target = "java/io/PrintStream.println(Ljava/lang/String;)V",
+                shift = Shift.AFTER,
+            ),
     )
-    fun injectAfterPrintln(callback: CallbackInfo, string: String) {
+    fun injectAfterPrintln(
+        callback: CallbackInfo,
+        string: String,
+    ) {
         println("[INVOKE INJECT] After println with param: $string")
     }
 }
-

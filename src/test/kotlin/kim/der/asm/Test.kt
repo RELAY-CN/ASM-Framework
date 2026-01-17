@@ -8,7 +8,6 @@ import kim.der.asm.mixin.*
 import kim.der.asm.transformer.AsmProcessor
 import java.nio.file.Files
 import java.nio.file.Paths
-import kotlin.jvm.java
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull

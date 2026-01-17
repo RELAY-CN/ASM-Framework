@@ -4,7 +4,12 @@
 
 package kim.der.asm.mixin
 
-import kim.der.asm.api.annotation.*
+import kim.der.asm.api.annotation.Accessor
+import kim.der.asm.api.annotation.AsmInject
+import kim.der.asm.api.annotation.AsmMixin
+import kim.der.asm.api.annotation.CallbackInfo
+import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Shadow
 
 /**
  * Accessor 和 Shadow 结合使用示例

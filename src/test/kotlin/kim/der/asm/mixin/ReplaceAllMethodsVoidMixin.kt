@@ -14,4 +14,3 @@ import kim.der.asm.api.annotation.ReplaceAllMethods
 @AsmMixin("Test")
 @ReplaceAllMethods
 class ReplaceAllMethodsVoidMixin
-

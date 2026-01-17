@@ -22,9 +22,11 @@ ASM 注册器，负责管理所有注册的 ASM 类。
 注册一个 ASM 类。
 
 **参数：**
+
 - `asmClass`: 带 `@AsmMixin` 注解的类
 
 **示例：**
+
 ```kotlin
 AsmRegistry.register(MyMixin::class.java)
 AsmRegistry.registerWithPathMatcher(MyMixin::class.java) { className ->
@@ -41,12 +43,14 @@ ASM 扫描器，用于自动扫描和注册 ASM 类。
 #### 方法
 
 **方法：**
+
 - `scanPackage(packageName: String)` - 扫描包
 - `scanDirectory(directory: File, packageName: String)` - 扫描目录
 - `scanJar(jarFile: File, packageName: String)` - 扫描 JAR
 - `scanClassLoader(classLoader: ClassLoader, packageName: String)` - 扫描类加载器
 
 **示例：**
+
 ```kotlin
 AsmScanner.scanPackage("com.example.asms")
 AsmScanner.scanDirectory(File("build/classes"), "com.example.asms")
@@ -60,10 +64,12 @@ ASM 处理器，负责应用所有注册的 ASM 到目标类。
 #### 方法
 
 **方法：**
+
 - `transform(className: String, classBytes: ByteArray, classLoader: ClassLoader?): ByteArray` - 转换类字节码
 - `applyAsms(className: String, classNode: ClassNode): Boolean` - 应用 ASM 到类节点
 
 **示例：**
+
 ```kotlin
 val processor = AsmProcessor()
 val transformed = processor.transform("com/example/TargetClass", originalBytes, null)
@@ -76,11 +82,13 @@ val transformed = processor.transform("com/example/TargetClass", originalBytes, 
 标记一个类为 ASM Mixin 类。
 
 **参数：**
+
 - `value: String = ""` - 单个目标类名（内部名称）
 - `targets: Array<String> = []` - 多个目标类名数组
 - `remap: Boolean = false` - 是否重映射（暂时不支持）
 
 **示例：**
+
 ```kotlin
 @AsmMixin("com/example/TargetClass")
 object MyMixin
@@ -94,6 +102,7 @@ object MultiTargetMixin
 在目标方法的指定位置注入代码。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `target: InjectionPoint = InjectionPoint.HEAD` - 注入点位置
 - `cancellable: Boolean = false` - 是否可取消方法执行
@@ -112,6 +121,7 @@ object MultiTargetMixin
 完全覆盖目标方法的实现。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `remap: Boolean = false` - 是否重映射
 
@@ -122,6 +132,7 @@ object MultiTargetMixin
 修改目标方法的参数值。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `index: Int = -1` - 参数索引（从0开始）
 - `at: At = At()` - 注入位置
@@ -135,6 +146,7 @@ object MultiTargetMixin
 修改目标方法的返回值。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `at: At = At()` - 注入位置
 - `remap: Boolean = false` - 是否重映射
@@ -146,6 +158,7 @@ object MultiTargetMixin
 修改方法中的常量值。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `constant: String = ""` - 要修改的常量值
 - `remap: Boolean = false` - 是否重映射
@@ -157,6 +170,7 @@ object MultiTargetMixin
 重定向目标方法中的方法调用。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `target: String = ""` - 要重定向的方法调用
 - `at: At = At()` - 注入位置
@@ -170,6 +184,7 @@ object MultiTargetMixin
 在 Mixin 类中引用目标类的字段或方法。
 
 **参数：**
+
 - `method: String = ""` - 目标成员名（字段或方法）
 - `remap: Boolean = false` - 是否重映射
 
@@ -180,6 +195,7 @@ object MultiTargetMixin
 为字段生成访问器方法。
 
 **参数：**
+
 - `value: String = ""` - 字段名
 - `remap: Boolean = false` - 是否重映射
 
@@ -190,10 +206,12 @@ object MultiTargetMixin
 生成调用私有/受保护方法的访问器。
 
 **参数：**
+
 - `value: String = ""` - 方法签名
 - `remap: Boolean = false` - 是否重映射
 
 **示例：**
+
 ```kotlin
 @Invoker("privateMethod()V")
 fun invokePrivateMethod() {
@@ -206,10 +224,12 @@ fun invokePrivateMethod() {
 将 Mixin 方法复制到目标类中作为新方法。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `remap: Boolean = false` - 是否重映射
 
 **示例：**
+
 ```kotlin
 @Copy(method = "newMethod()V")
 fun newMethod() {
@@ -222,10 +242,12 @@ fun newMethod() {
 移除目标类中的方法。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `remap: Boolean = false` - 是否重映射
 
 **示例：**
+
 ```kotlin
 @RemoveMethod(method = "unwantedMethod()V")
 fun removeMethod() {}
@@ -236,10 +258,12 @@ fun removeMethod() {}
 移除目标方法的 `synchronized` 关键字。
 
 **参数：**
+
 - `method: String = ""` - 目标方法签名
 - `remap: Boolean = false` - 是否重映射
 
 **示例：**
+
 ```kotlin
 @RemoveSynchronized(method = "synchronizedMethod()V")
 fun removeSync() {}
@@ -250,10 +274,12 @@ fun removeSync() {}
 替换目标类中的所有方法。
 
 **参数：**
+
 - `removeSync: Boolean = false` - 是否同时移除所有方法的 synchronized
 - `remap: Boolean = false` - 是否重映射
 
 **示例：**
+
 ```kotlin
 @ReplaceAllMethods(removeSync = true)
 @AsmMixin("com/example/TargetClass")
@@ -265,6 +291,7 @@ object MyMixin
 标记字段为可变，用于移除 `final` 修饰符。
 
 **示例：**
+
 ```kotlin
 @Shadow()
 @Mutable
@@ -276,6 +303,7 @@ private val finalField: String? = null
 标记字段为最终（添加 `final` 修饰符）。
 
 **示例：**
+
 ```kotlin
 @Final
 @Shadow()
@@ -295,6 +323,7 @@ private val field: String? = null
 取消方法的继续执行（如果可取消）。
 
 **示例：**
+
 ```kotlin
 callback.cancel()
 ```
@@ -304,9 +333,11 @@ callback.cancel()
 检查是否已取消。
 
 **返回：**
+
 - `Boolean`: 是否已取消
 
 **示例：**
+
 ```kotlin
 if (callback.isCancelled()) {
     return
@@ -318,12 +349,15 @@ if (callback.isCancelled()) {
 获取返回值。
 
 **类型参数：**
+
 - `T`: 返回类型
 
 **返回：**
+
 - `T?`: 返回值，如果未设置则返回 null
 
 **示例：**
+
 ```kotlin
 val value = callback.getReturnValue<String>()
 ```
@@ -333,9 +367,11 @@ val value = callback.getReturnValue<String>()
 设置返回值（仅在支持返回值修改的注入点有效）。
 
 **参数：**
+
 - `value`: 返回值
 
 **示例：**
+
 ```kotlin
 callback.setReturnValue("new value")
 ```
@@ -347,9 +383,11 @@ callback.setReturnValue("new value")
 创建可取消的回调信息。
 
 **返回：**
+
 - `CallbackInfo`: 已调用 `cancel()` 的回调信息
 
 **示例：**
+
 ```kotlin
 val callback = CallbackInfo.cancellable()
 ```
@@ -359,12 +397,15 @@ val callback = CallbackInfo.cancellable()
 创建带返回值的回调信息。
 
 **参数：**
+
 - `returnValue`: 返回值
 
 **返回：**
+
 - `CallbackInfo`: 带返回值的回调信息
 
 **示例：**
+
 ```kotlin
 val callback = CallbackInfo.returnable("value")
 ```
@@ -374,6 +415,7 @@ val callback = CallbackInfo.returnable("value")
 注入点枚举，定义代码注入的位置。
 
 **值：**
+
 - `HEAD` - 方法开头
 - `TAIL` - 方法结尾（所有 RETURN 之前）
 - `RETURN` - 返回前（每个 RETURN 之前）
@@ -389,6 +431,7 @@ val callback = CallbackInfo.returnable("value")
 用于指定精确的注入位置。
 
 **参数：**
+
 - `value: InjectionPoint = InjectionPoint.HEAD` - 注入点类型
 - `target: String = ""` - 目标方法/字段签名
 - `shift: Shift = Shift.BEFORE` - 偏移方向
@@ -396,6 +439,7 @@ val callback = CallbackInfo.returnable("value")
 - `args: Array<String> = []` - 参数类型数组
 
 **示例：**
+
 ```kotlin
 At(
     value = InjectionPoint.INVOKE,
@@ -409,6 +453,7 @@ At(
 注入位置偏移枚举。
 
 **值：**
+
 - `BEFORE` - 在目标之前
 - `AFTER` - 在目标之后
 - `REPLACE` - 替换目标
@@ -418,11 +463,13 @@ At(
 用于定义查找范围。
 
 **参数：**
+
 - `from: At = At()` - 起始位置
 - `to: At = At()` - 结束位置
 - `id: String = ""` - 切片标识符
 
 **示例：**
+
 ```kotlin
 Slice(
     from = At(value = InjectionPoint.INVOKE, target = "method1()V"),
@@ -446,6 +493,7 @@ AsmRegistry.registerWithPathMatcher(MyMixin::class.java) { className ->
 AsmRegistry.register(ModifyArgMixin::class.java)
 AsmRegistry.register(ModifyReturnValueMixin::class.java)
 ```
+
 它们会按注册顺序应用。
 
 ### 内联代码注入
@@ -461,25 +509,25 @@ AsmRegistry.register(ModifyReturnValueMixin::class.java)
 ### 基本类型
 
 | Java 类型 | JVM 描述符 |
-|----------|-----------|
-| void     | V         |
-| boolean  | Z         |
-| byte     | B         |
-| short    | S         |
-| int      | I         |
-| long     | J         |
-| float    | F         |
-| double   | D         |
-| char     | C         |
+|---------|---------|
+| void    | V       |
+| boolean | Z       |
+| byte    | B       |
+| short   | S       |
+| int     | I       |
+| long    | J       |
+| float   | F       |
+| double  | D       |
+| char    | C       |
 
 ### 引用类型
 
-| Java 类型 | JVM 描述符 |
-|----------|-----------|
-| String   | Ljava/lang/String; |
-| Object   | Ljava/lang/Object; |
-| int[]    | [I |
-| String[] | [Ljava/lang/String; |
+| Java 类型           | JVM 描述符             |
+|-------------------|---------------------|
+| String            | Ljava/lang/String;  |
+| Object            | Ljava/lang/Object;  |
+| int[]             | [I                  |
+| String[]          | [Ljava/lang/String; |
 | com.example.Class | Lcom/example/Class; |
 
 ### 方法签名示例
