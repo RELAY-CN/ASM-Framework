@@ -3,12 +3,13 @@
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.internal.backend.common.serialization.metadata.DynamicTypeDeserializer.id
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 plugins {
-    id("org.jetbrains.kotlin.jvm") version "2.2.21"
+    id("org.jetbrains.kotlin.jvm") version "2.3.10"
     id("java-library")
     id("maven-publish")
 }

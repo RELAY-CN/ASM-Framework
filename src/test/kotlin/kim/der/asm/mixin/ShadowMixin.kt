@@ -92,14 +92,14 @@ class ShadowMixin {
      *
      * 在目标类中，这个字段会被映射到：
      * ```java
-     * // 原本是: private static final String staticFinalString = "StaticFinalString";
+     * // 原本是: private static final String STATIC_FINAL_STRING = "StaticFinalString";
      * // @Mutable 移除 final 后变成:
-     * private static String staticFinalString = "StaticFinalString";
+     * private static String STATIC_FINAL_STRING = "StaticFinalString";
      * ```
      */
     @Shadow()
     @Mutable
-    private val staticFinalString: String? = null
+    private val STATIC_FINAL_STRING: String? = null
 
     /**
      * Shadow 方法示例 - 实例方法
@@ -125,7 +125,7 @@ class ShadowMixin {
      * 在目标类中，这个方法会被映射到：
      * ```java
      * public static String testB0() {
-     *     return staticFinalString;
+     *     return STATIC_FINAL_STRING;
      * }
      * ```
      */

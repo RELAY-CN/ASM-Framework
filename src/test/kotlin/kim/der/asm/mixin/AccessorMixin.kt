@@ -110,20 +110,20 @@ object AccessorMixin {
      * ```java
      * // @Mutable 会移除 final 修饰符
      * public static String getStaticFinalString() {
-     *     return staticFinalString;
+     *     return STATIC_FINAL_STRING;
      * }
      *
      * public static void setStaticFinalString(String value) {
-     *     staticFinalString = value;  // 现在可以修改了
+     *     STATIC_FINAL_STRING = value;  // 现在可以修改了
      * }
      * ```
      */
-    @Accessor("staticFinalString")
+    @Accessor("STATIC_FINAL_STRING")
     @Mutable
     @JvmStatic
     fun getStaticFinalString(): String = throw UnsupportedOperationException("Accessor should not be called directly")
 
-    @Accessor("staticFinalString")
+    @Accessor("STATIC_FINAL_STRING")
     @Mutable
     @JvmStatic
     fun setStaticFinalString(value: String): Unit = throw UnsupportedOperationException("Accessor should not be called directly")
