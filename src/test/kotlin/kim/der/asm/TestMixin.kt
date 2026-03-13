@@ -626,6 +626,7 @@ class TestMixin {
                 "RemoveMethod" to RemoveMethodMixin::class.java,
                 "ThisAccess" to ThisAccessMixin::class.java,
                 "ReplaceAllMethodsVoid" to ReplaceAllMethodsVoidMixin::class.java,
+                "RedirectAllMethodsAdvanced" to RedirectAllMethodsAdvancedMixin::class.java,
             )
 
         for ((name, mixinClass) in mixins) {
