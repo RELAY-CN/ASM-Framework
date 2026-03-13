@@ -39,6 +39,28 @@ annotation class ReplaceAllMethods(
 )
 
 /**
+ * 全方法重定向注解
+ * 用于将目标类中所有方法里的指定调用统一重定向到 @Redirect 标注的方法
+ * 
+ * 使用场景：
+ * - 将所有方法中的 System.gc() 调用替换成空操作
+ * - 将所有方法中的某个方法调用统一重定向到自定义实现
+ * 
+ * 与普通 @Redirect 的区别：
+ * - 普通 @Redirect 需要在注解中指定 method 参数，只影响特定方法
+ * - @RedirectAllMethods 会让 @Redirect 应用到目标类的所有方法，无需指定 method
+ *
+ * @param remap 是否需要重映射（暂时不支持，保留用于未来扩展）
+ *
+ * @author Dr (dr@der.kim)
+ */
+@Target(AnnotationTarget.CLASS)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class RedirectAllMethods(
+    val remap: Boolean = false,
+)
+
+/**
  * 覆盖方法注解，类似 Mixin 的 @Overwrite
  * 用于完全替换目标方法的实现
  */

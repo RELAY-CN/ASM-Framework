@@ -48,6 +48,14 @@ class TargetClassContext(
             }
         }
 
+        // 检查是否有 @RedirectAllMethods 注解
+        val redirectAllAnnotation = asmInfo.asmClass.getAnnotation(RedirectAllMethods::class.java)
+        if (redirectAllAnnotation != null) {
+            if (applyRedirectAllMethods(redirectAllAnnotation)) {
+                transformed = true
+            }
+        }
+
         // 处理 ASM 类中的所有字段
         applyFields()
 
@@ -1307,6 +1315,57 @@ class TargetClassContext(
                 }
             Type.VOID -> return
             else -> throw IllegalStateException("Unsupported type for default return: $type")
+        }
+    }
+
+    /**
+     * 应用 @RedirectAllMethods 全方法重定向
+     * 将目标类所有方法中的指定调用重定向到 @Redirect 标注的方法
+     */
+    private fun applyRedirectAllMethods(annotation: RedirectAllMethods): Boolean {
+        var transformed = false
+        
+        // 收集所有 @Redirect 注解的方法
+        val redirectMethods = asmInfo.asmClass.declaredMethods.filter { method ->
+            method.getAnnotation(Redirect::class.java) != null
+        }
+        
+        if (redirectMethods.isEmpty()) {
+            return false
+        }
+        
+        // 获取目标类的所有方法（排除构造函数和静态初始化块）
+        val targetMethods = classNode.methods.filter { 
+            it.name != "<init>" && it.name != "<clinit>" 
+        }
+        
+        // 为每个 @Redirect 方法应用到所有目标方法
+        for (redirectMethod in redirectMethods) {
+            val redirectAnnotation = redirectMethod.getAnnotation(Redirect::class.java) ?: continue
+            
+            // 构建重定向目标
+            val redirectTarget = buildRedirectTarget(redirectAnnotation.target, redirectAnnotation.at.target)
+            
+            // 为每个目标方法应用此重定向
+            for (methodNode in targetMethods) {
+                // 直接使用注入器应用重定向
+                val injector = AsmInjectorFactory.createRedirectInjector(redirectMethod, asmInfo, redirectTarget)
+                if (injector.inject(methodNode)) {
+                    transformed = true
+                }
+            }
+        }
+        
+        return transformed
+    }
+    
+    /**
+     * 根据方法签名查找方法
+     */
+    private fun findMethodBySignature(signature: String): MethodNode? {
+        return classNode.methods.find { method ->
+            val methodSig = "${method.name}${method.desc}"
+            methodSig == signature
         }
     }
 }
