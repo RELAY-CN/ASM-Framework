@@ -28,8 +28,11 @@ class RedirectInjector(
         // 解析目标方法签名
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(targetMethodSignature)
 
-        if (targetOwner == null || targetName == null || targetDesc == null) {
-            throw IllegalArgumentException("Invalid target method signature: $targetMethodSignature")
+        if (targetName == null || targetDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid target method signature: $targetMethodSignature " +
+                "(parsed: owner=$targetOwner, name=$targetName, desc=$targetDesc)"
+            )
         }
 
         val instructions = target.instructions
@@ -49,6 +52,78 @@ class RedirectInjector(
         }
 
         return transformed
+    }
+    
+    /**
+     * 查找方法调用前加载参数和实例的指令
+     */
+    private fun findLoadInstructions(
+        instructions: InsnList,
+        methodInsn: MethodInsnNode
+    ): List<AbstractInsnNode> {
+        val paramTypes = Type.getArgumentTypes(methodInsn.desc)
+        val isInstanceCall = methodInsn.opcode != Opcodes.INVOKESTATIC
+        
+        // 计算需要从栈上消耗的槽位数
+        var slotsNeeded = paramTypes.sumOf { 
+            if (it.sort == Type.LONG || it.sort == Type.DOUBLE) 2 else 1 
+        }
+        if (isInstanceCall) slotsNeeded++ // 实例引用占一个槽位
+        
+        val loadInsns = mutableListOf<AbstractInsnNode>()
+        var currentInsn = methodInsn.previous
+        var slotsFound = 0
+        
+        // 向后查找加载指令
+        while (currentInsn != null && slotsFound < slotsNeeded) {
+            val opcode = currentInsn.opcode
+            when {
+                // ALOAD variants (21, 42-45)
+                opcode == Opcodes.ALOAD || opcode in 42..45 -> {
+                    loadInsns.add(0, currentInsn)
+                    slotsFound++
+                }
+                // ILOAD variants (21, 26-29)
+                opcode == Opcodes.ILOAD || opcode in 26..29 -> {
+                    loadInsns.add(0, currentInsn)
+                    slotsFound++
+                }
+                // FLOAD variants (23, 34-37)
+                opcode == Opcodes.FLOAD || opcode in 34..37 -> {
+                    loadInsns.add(0, currentInsn)
+                    slotsFound++
+                }
+                // LLOAD variants (22, 30-33) - takes 2 slots
+                opcode == Opcodes.LLOAD || opcode in 30..33 -> {
+                    loadInsns.add(0, currentInsn)
+                    slotsFound += 2
+                }
+                // DLOAD variants (24, 38-41) - takes 2 slots
+                opcode == Opcodes.DLOAD || opcode in 38..41 -> {
+                    loadInsns.add(0, currentInsn)
+                    slotsFound += 2
+                }
+                // 如果遇到方法调用或其他产生值的指令,停止查找
+                opcode in listOf(
+                    Opcodes.INVOKEVIRTUAL, Opcodes.INVOKESPECIAL, Opcodes.INVOKESTATIC,
+                    Opcodes.INVOKEINTERFACE, Opcodes.INVOKEDYNAMIC,
+                    Opcodes.NEW, Opcodes.NEWARRAY, Opcodes.ANEWARRAY, Opcodes.MULTIANEWARRAY,
+                    Opcodes.GETFIELD, Opcodes.GETSTATIC,
+                    Opcodes.LDC,
+                    Opcodes.ACONST_NULL
+                ) || opcode in 2..15 || opcode == 18 || opcode == 20 -> {
+                    // 这些指令产生值,不是简单的load,停止查找
+                    // opcodes 2-15: ICONST_*, LCONST_*, FCONST_*, DCONST_*
+                    // opcode 18: LDC
+                    // opcode 20: LDC2_W
+                    return emptyList()
+                }
+            }
+            currentInsn = currentInsn.previous
+        }
+        
+        // 只有找到了足够的load指令才返回
+        return if (slotsFound == slotsNeeded) loadInsns else emptyList()
     }
 
     /**
@@ -119,102 +194,48 @@ class RedirectInjector(
     private fun replaceMethodCall(
         instructions: InsnList,
         originalInsn: MethodInsnNode,
-        target: MethodNode,
+        target: MethodNode
     ) {
         val il = InsnList()
 
-        // 保存调用参数到局部变量（如果需要）
-        val paramTypes = Type.getArgumentTypes(originalInsn.desc)
-        val savedParams = mutableListOf<Int>()
-        var varIndex = allocateVariablesForParams(target, paramTypes)
-
-        // 保存所有参数
-        var paramOffset = 0
-        for (i in paramTypes.indices.reversed()) {
-            val paramType = paramTypes[i]
-            val needsDoubleSlot = paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE
-
-            // 保存参数
-            saveParameter(il, paramType, varIndex)
-            savedParams.add(0, varIndex)
-
-            varIndex -= if (needsDoubleSlot) 2 else 1
-        }
-
-        // 如果是实例方法调用，保存实例引用
-        var savedInstanceIndex: Int? = null
-        if (originalInsn.opcode != Opcodes.INVOKESTATIC) {
-            savedInstanceIndex = varIndex
-            il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
-            varIndex++
-        }
-
-        // 生成调用 ASM 方法的指令
-        // 需要加载所有保存的参数
-        if (savedInstanceIndex != null) {
-            il.add(VarInsnNode(Opcodes.ALOAD, savedInstanceIndex))
-        }
-
-        for (savedIndex in savedParams) {
-            val paramIndex = savedParams.indexOf(savedIndex)
-            val paramType = paramTypes[paramIndex]
-            InstructionUtil.loadParam(paramType, savedIndex).let { il.add(it) }
-        }
-
-        // 创建模拟方法节点
-        val mockTarget = createMockMethodNode(target, originalInsn)
-        AsmMethodCallGenerator.generateMethodCall(
-            il,
-            asmMethod,
-            asmInfo,
-            mockTarget,
-            null,
+        // 直接生成调用重定向处理器的指令
+        // 栈上已经有了参数: [..., instance?, param1, param2, ...]
+        // 重定向处理器必须是静态方法,直接调用即可
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESTATIC,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
         )
 
-        // 处理返回值类型转换（如果需要）
+        // 处理返回值类型转换
         val originalReturnType = Type.getReturnType(originalInsn.desc)
         val asmReturnType = Type.getReturnType(asmMethod)
 
-        if (asmReturnType != originalReturnType && asmReturnType != Type.VOID_TYPE) {
-            if (originalReturnType == Type.VOID_TYPE) {
-                // ASM 返回了值但原方法返回 void，需要弹出
+        if (originalReturnType != asmReturnType) {
+            if (originalReturnType == Type.VOID_TYPE && asmReturnType != Type.VOID_TYPE) {
+                // 原方法返回 void 但重定向处理器返回了值,需要弹出
                 il.add(InsnNode(Opcodes.POP))
-            } else {
-                // 类型转换
-                if (asmReturnType.sort != originalReturnType.sort) {
-                    val unboxList = InstructionUtil.unbox(asmReturnType)
-                    for (unboxInsn in unboxList) {
-                        il.add(unboxInsn)
-                    }
-                    // 装箱回目标类型（如果需要）
-                    if (originalReturnType.sort in
-                        setOf(
-                            Type.BOOLEAN,
-                            Type.BYTE,
-                            Type.CHAR,
-                            Type.SHORT,
-                            Type.INT,
-                            Type.LONG,
-                            Type.FLOAT,
-                            Type.DOUBLE,
-                        )
-                    ) {
-                        InstructionUtil.box(originalReturnType)?.let { il.add(it) }
-                    }
-                } else {
-                    // 直接类型转换
-                    if (originalReturnType.sort == Type.OBJECT || originalReturnType.sort == Type.ARRAY) {
-                        il.add(TypeInsnNode(Opcodes.CHECKCAST, originalReturnType.internalName))
-                    }
+            } else if (originalReturnType != Type.VOID_TYPE && asmReturnType == Type.VOID_TYPE) {
+                // 重定向处理器返回 void 但原方法需要返回值,这是错误的
+                throw IllegalStateException(
+                    "Redirect handler returns void but original method expects ${originalReturnType.className}"
+                )
+            } else if (originalReturnType != Type.VOID_TYPE && asmReturnType != Type.VOID_TYPE) {
+                // 两者都有返回值,需要类型转换
+                if (originalReturnType.sort == Type.OBJECT || originalReturnType.sort == Type.ARRAY) {
+                    il.add(TypeInsnNode(Opcodes.CHECKCAST, originalReturnType.internalName))
                 }
             }
         }
 
-        // 替换原始调用
+        // 在原始调用位置插入新代码并移除原始调用
         instructions.insertBefore(originalInsn, il)
         instructions.remove(originalInsn)
-
-        // 清理临时变量（在方法结束时自动清理）
     }
 
     /**
@@ -246,10 +267,12 @@ class RedirectInjector(
 
     /**
      * 为参数分配局部变量
+     * 返回第一个可用的局部变量索引
      */
     private fun allocateVariablesForParams(
         targetMethod: MethodNode,
         paramTypes: Array<Type>,
+        isInstanceCall: Boolean,
     ): Int {
         val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
         var maxIndex = if (isStatic) 0 else 1
@@ -266,13 +289,7 @@ class RedirectInjector(
             maxIndex = maxOf(maxIndex, end)
         }
 
-        // 计算需要分配的变量数
-        var neededSlots = 0
-        for (paramType in paramTypes) {
-            neededSlots += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
-        }
-
-        return maxIndex + neededSlots
+        return maxIndex
     }
 
     /**

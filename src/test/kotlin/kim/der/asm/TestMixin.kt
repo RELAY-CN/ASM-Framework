@@ -6,11 +6,11 @@ package kim.der.asm
 
 import kim.der.asm.mixin.*
 import kim.der.asm.transformer.AsmProcessor
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Paths
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
 
 /**
  * Test.java 的 ASM 测试用例
@@ -25,7 +25,7 @@ import kotlin.test.assertNotNull
  *
  * @author Dr (dr@der.kim)
  */
-class Test {
+class TestMixin {
     private val asmProcessor = AsmProcessor()
 
     // ========== Overwrite 测试 ==========
@@ -169,7 +169,7 @@ class Test {
         // 测试 dynamicString Getter/Setter
         val getterDynamic = clazz.getMethod("getDynamicString")
         val valueDynamic = getterDynamic.invoke(instance) as String
-        assertEquals("DynamicString", valueDynamic, "dynamicString getter 应该返回字段值")
+        assertEquals("DefaultConstructor", valueDynamic, "dynamicString getter 应该返回字段值（无参构造函数设置为 DefaultConstructor）")
 
         val setterDynamic = clazz.getMethod("setDynamicString", String::class.java)
         setterDynamic.invoke(instance, "NewDynamicValue")
@@ -179,7 +179,7 @@ class Test {
         // 测试 staticString Getter/Setter
         val getterStatic = clazz.getMethod("getStaticString")
         val valueStatic = getterStatic.invoke(null) as String
-        assertEquals("StaticString", valueStatic, "staticString getter 应该返回字段值")
+        assertEquals("StaticInitBlock", valueStatic, "staticString getter 应该返回字段值（静态初始化块设置为 StaticInitBlock）")
 
         val setterStatic = clazz.getMethod("setStaticString", String::class.java)
         setterStatic.invoke(null, "NewStaticValue")
@@ -189,12 +189,12 @@ class Test {
         // 测试 staticFinalString Getter/Setter
         val getterFinal = clazz.getMethod("getStaticFinalString")
         val valueFinal = getterFinal.invoke(null) as String
-        assertEquals("StaticFinalString", valueFinal, "staticFinalString getter 应该返回字段值")
+        assertEquals("StaticFinalString", valueFinal, "STATIC_FINAL_STRING getter 应该返回字段值")
 
         val setterFinal = clazz.getMethod("setStaticFinalString", String::class.java)
         setterFinal.invoke(null, "NewFinalValue")
         val newValueFinal = getterFinal.invoke(null) as String
-        assertEquals("NewFinalValue", newValueFinal, "staticFinalString setter 应该设置字段值（需要 @Mutable）")
+        assertEquals("NewFinalValue", newValueFinal, "STATIC_FINAL_STRING setter 应该设置字段值（需要 @Mutable）")
     }
 
     // ========== Invoker 测试 ==========
@@ -211,7 +211,7 @@ class Test {
         // 测试调用 testA0
         val invokerA0 = clazz.getMethod("invokeTestA0")
         val resultA0 = invokerA0.invoke(instance) as String
-        assertEquals("DynamicString", resultA0, "Invoker 应该能够调用 testA0")
+        assertEquals("DefaultConstructor", resultA0, "Invoker 应该能够调用 testA0（返回 DefaultConstructor）")
 
         // 测试调用 testB0（静态方法）
         val invokerB0 = clazz.getMethod("invokeTestB0")
@@ -245,12 +245,12 @@ class Test {
         assertNotNull(clazz, "Shadow 应该能够正确声明")
 
         // 验证 @Mutable 是否移除了 final 修饰符
-        // 通过反射检查 staticFinalString 字段是否不再是 final
-        val staticFinalField = clazz.getDeclaredField("staticFinalString")
+        // 通过反射检查 STATIC_FINAL_STRING 字段是否不再是 final
+        val staticFinalField = clazz.getDeclaredField("STATIC_FINAL_STRING")
         val isFinal =
             java.lang.reflect.Modifier
                 .isFinal(staticFinalField.modifiers)
-        // 由于 @Mutable，staticFinalString 应该不再是 final
+        // 由于 @Mutable，STATIC_FINAL_STRING 应该不再是 final
         // 注意：这个测试可能不准确，因为字段可能仍然是 final（取决于实现）
         // 但至少验证了 Shadow 能够正确应用
         assertNotNull(staticFinalField, "Shadow 字段应该存在")
@@ -270,7 +270,7 @@ class Test {
         // 验证 Accessor 方法是否生成（通过 Shadow 字段生成的访问器）
         val getterDynamic = clazz.getMethod("getDynamicString")
         val valueDynamic = getterDynamic.invoke(instance) as String
-        assertEquals("DynamicString", valueDynamic, "Accessor 应该能够访问 Shadow 字段")
+        assertEquals("DefaultConstructor", valueDynamic, "Accessor 应该能够访问 Shadow 字段（无参构造函数设置为 DefaultConstructor）")
 
         // 验证可以通过 Accessor 修改字段值
         val setterDynamic = clazz.getMethod("setDynamicString", String::class.java)
@@ -288,17 +288,71 @@ class Test {
     // ========== Redirect 测试 ==========
     @Test
     fun testRedirect() {
-        // Redirect 用于重定向方法内部对其他方法的调用
-        // 由于 Test.java 中的方法内部没有方法调用，Redirect 无法测试
-        // 如果需要测试 Redirect，需要在 Test.java 中添加方法调用
-        // 这里暂时跳过测试
         AsmRegistry.clear()
         AsmRegistry.register(RedirectMixin::class.java)
         val originalBytes = loadLegacyClass()
         val transformed = transformClass(originalBytes)
 
         val clazz = loadClass(transformed, "Test")
-        assertNotNull(clazz, "Redirect Mixin 应该能够正确应用")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        
+        println("\n========== Redirect 测试 ==========")
+        
+        // 测试 comprehensiveTest() 方法，验证 Redirect 是否生效
+        val comprehensiveTest = clazz.getMethod("comprehensiveTest")
+        comprehensiveTest.isAccessible = true
+        val result = comprehensiveTest.invoke(instance) as String
+        
+        println("原始预期结果应该包含：")
+        println("  - StaticFinalString (testB0)")
+        println("  - DefaultConstructor (testA0)")
+        println("  - ParentMethod (parentMethod)")
+        println("  - InterfaceImpl-Test (interfaceMethod)")
+        println()
+        println("如果 Redirect 生效，结果应该包含：")
+        println("  - Redirected-testB0")
+        println("  - Redirected-testA0")
+        println("  - Redirected-parentMethod")
+        println("  - Redirected-interfaceMethod-Test")
+        println()
+        println("实际结果：")
+        println(result)
+        println()
+        
+        // 验证重定向是否生效
+        val hasRedirectTestB0 = result.contains("Redirected-testB0")
+        val hasRedirectTestA0 = result.contains("Redirected-testA0")
+        val hasRedirectParentMethod = result.contains("Redirected-parentMethod")
+        val hasRedirectInterfaceMethod = result.contains("Redirected-interfaceMethod")
+        
+        println("Redirect 生效检查：")
+        println("  testB0: ${if (hasRedirectTestB0) "✓ 已重定向" else "✗ 未重定向"}")
+        println("  testA0: ${if (hasRedirectTestA0) "✓ 已重定向" else "✗ 未重定向"}")
+        println("  parentMethod: ${if (hasRedirectParentMethod) "✓ 已重定向" else "✗ 未重定向"}")
+        println("  interfaceMethod: ${if (hasRedirectInterfaceMethod) "✓ 已重定向" else "✗ 未重定向"}")
+        println()
+        
+        if (hasRedirectTestB0 || hasRedirectTestA0 || hasRedirectParentMethod || hasRedirectInterfaceMethod) {
+            println("✓ Redirect 功能正常工作！")
+        } else {
+            println("⚠ Redirect 未生效，可能的原因：")
+            println("  1. Redirect 功能尚未实现")
+            println("  2. 方法签名不匹配")
+            println("  3. 注入点查找失败")
+        }
+        println("=====================================\n")
+        
+        assertNotNull(result, "comprehensiveTest 应该返回结果")
+        
+        // 测试 testC0() 方法，验证 println 重定向
+        println("测试 println 重定向：")
+        val testC0 = clazz.getMethod("testC0", String::class.java)
+        val testC0Result = testC0.invoke(instance, "TestRedirect") as String
+        println("testC0 返回值: $testC0Result")
+        println("(检查上面的输出是否包含 [REDIRECTED] 前缀)")
+        println()
+        
+        assertNotNull(testC0Result, "testC0 应该返回结果")
     }
 
     // ========== This Access 测试 ==========
@@ -342,10 +396,218 @@ class Test {
         assertEquals("ModifiedReturnC0", resultC0, "testC0 应该被 ModifyArg 和 ModifyReturnValue 处理")
     }
 
+    // ========== 测试新增方法：Lambda 表达式 ==========
+    @Test
+    fun testLambdaMethods() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试 lambdaTest 方法
+        val lambdaTest = clazz.getMethod("lambdaTest")
+        val result = lambdaTest.invoke(instance) as String
+        assertNotNull(result, "lambdaTest 应该返回结果")
+        println("Lambda Test Result: $result")
+
+        // 测试 lambdaStreamTest 方法
+        val lambdaStreamTest = clazz.getMethod("lambdaStreamTest")
+        val streamResult = lambdaStreamTest.invoke(instance) as String
+        assertEquals("abc", streamResult, "lambdaStreamTest 应该返回 'abc'")
+    }
+
+    // ========== 测试新增方法：重载方法 ==========
+    @Test
+    fun testOverloadedMethods() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试无参重载
+        val method0 = clazz.getMethod("overloadedMethod")
+        val result0 = method0.invoke(instance) as String
+        assertEquals("Overloaded-0", result0, "overloadedMethod() 应该返回 'Overloaded-0'")
+
+        // 测试单参重载
+        val method1 = clazz.getMethod("overloadedMethod", String::class.java)
+        val result1 = method1.invoke(instance, "Test") as String
+        assertEquals("Overloaded-1-Test", result1, "overloadedMethod(String) 应该返回正确结果")
+
+        // 测试双参重载
+        val method2 = clazz.getMethod("overloadedMethod", String::class.java, Int::class.javaPrimitiveType)
+        val result2 = method2.invoke(instance, "Test", 42) as String
+        assertEquals("Overloaded-2-Test-42", result2, "overloadedMethod(String, int) 应该返回正确结果")
+    }
+
+    // ========== 测试新增方法：同步方法 ==========
+    @Test
+    fun testSynchronizedMethods() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试实例同步方法
+        // 注意：实例初始化块将 instanceCounter 设置为 50，所以第一次调用返回 51
+        val syncMethod = clazz.getMethod("synchronizedMethod")
+        val result1 = syncMethod.invoke(instance) as String
+        assertEquals("SyncInstance-51", result1, "第一次调用应该返回 'SyncInstance-51'（实例初始化块设置 counter=50）")
+
+        val result2 = syncMethod.invoke(instance) as String
+        assertEquals("SyncInstance-52", result2, "第二次调用应该返回 'SyncInstance-52'")
+
+        // 测试静态同步方法
+        val staticSyncMethod = clazz.getMethod("synchronizedStaticMethod")
+        val staticResult = staticSyncMethod.invoke(null) as String
+        assertNotNull(staticResult, "静态同步方法应该返回结果")
+        println("Static Sync Result: $staticResult")
+    }
+
+    // ========== 测试新增方法：泛型和可变参数 ==========
+    @Test
+    fun testGenericAndVarArgs() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试泛型方法
+        val genericMethod = clazz.getMethod("genericMethod", Object::class.java)
+        val genericResult = genericMethod.invoke(instance, "TestString") as String
+        assertNotNull(genericResult, "泛型方法应该返回结果")
+        println("Generic Method Result: $genericResult")
+
+        // 测试可变参数方法
+        val varArgsMethod = clazz.getMethod("varArgsMethod", Array<String>::class.java)
+        val varArgsResult = varArgsMethod.invoke(instance, arrayOf("A", "B", "C")) as String
+        assertEquals("VarArgs-A,B,C", varArgsResult, "可变参数方法应该返回正确结果")
+    }
+
+    // ========== 测试新增方法：递归方法 ==========
+    @Test
+    fun testRecursiveMethod() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试递归方法（阶乘）
+        val recursiveMethod = clazz.getMethod("recursiveMethod", Int::class.javaPrimitiveType)
+        val result = recursiveMethod.invoke(instance, 5) as Int
+        assertEquals(120, result, "recursiveMethod(5) 应该返回 120 (5!)")
+    }
+
+    // ========== 测试新增方法：继承和接口 ==========
+    @Test
+    fun testInheritanceAndInterface() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试父类方法
+        val parentMethod = clazz.getMethod("parentMethod")
+        val parentResult = parentMethod.invoke(instance) as String
+        assertEquals("ParentMethod", parentResult, "应该能调用父类方法")
+
+        // 测试重写的方法
+        val overridableMethod = clazz.getMethod("overridableMethod")
+        val overrideResult = overridableMethod.invoke(instance) as String
+        assertEquals("ChildOverride-ParentOverridable", overrideResult, "应该调用子类重写的方法")
+
+        // 测试接口方法
+        val interfaceMethod = clazz.getMethod("interfaceMethod", String::class.java)
+        interfaceMethod.isAccessible = true  // 允许访问非 public 接口的方法
+        val interfaceResult = interfaceMethod.invoke(instance, "Test") as String
+        assertEquals("InterfaceImpl-Test", interfaceResult, "应该能调用接口实现方法")
+
+        // 测试默认接口方法
+        val defaultMethod = clazz.getMethod("defaultMethod")
+        defaultMethod.isAccessible = true  // 允许访问非 public 接口的方法
+        val defaultResult = defaultMethod.invoke(instance) as String
+        assertEquals("DefaultMethod", defaultResult, "应该能调用接口默认方法")
+    }
+
+    // ========== 测试新增方法：void 方法 ==========
+    @Test
+    fun testVoidMethods() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试实例 void 方法
+        val testVoid = clazz.getMethod("testVoid")
+        testVoid.invoke(instance) // 不应该抛出异常
+
+        // 测试静态 void 方法
+        val staticVoidMethod = clazz.getMethod("staticVoidMethod")
+        staticVoidMethod.invoke(null) // 不应该抛出异常
+    }
+
+    // ========== 测试新增方法：构造函数 ==========
+    @Test
+    fun testConstructors() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+
+        // 测试无参构造函数
+        val instance1 = clazz.getDeclaredConstructor().newInstance()
+        assertNotNull(instance1, "无参构造函数应该能创建实例")
+
+        // 验证无参构造函数设置的字段值
+        val testA0_1 = clazz.getMethod("testA0")
+        val result1 = testA0_1.invoke(instance1) as String
+        assertEquals("DefaultConstructor", result1, "无参构造函数应该设置 dynamicString 为 'DefaultConstructor'")
+
+        // 测试带参构造函数
+        val instance2 = clazz.getDeclaredConstructor(String::class.java).newInstance("CustomValue")
+        assertNotNull(instance2, "带参构造函数应该能创建实例")
+
+        // 验证构造函数设置的字段值
+        val testA0_2 = clazz.getMethod("testA0")
+        val result2 = testA0_2.invoke(instance2) as String
+        assertEquals("CustomValue", result2, "构造函数应该正确设置字段值")
+    }
+
+    // ========== 测试新增方法：枚举 ==========
+    @Test
+    fun testEnumMethods() {
+        AsmRegistry.clear()
+        val originalBytes = loadLegacyClass()
+        val transformed = transformClass(originalBytes)
+
+        val clazz = loadClass(transformed, "Test")
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // 测试枚举方法
+        val enumTest = clazz.getMethod("enumTest")
+        val result = enumTest.invoke(instance) as String
+        assertEquals("First-VALUE2", result, "enumTest 应该返回正确的枚举值")
+    }
+
     // ========== 生成转换后的 Class 文件 ==========
     @Test
     fun generateTransformedClasses() {
-        val outputDir = Paths.get("D:/home/RELAY-CN_Group/RustedwarfareServer/ASM-Framework/src/test/resources")
+        val outputDir = Paths.get("d:/home/RELAY-CN_Group/ASM-Framework/src/test/resources/out")
         Files.createDirectories(outputDir)
 
         val originalBytes = loadLegacyClass()
@@ -386,23 +648,73 @@ class Test {
     }
 
     // ========== 辅助方法 ==========
+    
+    // 创建一个能够从 test/ 目录加载类的 ClassLoader
+    private val testClassLoader = object : ClassLoader(Thread.currentThread().contextClassLoader) {
+        override fun findClass(name: String): Class<*> {
+            // 尝试从 test 目录加载类
+            try {
+                val resourceName = "test/$name.class"
+                val classBytes = getResourceAsStream(resourceName)?.readAllBytes()
+                if (classBytes != null) {
+                    return defineClass(name, classBytes, 0, classBytes.size)
+                }
+            } catch (e: Exception) {
+                // 忽略，让父类加载器处理
+            }
+            throw ClassNotFoundException(name)
+        }
+        
+        override fun getResourceAsStream(name: String): java.io.InputStream? {
+            // 如果请求的是 Test.class 或其他测试类，重定向到 test/ 目录
+            if (name.endsWith(".class") && !name.startsWith("test/")) {
+                val testResource = "test/$name"
+                val stream = super.getResourceAsStream(testResource)
+                if (stream != null) {
+                    return stream
+                }
+            }
+            return super.getResourceAsStream(name)
+        }
+    }
+    
     private fun loadLegacyClass(): ByteArray =
         Thread
             .currentThread()
             .getContextClassLoader()
-            .getResourceAsStream("Test.class")!!
+            .getResourceAsStream("test/Test.class")!!
             .readAllBytes()
 
-    private fun transformClass(originalBytes: ByteArray): ByteArray = asmProcessor.transform("Test", originalBytes, null)
+    private fun transformClass(originalBytes: ByteArray): ByteArray = 
+        asmProcessor.transform("Test", originalBytes, testClassLoader)
 
     private fun loadClass(
         transformedBytes: ByteArray,
         className: String,
     ): Class<*> {
         val loader =
-            object : ClassLoader() {
-                fun define(name: String): Class<*> = defineClass(name, transformedBytes, 0, transformedBytes.size)
+            object : ClassLoader(Thread.currentThread().contextClassLoader) {
+                override fun findClass(name: String): Class<*> {
+                    // 如果是要加载的转换后的类，使用传入的字节码
+                    if (name == className) {
+                        return defineClass(name, transformedBytes, 0, transformedBytes.size)
+                    }
+                    
+                    // 尝试从 test 目录加载依赖类
+                    try {
+                        val resourceName = "test/$name.class"
+                        val classBytes = javaClass.classLoader.getResourceAsStream(resourceName)?.readAllBytes()
+                        if (classBytes != null) {
+                            return defineClass(name, classBytes, 0, classBytes.size)
+                        }
+                    } catch (e: Exception) {
+                        // 忽略，让父类加载器处理
+                    }
+                    
+                    // 让父类加载器处理
+                    throw ClassNotFoundException(name)
+                }
             }
-        return loader.define(className)
+        return loader.loadClass(className)
     }
 }

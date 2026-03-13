@@ -782,18 +782,23 @@ class TargetClassContext(
         target: String,
         atTarget: String,
     ): String {
+        // 如果 target 为空，直接使用 atTarget
+        if (target.isEmpty()) {
+            return atTarget
+        }
+        
         if (atTarget.isEmpty()) {
             return target
         }
 
-        // 如果 target 包含方法名和描述符，组合 owner
+        // 如果 target 包含方法名和描述符,组合 owner
         // 格式: "methodName(desc)" 或 "owner.methodName(desc)"
         if (target.contains("(")) {
             val parenIndex = target.indexOf('(')
             val methodPart = target.substring(0, parenIndex)
             val descPart = target.substring(parenIndex)
 
-            // 如果 methodPart 不包含点，说明没有 owner，需要添加
+            // 如果 methodPart 不包含点,说明没有 owner,需要添加
             if (!methodPart.contains(".") && !methodPart.contains("/")) {
                 return "$atTarget.$methodPart$descPart"
             }
