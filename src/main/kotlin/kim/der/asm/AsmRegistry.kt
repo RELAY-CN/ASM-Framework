@@ -17,6 +17,7 @@ import kim.der.asm.func.Find
 object AsmRegistry {
     private val asms = mutableMapOf<String, MutableList<AsmInfo>>()
     private val pathMatchers = mutableListOf<AsmInfo>()
+    private val targetCache = mutableMapOf<String, List<AsmInfo>>()
 
     /**
      * 注册 ASM 类
@@ -37,6 +38,9 @@ object AsmRegistry {
         targets.forEach { target ->
             asms.getOrPut(target) { mutableListOf() }.add(asmInfo)
         }
+
+        // 注册关系变更后，清空缓存以避免返回过期结果
+        targetCache.clear()
     }
 
     /**
@@ -58,6 +62,8 @@ object AsmRegistry {
             )
 
         pathMatchers.add(asmInfo)
+        // 路径匹配可能影响任意目标类，直接清空整个缓存
+        targetCache.clear()
     }
 
     /**
@@ -65,13 +71,17 @@ object AsmRegistry {
      */
     @JvmStatic
     fun getForTarget(targetClass: String): List<AsmInfo> {
-        val result = mutableListOf<AsmInfo>()
-
-        // 不能调换顺序：路径匹配在前，精确匹配在后（避免模糊覆盖精准）
-        pathMatchers.filter { it.pathMatcher?.invoke(targetClass) == true }.forEach { result.add(it) }
-        result.addAll(asms[targetClass] ?: emptyList())
-
-        return result
+        return targetCache.getOrPut(targetClass) {
+            buildList {
+                // 不能调换顺序：路径匹配在前，精确匹配在后（避免模糊覆盖精准）
+                pathMatchers.forEach { asmInfo ->
+                    if (asmInfo.pathMatcher?.invoke(targetClass) == true) {
+                        add(asmInfo)
+                    }
+                }
+                asms[targetClass]?.let(::addAll)
+            }
+        }
     }
 
     /**
@@ -81,5 +91,6 @@ object AsmRegistry {
     fun clear() {
         asms.clear()
         pathMatchers.clear()
+        targetCache.clear()
     }
 }
