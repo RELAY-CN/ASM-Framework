@@ -9,6 +9,8 @@ build/
 src/main/resources/gradleRes/
 src/main/resources/META-INF/native-image/
 
+md/*
+
 # IDE
 .idea/
 *.iml
