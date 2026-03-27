@@ -5,6 +5,7 @@
 package kim.der.asm.transformer
 
 import kim.der.asm.AsmRegistry
+import kim.der.asm.data.AsmInfo
 import org.objectweb.asm.tree.ClassNode
 
 /**
@@ -24,8 +25,13 @@ class AsmProcessor : AsmTransformer() {
     fun applyAsms(
         className: String,
         classNode: ClassNode,
+    ): Boolean = applyAsms(className, classNode, AsmRegistry.getForTarget(className))
+
+    private fun applyAsms(
+        className: String,
+        classNode: ClassNode,
+        asms: List<AsmInfo>,
     ): Boolean {
-        val asms = AsmRegistry.getForTarget(className)
         if (asms.isEmpty()) {
             return false
         }
@@ -51,12 +57,13 @@ class AsmProcessor : AsmTransformer() {
         classfileBuffer: ByteArray,
         loader: ClassLoader?,
     ): ByteArray {
-        if (!shouldTransform(className)) {
+        val asms = AsmRegistry.getForTarget(className)
+        if (asms.isEmpty()) {
             return classfileBuffer
         }
 
         val classNode = readClass(className, classfileBuffer, true)
-        val transformed = applyAsms(className, classNode)
+        val transformed = applyAsms(className, classNode, asms)
 
         return if (transformed) {
             writeClass(classNode, loader)
