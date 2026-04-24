@@ -35,7 +35,7 @@ import java.lang.reflect.Modifier
  * 以上顺序用于避免 HEAD 注入创建的 RETURN 指令被 RETURN 注入二次处理，导致“取消分支仍触发 RETURN 注入”这类行为偏差。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-11-22
+ * @date 2025-11-24
  */
 class TargetClassContext(
     private val className: String,
@@ -1376,3 +1376,4 @@ class TargetClassContext(
         }
     }
 }
+

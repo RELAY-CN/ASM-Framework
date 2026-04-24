@@ -27,7 +27,7 @@ package kim.der.asm.api.annotation
  * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -51,7 +51,7 @@ annotation class AsmInject(
  * 其余值在当前实现中会回退为 HEAD 注入。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 enum class InjectionPoint {
     /** 方法开头 */
@@ -96,7 +96,7 @@ enum class InjectionPoint {
  * @param by 预留参数，当前实现未实现按字节码偏移移动
  * @param args 预留参数，当前实现未解析
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 annotation class At(
     val value: InjectionPoint = InjectionPoint.HEAD,
@@ -110,7 +110,7 @@ annotation class At(
  * 注入偏移策略。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 enum class Shift {
     /** 在目标之前 */
@@ -133,10 +133,11 @@ enum class Shift {
  * @param to 结束定位条件
  * @param id 预留标识
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 annotation class Slice(
     val from: At = At(),
     val to: At = At(),
     val id: String = "",
 )
+

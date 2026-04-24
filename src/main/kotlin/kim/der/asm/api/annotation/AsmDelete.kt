@@ -11,8 +11,9 @@ package kim.der.asm.api.annotation
  * 是否以及如何执行删除由转换器实现决定；当前模块仅提供注解定义与元数据，不保证存在对应的处理逻辑。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class AsmDelete
+

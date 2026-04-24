@@ -13,7 +13,7 @@ import java.security.ProtectionDomain
  * 当 agent 尚未初始化时，[transform] 系列方法会直接返回原始字节码。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-02-09
+ * @date 2025-11-24
  */
 open class AsmCore {
     protected val setAgent = { agent: AsmBootstrap -> Companion.agent = agent }
@@ -58,3 +58,4 @@ open class AsmCore {
         ): ByteArray = agent?.transform(loader, className, classBeingRedefined, protectionDomain, classfileBuffer) ?: classfileBuffer
     }
 }
+

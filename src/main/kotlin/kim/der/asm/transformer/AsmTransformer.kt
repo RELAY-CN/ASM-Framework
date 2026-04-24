@@ -16,7 +16,7 @@ import org.objectweb.asm.tree.ClassNode
  * 当写入阶段使用缓存的 [ClassReader] 且写入目标为同一个 [ClassNode] 时，会复用 reader 以降低计算开销。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-11-22
+ * @date 2025-11-24
  */
 abstract class AsmTransformer {
     private var classReader: ClassReader? = null
@@ -110,3 +110,4 @@ abstract class AsmTransformer {
      */
     open fun shouldTransform(className: String): Boolean = true
 }
+

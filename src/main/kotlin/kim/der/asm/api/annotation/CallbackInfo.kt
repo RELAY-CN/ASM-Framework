@@ -26,7 +26,7 @@ package kim.der.asm.api.annotation
  *
  * @param returnValue 初始返回值（用于在返回值可变的注入点中提供默认值）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 class CallbackInfo
     @JvmOverloads
@@ -80,3 +80,4 @@ class CallbackInfo
             fun returnable(returnValue: Any?): CallbackInfo = CallbackInfo(returnValue)
         }
     }
+
