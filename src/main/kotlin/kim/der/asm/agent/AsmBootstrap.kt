@@ -19,7 +19,7 @@ import java.security.ProtectionDomain
  * 改写集合与匹配逻辑由 [AsmProcessor] 与 [kim.der.asm.AsmRegistry] 共同决定。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-02-09
+ * @date 2025-11-24
  */
 @Suppress("UNUSED")
 class AsmBootstrap :
@@ -78,3 +78,4 @@ class AsmBootstrap :
         }
     }
 }
+

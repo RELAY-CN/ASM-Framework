@@ -15,7 +15,7 @@ package kim.der.asm.api.annotation
  * @param targets 多目标类 internal name 列表
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
@@ -35,7 +35,7 @@ annotation class AsmMixin(
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
@@ -63,7 +63,7 @@ annotation class ReplaceAllMethods(
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
@@ -80,7 +80,7 @@ annotation class RedirectAllMethods(
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -99,7 +99,7 @@ annotation class Overwrite(
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -124,7 +124,7 @@ annotation class Copy(
  * @param slice 预留参数，当前实现未使用
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -151,7 +151,7 @@ annotation class ModifyArg(
  * @param at 预留参数，当前实现未使用
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -176,7 +176,7 @@ annotation class ModifyReturnValue(
  * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -203,7 +203,7 @@ annotation class ModifyConstant(
  * @param slice 预留参数，当前实现未使用
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -227,7 +227,7 @@ annotation class Redirect(
  * @param method 目标名称提示；建议使用 `shadow_` 前缀显式指定
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FIELD, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -253,7 +253,7 @@ annotation class Shadow(
  * @param value 目标字段名；为空时从方法名推断
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -270,7 +270,7 @@ annotation class Accessor(
  * @param value 目标方法名；为空时从方法名推断
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -285,7 +285,7 @@ annotation class Invoker(
  * 标记字段为可变（移除目标字段的 `final` 修饰符）。该注解可用于字段或 [Accessor] 方法。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FIELD, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -297,7 +297,7 @@ annotation class Mutable
  * 标记字段为最终（为目标字段添加 `final` 修饰符）。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.RUNTIME)
@@ -312,7 +312,7 @@ annotation class Final
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -330,7 +330,7 @@ annotation class RemoveMethod(
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  *
  * @author Dr (dr@der.kim)
- * @date 2025-06-11
+ * @date 2025-11-24
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
@@ -338,3 +338,4 @@ annotation class RemoveSynchronized(
     val method: String = "",
     val remap: Boolean = false,
 )
+

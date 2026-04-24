@@ -15,7 +15,7 @@ import org.objectweb.asm.tree.ClassNode
  * 单个 ASM 应用失败时会捕获异常并继续处理剩余条目（仅输出到 stderr）。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-11-22
+ * @date 2025-11-24
  */
 class AsmProcessor : AsmTransformer() {
     /**
@@ -80,3 +80,4 @@ class AsmProcessor : AsmTransformer() {
         return AsmRegistry.getForTarget(className).isNotEmpty()
     }
 }
+
