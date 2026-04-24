@@ -8,17 +8,22 @@ import kim.der.asm.api.listener.RedirectionListener
 import kim.der.asm.api.replace.RedirectionReplace
 
 /**
- * ASM 中需要修改的目标方法信息和需要指向的 Class 方法
+ * 需要被重定向/监听的目标方法描述。
  *
- * @property classPath 需要修改的Class包路径
- * @property methodName 需要修改的方法名
- * @property methodParamsInfo 需要修改的方法返回值
- * @property replaceClass Class<out RedirectionReplace>?
- * @property listenerClass Class<out RedirectionListener>?
- * @property desc String
+ * 该类型用于描述“目标类 + 方法名 + 方法描述符”，并可选绑定：
  *
- * @date 2023/10/28 12:10
+ * - 用于替换调用的 [RedirectionReplace] 实现类
+ * - 用于监听调用的 [RedirectionListener] 实现类
+ *
+ * @property classPath 目标类内部名（不含前导 `L`，如 `java/lang/String`）
+ * @property methodName 目标方法名
+ * @property methodParamsInfo 目标方法描述符（如 `(Ljava/lang/String;)V`）
+ * @property replaceClass 替换实现类（可选）
+ * @property listenerClass 监听实现类（可选）
+ * @property desc 统一描述符：`L<classPath>;<methodName><methodParamsInfo>`
+ *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class MethodTypeInfoValue {
     val classPath: String

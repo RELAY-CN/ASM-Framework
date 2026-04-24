@@ -8,24 +8,30 @@ import kim.der.asm.manager.replace.RedirectionIgnoreManagerImpl
 import kim.der.asm.manager.replace.RedirectionManagerImpl
 
 /**
- * 方法重定向-取代, 取代方法
+ * 方法重定向替换入口。
  *
- * @date 2023/10/22 9:25
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object RedirectionReplaceApi {
     /**
-     *  Not using a ServiceLoader for now, modularized environments with
-     *  multiple ClassLoaders cause some issues.
+     * 默认重定向替换管理器。
      *
-     * @return an implementation of the [RedirectionManager].
+     * 当前不使用 ServiceLoader：模块化环境/多 ClassLoader 场景下容易出现加载与隔离问题。
      */
     private val redirectionManager: RedirectionReplaceManager = RedirectionManagerImpl()
     private val redirectionIgnoreManager: RedirectionReplaceManager = RedirectionIgnoreManagerImpl()
 
     /**
+     * 执行重定向替换（由 transformer 注入调用点调用）。
      *
-     * @see Redirection
+     * @param obj 目标对象；静态方法调用场景下可能为 `Class` 常量或占位对象
+     * @param desc 调用点描述符（示例：`Lcom/example/Target;methodName(Ljava/lang/String;)V`）
+     * @param type 返回值类型
+     * @param args 调用参数（按原顺序）
+     * @return 替换后的返回值
+     * @throws Throwable 由替换实现抛出的异常
+     * @see kim.der.asm.api.annotation.Redirect
      */
     // used by the transformer
     @JvmStatic
@@ -38,6 +44,16 @@ object RedirectionReplaceApi {
         vararg args: Any?,
     ): Any? = redirectionManager.invoke(obj, desc, type, *args)
 
+    /**
+     * 执行“忽略模式”的重定向替换（由 transformer 注入调用点调用）。
+     *
+     * @param obj 目标对象；静态方法调用场景下可能为 `Class` 常量或占位对象
+     * @param desc 调用点描述符（示例：`Lcom/example/Target;methodName(Ljava/lang/String;)V`）
+     * @param type 返回值类型
+     * @param args 调用参数（按原顺序）
+     * @return 替换后的返回值
+     * @throws Throwable 由替换实现抛出的异常
+     */
     // used by the transformer
     @JvmStatic
     @Suppress("UNUSED")
