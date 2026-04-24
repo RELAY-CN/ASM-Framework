@@ -9,18 +9,21 @@ import kim.der.asm.data.AsmInfo
 import org.objectweb.asm.tree.ClassNode
 
 /**
- * ASM 处理器
- * 负责应用所有注册的 ASM 到目标类
+ * ASM 处理器。
+ *
+ * 负责按 [AsmRegistry] 的注册结果，为目标类收集匹配的 [AsmInfo] 并依次应用改写。
+ * 单个 ASM 应用失败时会捕获异常并继续处理剩余条目（仅输出到 stderr）。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class AsmProcessor : AsmTransformer() {
     /**
-     * 应用所有相关的 ASM 到目标类
+     * 应用所有相关的 ASM 到目标类。
      *
      * @param className 类名（内部名称）
      * @param classNode 目标类节点
-     * @return true 如果进行了转换
+     * @return 如果至少一个改写生效则返回 true
      */
     fun applyAsms(
         className: String,
@@ -77,3 +80,4 @@ class AsmProcessor : AsmTransformer() {
         return AsmRegistry.getForTarget(className).isNotEmpty()
     }
 }
+
