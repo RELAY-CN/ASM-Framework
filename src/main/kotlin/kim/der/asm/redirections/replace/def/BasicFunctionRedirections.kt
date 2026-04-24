@@ -7,10 +7,13 @@ package kim.der.asm.redirections.replace.def
 import kim.der.asm.api.replace.RedirectionReplace
 
 /**
+ * 常用函数重定向默认实现。
  *
+ * 当前文件主要提供与时间相关的 [RedirectionReplace] 实现（`System.nanoTime()` / `System.currentTimeMillis()` 等），
+ * 供 transformer 在替换调用点时复用。
  *
- * @date 2023/12/25 15:15
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object BasicFunctionRedirections {
     val Nanos = RedirectionReplace { _: Any, _: String, _: Class<*>, _: Array<out Any?> -> System.nanoTime() }

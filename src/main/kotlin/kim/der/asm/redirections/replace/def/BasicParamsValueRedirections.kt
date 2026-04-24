@@ -7,10 +7,12 @@ package kim.der.asm.redirections.replace.def
 import kim.der.asm.api.replace.RedirectionReplace
 
 /**
+ * 常用参数返回型重定向默认实现。
  *
+ * 提供“直接返回第 N 个参数”的 [RedirectionReplace]，用于快速屏蔽调用副作用或透传参数。
  *
- * @date 2023/12/25 15:15
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object BasicParamsValueRedirections {
     val ReturnFirstParams =
