@@ -5,11 +5,28 @@
 package kim.der.asm.api.annotation
 
 /**
- * 回调信息类，类似 Mixin 的 CallbackInfo
- * 支持取消执行和返回值修改，用于在注入的方法中控制目标方法的执行流程
+ * 注入回调控制信息。
  *
- * @param returnValue 返回值（用于修改方法的返回值）
+ * 当注入方法以 [CallbackInfo] 作为第一个参数时，注入器会在调用后读取该对象的状态：
+ *
+ * - 通过 [cancel] 标记取消：用于 HEAD 注入提前返回（跳过原方法体）
+ * - 通过 [setReturnValue] 修改返回值：用于 RETURN 注入在返回前替换结果
+ *
+ * 注意：该对象是可变的、非线程安全的，只应在单次注入调用链路内使用。
+ *
+ * ## 示例
+ *
+ * ```kotlin
+ * @AsmInject(method = "targetMethod()V", target = InjectionPoint.HEAD)
+ * fun onHead(ci: CallbackInfo) {
+ *     // 跳过目标方法体
+ *     ci.cancel()
+ * }
+ * ```
+ *
+ * @param returnValue 初始返回值（用于在返回值可变的注入点中提供默认值）
  * @author Dr (dr@der.kim)
+ * @date 2025-06-11
  */
 class CallbackInfo
     @JvmOverloads
@@ -19,25 +36,31 @@ class CallbackInfo
         private var cancelled = false
 
         /**
-         * 取消方法的继续执行（如果可取消）
+         * 标记取消。
+         *
+         * 注入器在支持取消的注入点（例如 HEAD）会根据该标记决定是否提前返回。
          */
         fun cancel() {
             cancelled = true
         }
 
         /**
-         * 检查是否已取消
+         * 是否已取消。
          */
         fun isCancelled(): Boolean = cancelled
 
         /**
-         * 获取返回值
+         * 获取返回值。
+         *
+         * 该方法会尝试将内部保存的值转换为目标类型；类型不匹配时返回 `null`。
          */
         @Suppress("UNCHECKED_CAST")
         fun <T> getReturnValue(): T? = returnValue as? T
 
         /**
-         * 设置返回值（仅在支持返回值修改的注入点有效）
+         * 设置返回值。
+         *
+         * 该值用于支持“返回值可变”的注入点（例如 RETURN），以及取消分支需要返回特定结果的场景。
          */
         fun setReturnValue(value: Any?) {
             this.returnValue = value
@@ -45,13 +68,13 @@ class CallbackInfo
 
         companion object {
             /**
-             * 创建可取消的回调信息
+             * 创建并立即标记为取消的回调信息。
              */
             @JvmStatic
             fun cancellable(): CallbackInfo = CallbackInfo().apply { cancel() }
 
             /**
-             * 创建带返回值的回调信息
+             * 创建带初始返回值的回调信息。
              */
             @JvmStatic
             fun returnable(returnValue: Any?): CallbackInfo = CallbackInfo(returnValue)
