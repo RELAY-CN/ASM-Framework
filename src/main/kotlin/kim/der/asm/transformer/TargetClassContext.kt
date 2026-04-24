@@ -19,10 +19,23 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * 目标类上下文
- * 管理将 ASM 应用到目标类的过程
+ * 目标类改写上下文。
+ *
+ * 该上下文负责把单个 ASM 类（[AsmInfo.asmClass]）解析为注入/替换/重定向等操作，
+ * 并将这些操作应用到目标 [ClassNode] 上。
+ *
+ * ## 处理顺序
+ *
+ * 该上下文会按固定顺序处理注入点，以尽量贴近 Mixin 的行为并避免注入之间互相干扰：
+ *
+ * 1. RETURN 与 TAIL 注入
+ * 2. 其他非 HEAD 注入（如 INVOKE）
+ * 3. 最后处理 HEAD 注入
+ *
+ * 以上顺序用于避免 HEAD 注入创建的 RETURN 指令被 RETURN 注入二次处理，导致“取消分支仍触发 RETURN 注入”这类行为偏差。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-22
  */
 class TargetClassContext(
     private val className: String,
@@ -30,9 +43,9 @@ class TargetClassContext(
     private val asmInfo: AsmInfo,
 ) {
     /**
-     * 应用 ASM
+     * 应用 ASM 到目标类。
      *
-     * @return true 如果进行了转换
+     * @return 如果至少一个改写生效则返回 true
      */
     fun applyAsm(): Boolean {
         var transformed = false
@@ -63,20 +76,18 @@ class TargetClassContext(
         // 注意：必须按照特定的顺序处理注入，以确保行为一致
         val methodsToProcess = asmInfo.asmClass.declaredMethods.toList()
 
-        /**
-         * 第一轮：处理 RETURN 和 TAIL 注入（必须在 HEAD 注入之前）
-         *
-         * 原因：
-         * 1. HEAD 注入如果取消方法执行，会在取消分支中创建一个新的 RETURN 指令
-         * 2. RETURN 注入会查找所有 RETURN 指令并在其之前插入代码
-         * 3. 如果 RETURN 注入在 HEAD 注入之后执行，它会错误地在 HEAD 注入创建的 RETURN 指令之前插入代码
-         * 4. 这会导致即使 HEAD 注入取消了方法，RETURN 注入仍然会被执行（不符合预期）
-         *
-         * 解决方案：
-         * - 先处理 RETURN/TAIL 注入，它们只会在原始的 RETURN 指令之前插入代码
-         * - 后处理 HEAD 注入，HEAD 注入创建的 RETURN 指令不会被 RETURN 注入处理
-         * - 这样确保：当 HEAD 注入取消方法时，RETURN 注入不会被执行（符合 Mixin-master 的行为）
-         */
+        // 第一轮：处理 RETURN 和 TAIL 注入（必须在 HEAD 注入之前）
+        //
+        // 原因：
+        // 1. HEAD 注入如果取消方法执行，会在取消分支中创建一个新的 RETURN 指令
+        // 2. RETURN 注入会查找所有 RETURN 指令并在其之前插入代码
+        // 3. 如果 RETURN 注入在 HEAD 注入之后执行，会错误地在 HEAD 注入创建的 RETURN 指令之前插入代码
+        // 4. 这会导致即使 HEAD 注入取消了方法，RETURN 注入仍然会被执行（不符合预期）
+        //
+        // 解决方案：
+        // - 先处理 RETURN/TAIL 注入，它们只会在原始的 RETURN 指令之前插入代码
+        // - 后处理 HEAD 注入，HEAD 注入创建的 RETURN 指令不会被 RETURN 注入处理
+        // - 这样确保：当 HEAD 注入取消方法时，RETURN 注入不会被执行（贴近 Mixin-master 的行为）
         for (method in methodsToProcess) {
             val injectAnnotation = method.getAnnotation(AsmInject::class.java)
             if (injectAnnotation != null &&
@@ -88,10 +99,8 @@ class TargetClassContext(
             }
         }
 
-        /**
-         * 处理其他非 HEAD 注入（如 INVOKE 等）
-         * 这些注入不涉及 RETURN 指令的创建，可以在 HEAD 注入之前或之后处理
-         */
+        // 处理其他非 HEAD 注入（如 INVOKE 等）
+        // 这些注入不涉及 RETURN 指令的创建，可以在 HEAD 注入之前或之后处理
         for (method in methodsToProcess) {
             val injectAnnotation = method.getAnnotation(AsmInject::class.java)
             val modifyArgAnnotation = method.getAnnotation(ModifyArg::class.java)
@@ -176,19 +185,17 @@ class TargetClassContext(
             }
         }
 
-        /**
-         * 第二轮：最后处理 HEAD 注入（确保在 RETURN 注入之后）
-         *
-         * 处理顺序的重要性：
-         * - HEAD 注入在方法开头插入代码，如果取消方法执行，会在取消分支中创建 RETURN 指令
-         * - 由于 RETURN 注入已经在第一轮处理完成，它只会处理原始的 RETURN 指令
-         * - HEAD 注入创建的 RETURN 指令不会被 RETURN 注入处理
-         * - 这确保了当 HEAD 注入取消方法时，RETURN 注入不会被执行（符合预期行为）
-         *
-         * 参考 Mixin-master 的行为：
-         * - 当 HEAD 注入取消方法时，方法立即返回，不会执行方法体
-         * - 因此 RETURN 注入不应该被执行（因为方法体从未执行）
-         */
+        // 第二轮：最后处理 HEAD 注入（确保在 RETURN 注入之后）
+        //
+        // 处理顺序的重要性：
+        // - HEAD 注入在方法开头插入代码，如果取消方法执行，会在取消分支中创建 RETURN 指令
+        // - RETURN 注入已在第一轮处理完成，只会处理当时存在的原始 RETURN 指令
+        // - HEAD 注入创建的 RETURN 指令不会被 RETURN 注入处理
+        // - 这确保了当 HEAD 注入取消方法时，RETURN 注入不会被执行（符合预期行为）
+        //
+        // 参考 Mixin-master 的行为：
+        // - 当 HEAD 注入取消方法时，方法立即返回，不会执行方法体
+        // - 因此 RETURN 注入不应该被执行（因为方法体从未执行）
         for (method in methodsToProcess) {
             val injectAnnotation = method.getAnnotation(AsmInject::class.java)
             if (injectAnnotation != null && injectAnnotation.target == InjectionPoint.HEAD) {

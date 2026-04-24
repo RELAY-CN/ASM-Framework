@@ -10,21 +10,24 @@ import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.tree.ClassNode
 
 /**
- * ASM 字节码转换器基类
- * 基于 ASM Tree API 实现字节码转换
+ * ASM 字节码转换器基类。
+ *
+ * 基于 ASM Tree API 将 classfile 字节码读入 [ClassNode] 并输出改写后的字节码。
+ * 当写入阶段使用缓存的 [ClassReader] 且写入目标为同一个 [ClassNode] 时，会复用 reader 以降低计算开销。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-22
  */
 abstract class AsmTransformer {
     private var classReader: ClassReader? = null
     private var classNode: ClassNode? = null
 
     /**
-     * 读取类字节码为 ClassNode
+     * 读取类字节码为 [ClassNode]。
      *
      * @param className 类名（内部名称）
      * @param basicClass 原始字节码
-     * @return ClassNode
+     * @return 解析后的 [ClassNode]
      */
     protected fun readClass(
         className: String,
@@ -32,12 +35,12 @@ abstract class AsmTransformer {
     ): ClassNode = readClass(className, basicClass, true)
 
     /**
-     * 读取类字节码为 ClassNode
+     * 读取类字节码为 [ClassNode]。
      *
      * @param className 类名（内部名称）
      * @param basicClass 原始字节码
      * @param cacheReader 是否缓存 ClassReader 以便后续写入时使用
-     * @return ClassNode
+     * @return 解析后的 [ClassNode]
      */
     protected fun readClass(
         className: String,
@@ -58,7 +61,7 @@ abstract class AsmTransformer {
     }
 
     /**
-     * 将 ClassNode 写入为字节码
+     * 将 [ClassNode] 写入为字节码。
      *
      * @param classNode ClassNode 要写入
      * @param loader 类加载器（可选）
@@ -86,7 +89,7 @@ abstract class AsmTransformer {
     }
 
     /**
-     * 转换类字节码
+     * 转换类字节码。
      *
      * @param className 类名（内部名称）
      * @param classfileBuffer 原始字节码
@@ -100,10 +103,10 @@ abstract class AsmTransformer {
     ): ByteArray
 
     /**
-     * 检查是否需要转换指定类
+     * 检查是否需要转换指定类。
      *
      * @param className 类名（内部名称）
-     * @return true 如果需要转换
+     * @return 如果需要转换则返回 true
      */
     open fun shouldTransform(className: String): Boolean = true
 }
