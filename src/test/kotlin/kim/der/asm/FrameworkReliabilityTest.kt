@@ -17,6 +17,7 @@ import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Overwrite
 import kim.der.asm.api.annotation.RemoveMethod
 import kim.der.asm.api.annotation.RemoveSynchronized
+import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.api.annotation.Shift
 import kim.der.asm.transformer.AsmProcessor
 import kim.der.asm.transformer.AsmTransformException
@@ -177,6 +178,33 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun shadowWithMissingFieldFailsDuringTransform() {
+        AsmRegistry.register(MissingShadowFieldMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun shadowWithMismatchedFieldTypeFailsDuringTransform() {
+        AsmRegistry.register(MismatchedShadowFieldMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun shadowWithMissingMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingShadowMethodMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -318,6 +346,24 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "changed"
     }
 
+    @AsmMixin("StrictTarget")
+    class MissingShadowFieldMixin {
+        @Shadow
+        private val missing: String? = null
+    }
+
+    @AsmMixin("FieldTarget")
+    class MismatchedShadowFieldMixin {
+        @Shadow
+        private val name: Int = 0
+    }
+
+    @AsmMixin("StrictTarget")
+    class MissingShadowMethodMixin {
+        @Shadow
+        private fun missing(): String = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -380,6 +426,14 @@ class FrameworkReliabilityTest {
             visitMaxs(1, 2)
             visitEnd()
         }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun fieldTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
         cw.visitEnd()
         return cw.toByteArray()
     }

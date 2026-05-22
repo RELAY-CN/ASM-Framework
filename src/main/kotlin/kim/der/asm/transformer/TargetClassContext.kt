@@ -307,11 +307,19 @@ class TargetClassContext(
 
         // 查找目标字段
         val targetField = classNode.fields.find { it.name == targetFieldName }
-        if (targetField != null) {
-            // 如果字段存在，应用 Mutable 修饰符
-            if (field.isAnnotationPresent(Mutable::class.java)) {
-                targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
-            }
+            ?: throw IllegalStateException("Shadow field $targetFieldName not found in $className")
+
+        val shadowFieldType = Type.getType(field.type)
+        val targetFieldType = Type.getType(targetField.desc)
+        if (shadowFieldType != targetFieldType) {
+            throw IllegalStateException(
+                "Shadow field $targetFieldName type ($shadowFieldType) must match target field type ($targetFieldType)",
+            )
+        }
+
+        // 如果字段存在，应用 Mutable 修饰符
+        if (field.isAnnotationPresent(Mutable::class.java)) {
+            targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
         }
     }
 
@@ -336,7 +344,7 @@ class TargetClassContext(
         // 验证目标方法是否存在（Shadow 方法只是引用，不需要转换）
         val targetMethod = findTargetMethod("$targetMethodName${Type.getMethodDescriptor(method)}")
         if (targetMethod == null) {
-            System.err.println("Warning: Shadow method $methodName not found in target class $className")
+            throw IllegalStateException("Shadow method $targetMethodName${Type.getMethodDescriptor(method)} not found in $className")
         }
     }
 
