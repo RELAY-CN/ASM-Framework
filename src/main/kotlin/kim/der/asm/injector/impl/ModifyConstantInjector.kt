@@ -6,13 +6,12 @@ package kim.der.asm.injector.impl
 
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
-import kim.der.asm.injector.util.AsmMethodCallGenerator
 import kim.der.asm.utils.transformer.BytecodeUtil
-import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 
 /**
  * ModifyConstant 注入器
@@ -100,24 +99,103 @@ class ModifyConstantInjector(
     ): Boolean {
         val il = InsnList()
 
-        // 加载原始常量值
-        loadConstant(il, constNode, constantType)
-
         // 调用 ASM 方法修改常量
-        val mockTarget = createMockMethodNode(target, constantType)
-        AsmMethodCallGenerator.generateMethodCall(
-            il,
-            asmMethod,
-            asmInfo,
-            mockTarget,
-            null,
-        )
+        generateConstantModifierCall(il, constNode, constantType)
 
         // 替换原始常量指令
         instructions.insertBefore(constNode, il)
         instructions.remove(constNode)
 
         return true
+    }
+
+    private fun generateConstantModifierCall(
+        il: InsnList,
+        constNode: AbstractInsnNode,
+        constantType: Type,
+    ) {
+        validateHandlerParameter(constantType)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        val useStaticCall = Modifier.isStatic(asmMethod.modifiers)
+
+        if (!useStaticCall) {
+            loadAsmHandlerReceiver(il, instanceType)
+        }
+
+        // 原始常量就是 @ModifyConstant handler 的第一个参数。
+        loadConstant(il, constNode, constantType)
+
+        il.add(
+            MethodInsnNode(
+                if (useStaticCall) Opcodes.INVOKESTATIC else Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun validateHandlerParameter(constantType: Type) {
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        if (asmParamTypes.size != 1 || !isHandlerParameterCompatible(constantType, asmParamTypes[0])) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} must take exactly one argument of type $constantType, actual ${asmParamTypes.toList()}",
+            )
+        }
+    }
+
+    private fun loadAsmHandlerReceiver(
+        il: InsnList,
+        instanceType: Type,
+    ) {
+        if (isKotlinObject()) {
+            il.add(
+                FieldInsnNode(
+                    Opcodes.GETSTATIC,
+                    instanceType.internalName,
+                    "INSTANCE",
+                    "L${instanceType.internalName};",
+                ),
+            )
+            return
+        }
+
+        val targetClassInternalName =
+            asmInfo.targets.firstOrNull()?.replace('.', '/')
+                ?: instanceType.internalName
+        val singletonFieldName = "\$asmInstance\$${asmInfo.asmClass.simpleName}"
+        val singletonFieldDesc = "L${instanceType.internalName};"
+        val notNullLabel = LabelNode()
+        val endLabel = LabelNode()
+
+        il.add(FieldInsnNode(Opcodes.GETSTATIC, targetClassInternalName, singletonFieldName, singletonFieldDesc))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(JumpInsnNode(Opcodes.IFNONNULL, notNullLabel))
+        il.add(InsnNode(Opcodes.POP))
+        il.add(TypeInsnNode(Opcodes.NEW, instanceType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, instanceType.internalName, "<init>", "()V", false))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(FieldInsnNode(Opcodes.PUTSTATIC, targetClassInternalName, singletonFieldName, singletonFieldDesc))
+        il.add(JumpInsnNode(Opcodes.GOTO, endLabel))
+        il.add(notNullLabel)
+        il.add(endLabel)
+    }
+
+    private fun isHandlerParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
+            return actual.sort == Type.OBJECT &&
+                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        }
+        return false
     }
 
     /**
@@ -146,21 +224,4 @@ class ModifyConstantInjector(
         }
     }
 
-    /**
-     * 创建模拟方法节点
-     */
-    private fun createMockMethodNode(
-        target: MethodNode,
-        constantType: Type,
-    ): MethodNode {
-        val asmReturnType = Type.getReturnType(asmMethod)
-        val mockDesc = Type.getMethodDescriptor(asmReturnType, constantType)
-        return MethodNode(
-            target.access,
-            target.name,
-            mockDesc,
-            target.signature,
-            target.exceptions?.toTypedArray(),
-        )
-    }
 }

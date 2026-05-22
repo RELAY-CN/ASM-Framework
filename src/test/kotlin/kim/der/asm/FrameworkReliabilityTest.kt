@@ -308,6 +308,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantUsesOriginalConstantAsHandlerArgument() {
+        AsmRegistry.register(StringOnlyModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed", result)
+    }
+
+    @Test
     fun shadowWithMissingFieldFailsDuringTransform() {
         AsmRegistry.register(MissingShadowFieldMixin::class.java)
 
