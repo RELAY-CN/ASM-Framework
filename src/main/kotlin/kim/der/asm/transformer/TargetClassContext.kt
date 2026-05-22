@@ -1063,21 +1063,26 @@ class TargetClassContext(
 
         val targetMethod = findTargetMethod(methodSignature) ?: return false
 
-        // 移除同步指令
-        val instructions = targetMethod.instructions
-        for (insnNode in instructions.toArray()) {
-            if (insnNode.opcode == Opcodes.MONITORENTER) {
-                // 将 monitorEnter 替换为 pop，即将监视器弹出堆栈
-                instructions[insnNode] = InsnNode(Opcodes.POP)
-            }
-        }
-
-        // 移除 ACC_SYNCHRONIZED 标志
-        targetMethod.access = targetMethod.access and Opcodes.ACC_SYNCHRONIZED.inv()
+        removeSynchronizedSemantics(targetMethod)
 
         return true
     }
 
+    /**
+     * 移除方法级 synchronized 标志和块级 monitor 指令。
+     *
+     * monitor 指令会消费栈顶对象引用；替换为 POP 可以保留原有加载指令的栈平衡。
+     */
+    private fun removeSynchronizedSemantics(methodNode: MethodNode) {
+        val instructions = methodNode.instructions
+        for (insnNode in instructions.toArray()) {
+            if (insnNode.opcode == Opcodes.MONITORENTER || insnNode.opcode == Opcodes.MONITOREXIT) {
+                instructions[insnNode] = InsnNode(Opcodes.POP)
+            }
+        }
+
+        methodNode.access = methodNode.access and Opcodes.ACC_SYNCHRONIZED.inv()
+    }
     /**
      * 构建方法签名
      * 从 Java Method 对象构建 ASM 方法签名
@@ -1139,15 +1144,7 @@ class TargetClassContext(
     ): Boolean {
         // 移除同步
         if (removeSync) {
-            // 移除同步指令
-            val instructions = methodNode.instructions
-            for (insnNode in instructions.toArray()) {
-                if (insnNode.opcode == Opcodes.MONITORENTER) {
-                    instructions[insnNode] = InsnNode(Opcodes.POP)
-                }
-            }
-            // 移除 ACC_SYNCHRONIZED 标志
-            methodNode.access = methodNode.access and Opcodes.ACC_SYNCHRONIZED.inv()
+            removeSynchronizedSemantics(methodNode)
         }
 
         // 移除 abstract 和 native 修饰符
@@ -1376,4 +1373,7 @@ class TargetClassContext(
         }
     }
 }
+
+
+
 
