@@ -23,6 +23,7 @@ object AsmRegistry {
      * 注册 ASM 类
      */
     @JvmStatic
+    @Synchronized
     fun register(asmClass: Class<*>) {
         val annotation = asmClass.getAnnotation(AsmMixin::class.java) ?: return
 
@@ -50,6 +51,7 @@ object AsmRegistry {
      * @param pathMatcher 路径匹配器，返回 true 表示匹配
      */
     @JvmStatic
+    @Synchronized
     fun registerWithPathMatcher(
         asmClass: Class<*>,
         pathMatcher: Find<String, Boolean>,
@@ -70,6 +72,7 @@ object AsmRegistry {
      * 获取目标类的所有 ASM
      */
     @JvmStatic
+    @Synchronized
     fun getForTarget(targetClass: String): List<AsmInfo> {
         return targetCache.getOrPut(targetClass) {
             buildList {
@@ -88,6 +91,7 @@ object AsmRegistry {
      * 清除所有注册的 ASM
      */
     @JvmStatic
+    @Synchronized
     fun clear() {
         asms.clear()
         pathMatchers.clear()

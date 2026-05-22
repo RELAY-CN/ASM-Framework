@@ -9,10 +9,22 @@ import kim.der.asm.data.AsmInfo
 import org.objectweb.asm.tree.ClassNode
 
 /**
+ * ASM 转换失败。
+ *
+ * @param className 正在转换的目标类 internal name
+ * @param asmClassName 失败的 ASM 类名
+ */
+class AsmTransformException(
+    val className: String,
+    val asmClassName: String,
+    cause: Throwable,
+) : RuntimeException("Failed to apply asm $asmClassName to $className", cause)
+
+/**
  * ASM 处理器。
  *
  * 负责按 [AsmRegistry] 的注册结果，为目标类收集匹配的 [AsmInfo] 并依次应用改写。
- * 单个 ASM 应用失败时会捕获异常并继续处理剩余条目（仅输出到 stderr）。
+ * 任一 ASM 应用失败都会终止本次转换，避免输出部分转换后的类。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -46,9 +58,8 @@ class AsmProcessor : AsmTransformer() {
                 if (TargetClassContext(className, classNode, asmInfo).applyAsm()) {
                     transformed = true
                 }
-            } catch (e: Exception) {
-                System.err.println("Error applying asm ${asmInfo.asmClass.name} to $className: ${e.message}")
-                e.printStackTrace()
+            } catch (throwable: Throwable) {
+                throw AsmTransformException(className, asmInfo.asmClass.name, throwable)
             }
         }
 
@@ -65,11 +76,11 @@ class AsmProcessor : AsmTransformer() {
             return classfileBuffer
         }
 
-        val classNode = readClass(className, classfileBuffer, true)
-        val transformed = applyAsms(className, classNode, asms)
+        val readResult = readClassWithReader(className, classfileBuffer)
+        val transformed = applyAsms(className, readResult.classNode, asms)
 
         return if (transformed) {
-            writeClass(classNode, loader)
+            writeClass(readResult.classNode, loader, readResult.classReader)
         } else {
             classfileBuffer
         }
@@ -80,4 +91,3 @@ class AsmProcessor : AsmTransformer() {
         return AsmRegistry.getForTarget(className).isNotEmpty()
     }
 }
-

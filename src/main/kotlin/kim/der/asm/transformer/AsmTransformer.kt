@@ -13,14 +13,19 @@ import org.objectweb.asm.tree.ClassNode
  * ASM 字节码转换器基类。
  *
  * 基于 ASM Tree API 将 classfile 字节码读入 [ClassNode] 并输出改写后的字节码。
- * 当写入阶段使用缓存的 [ClassReader] 且写入目标为同一个 [ClassNode] 时，会复用 reader 以降低计算开销。
+ * 读写上下文由单次转换持有，避免复用同一个转换器实例时出现跨线程缓存污染。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
 abstract class AsmTransformer {
-    private var classReader: ClassReader? = null
-    private var classNode: ClassNode? = null
+    /**
+     * 单次类读取结果。
+     */
+    protected data class ReadClassResult(
+        val classNode: ClassNode,
+        val classReader: ClassReader,
+    )
 
     /**
      * 读取类字节码为 [ClassNode]。
@@ -32,32 +37,23 @@ abstract class AsmTransformer {
     protected fun readClass(
         className: String,
         basicClass: ByteArray,
-    ): ClassNode = readClass(className, basicClass, true)
+    ): ClassNode = readClassWithReader(className, basicClass).classNode
 
     /**
-     * 读取类字节码为 [ClassNode]。
+     * 读取类字节码为 [ClassNode]，同时返回对应 [ClassReader] 供同一次写入复用。
      *
      * @param className 类名（内部名称）
      * @param basicClass 原始字节码
-     * @param cacheReader 是否缓存 ClassReader 以便后续写入时使用
-     * @return 解析后的 [ClassNode]
+     * @return 解析结果
      */
-    protected fun readClass(
+    protected fun readClassWithReader(
         className: String,
         basicClass: ByteArray,
-        cacheReader: Boolean,
-    ): ClassNode {
+    ): ReadClassResult {
         val reader = ClassReader(basicClass)
-        if (cacheReader) {
-            this.classReader = reader
-        }
-
         val node = ClassNode()
         reader.accept(node, ClassReader.EXPAND_FRAMES)
-        if (cacheReader) {
-            this.classNode = node
-        }
-        return node
+        return ReadClassResult(node, reader)
     }
 
     /**
@@ -70,20 +66,22 @@ abstract class AsmTransformer {
     protected fun writeClass(
         classNode: ClassNode,
         loader: ClassLoader? = null,
+    ): ByteArray = writeClass(classNode, loader, null)
+
+    /**
+     * 将 [ClassNode] 写入为字节码，可复用本次读取得到的 [ClassReader]。
+     *
+     * @param classNode ClassNode 要写入
+     * @param loader 类加载器（可选）
+     * @param classReader 同一次读取产生的 ClassReader（可选）
+     * @return 生成的字节码
+     */
+    protected fun writeClass(
+        classNode: ClassNode,
+        loader: ClassLoader? = null,
+        classReader: ClassReader? = null,
     ): ByteArray {
-        val writer =
-            if (this.classReader != null && this.classNode == classNode) {
-                // 使用缓存的 ClassReader 优化
-                SafeClassWriter(this.classReader, loader, ClassWriter.COMPUTE_FRAMES).also {
-                    this.classReader = null
-                    this.classNode = null
-                }
-            } else {
-                // 使用 SafeClassWriter 处理类加载问题
-                this.classNode = null
-                this.classReader = null
-                SafeClassWriter(null, loader, ClassWriter.COMPUTE_FRAMES)
-            }
+        val writer = SafeClassWriter(classReader, loader, ClassWriter.COMPUTE_FRAMES)
         classNode.accept(writer)
         return writer.toByteArray()
     }
@@ -110,4 +108,3 @@ abstract class AsmTransformer {
      */
     open fun shouldTransform(className: String): Boolean = true
 }
-
