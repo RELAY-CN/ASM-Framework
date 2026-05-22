@@ -12,6 +12,8 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
+import org.objectweb.asm.tree.analysis.Analyzer
+import org.objectweb.asm.tree.analysis.SourceInterpreter
 import java.lang.reflect.Method
 
 /**
@@ -46,17 +48,16 @@ class OverwriteInjector(
         // 复制方法体
         copyMethodBody(asmMethodNode, target)
 
-        // 适配参数和返回值（必须在 Kotlin object 调用转换之前，确保局部变量索引正确）
+        // 适配参数和返回值
         adaptMethodSignature(asmMethodNode, target)
-
-        // 处理 Kotlin object 兼容性：如果 asm 来自 Kotlin object 但目标方法是静态的，需要转换调用
-        adaptKotlinObjectCalls(asmMethodNode, target)
 
         // 转换 Shadow 字段和方法调用
         val targetClassName = asmInfo.targets.firstOrNull()?.replace('.', '/')
         if (targetClassName != null) {
             transformShadowReferences(target, targetClassName)
         }
+        recalculateMaxLocals(target)
+        adaptKotlinObjectSelfReceivers(target)
 
         // 重新计算 maxLocals，确保包含所有使用的局部变量
         recalculateMaxLocals(target)
@@ -424,9 +425,20 @@ class OverwriteInjector(
                         // 标记需要移除的指令
                         when (insn.opcode) {
                             Opcodes.ALOAD -> {
-                                // 如果是加载指令（aload_0），移除它
-                                // 注意：这可能会导致栈不平衡，但 this 在静态方法中不应该被使用
-                                toRemove.add(insn)
+                                if (isKotlinObject()) {
+                                    val instanceType = Type.getType(asmInfo.asmClass)
+                                    instructions[insn] =
+                                        FieldInsnNode(
+                                            Opcodes.GETSTATIC,
+                                            instanceType.internalName,
+                                            "INSTANCE",
+                                            "L${instanceType.internalName};",
+                                        )
+                                } else {
+                                    // 如果是加载指令（aload_0），移除它
+                                    // 注意：这可能会导致栈不平衡，但 this 在静态方法中不应该被使用
+                                    toRemove.add(insn)
+                                }
                             }
                             Opcodes.ASTORE -> {
                                 // 如果是存储指令（astore_0），移除它并用 POP 替换
@@ -649,177 +661,6 @@ class OverwriteInjector(
         }
 
     /**
-     * 适配 Kotlin object 调用
-     * 如果 asm 方法来自 Kotlin object 但目标方法是静态的，需要将实例调用转换为静态调用
-     *
-     * 注意：只有当目标方法是静态的且源方法不是静态的时，才进行转换。
-     * 如果目标方法是实例方法，Kotlin object 的方法体中的 INSTANCE 访问是正常的，不需要转换。
-     */
-    private fun adaptKotlinObjectCalls(
-        source: MethodNode,
-        target: MethodNode,
-    ) {
-        val isKotlinObject = isKotlinObject()
-        val targetIsStatic = (target.access and Opcodes.ACC_STATIC) != 0
-        val sourceIsStatic = (source.access and Opcodes.ACC_STATIC) != 0
-
-        // 如果 asm 来自 Kotlin object 且目标方法是静态的，需要转换
-        // 如果目标方法是实例方法，不需要转换，因为 Kotlin object 的方法需要通过 INSTANCE 访问
-        if (isKotlinObject && targetIsStatic && !sourceIsStatic) {
-            convertInstanceCallsToStatic(target)
-        }
-        // 如果目标方法是实例方法，不做任何转换，保持原样
-    }
-
-    /**
-     * 将方法体中的实例调用转换为静态调用
-     * 移除 GETSTATIC INSTANCE 指令，将 INVOKEVIRTUAL 转换为 INVOKESTATIC
-     */
-    private fun convertInstanceCallsToStatic(target: MethodNode) {
-        val asmClassName = Type.getType(asmInfo.asmClass).internalName
-        val instructions = target.instructions
-        val insns = instructions.toArray()
-        val toRemove = mutableSetOf<AbstractInsnNode>()
-        val toConvert = mutableSetOf<MethodInsnNode>()
-
-        // 遍历指令，查找 GETSTATIC INSTANCE 后跟 INVOKEVIRTUAL 的模式
-        for (i in insns.indices) {
-            val insn = insns[i]
-
-            // 查找 GETSTATIC INSTANCE 指令
-            if (insn is FieldInsnNode &&
-                insn.opcode == Opcodes.GETSTATIC &&
-                insn.owner == asmClassName &&
-                insn.name == "INSTANCE"
-            ) {
-                // 向前查找对应的 INVOKEVIRTUAL 调用
-                // 需要计算栈深度，找到消耗这个 INSTANCE 的方法调用
-                var stackDepth = 1 // INSTANCE 在栈上
-                var foundCall = false
-
-                for (j in (i + 1) until insns.size) {
-                    val nextInsn = insns[j]
-
-                    // 先更新栈深度（基于之前的指令）
-                    if (j > i + 1) {
-                        val prevInsn = insns[j - 1]
-                        val delta = getStackDelta(prevInsn)
-                        stackDepth += delta
-                    }
-
-                    // 如果是方法调用且属于同一类
-                    if (nextInsn is MethodInsnNode &&
-                        nextInsn.owner == asmClassName &&
-                        (nextInsn.opcode == Opcodes.INVOKEVIRTUAL || nextInsn.opcode == Opcodes.INVOKESPECIAL) &&
-                        nextInsn.name != "<init>"
-                    ) {
-                        // 计算这个方法调用需要多少参数（包括实例）
-                        val paramCount = Type.getArgumentTypes(nextInsn.desc).size
-                        val totalNeeded = paramCount + 1 // 参数 + 实例
-
-                        // 如果栈深度正好是所需的数量，说明这个 INSTANCE 是为这个调用准备的
-                        if (stackDepth == totalNeeded) {
-                            toRemove.add(insn)
-                            toConvert.add(nextInsn)
-                            foundCall = true
-                            break
-                        }
-                    }
-
-                    // 如果栈深度变为0或负数，说明 INSTANCE 被消耗了但不是我们要找的调用
-                    if (stackDepth <= 0) {
-                        break
-                    }
-
-                    // 限制查找范围，避免过度搜索
-                    if (j - i > 100) {
-                        break
-                    }
-                }
-
-                // 如果没有找到对应的调用，不要移除 INSTANCE，因为可能在其他地方使用
-                // 只有在明确匹配到方法调用时才移除
-            }
-        }
-
-        // 转换所有标记的方法调用
-        for (methodCall in toConvert) {
-            methodCall.opcode = Opcodes.INVOKESTATIC
-        }
-
-        // 移除所有标记的 INSTANCE 加载指令
-        for (insn in toRemove) {
-            instructions.remove(insn)
-        }
-    }
-
-    /**
-     * 计算指令对栈深度的影响
-     * 返回正数表示压栈，负数表示弹栈，0表示不变
-     */
-    private fun getStackDelta(insn: AbstractInsnNode): Int =
-        when (insn) {
-            is VarInsnNode -> {
-                when (insn.opcode) {
-                    Opcodes.ALOAD, Opcodes.ILOAD, Opcodes.FLOAD -> 1
-                    Opcodes.LLOAD, Opcodes.DLOAD -> 2
-                    Opcodes.ASTORE, Opcodes.ISTORE, Opcodes.FSTORE -> -1
-                    Opcodes.LSTORE, Opcodes.DSTORE -> -2
-                    else -> 0
-                }
-            }
-            is FieldInsnNode -> {
-                when (insn.opcode) {
-                    Opcodes.GETFIELD -> 0 // 消耗实例，产生字段值，净变化为0
-                    Opcodes.GETSTATIC -> 1
-                    Opcodes.PUTFIELD -> -2 // 消耗实例和值
-                    Opcodes.PUTSTATIC -> -1
-                    else -> 0
-                }
-            }
-            is MethodInsnNode -> {
-                val returnType = Type.getReturnType(insn.desc)
-                val argCount = Type.getArgumentTypes(insn.desc).size
-                val isStatic = insn.opcode == Opcodes.INVOKESTATIC
-                val consumed = argCount + (if (isStatic) 0 else 1) // 参数 + 实例（如果不是静态）
-                val produced =
-                    if (returnType == Type.VOID_TYPE) {
-                        0
-                    } else {
-                        if (returnType.sort == Type.LONG || returnType.sort == Type.DOUBLE) 2 else 1
-                    }
-                produced - consumed
-            }
-            is InsnNode -> {
-                when (insn.opcode) {
-                    Opcodes.POP -> -1
-                    Opcodes.POP2 -> -2
-                    Opcodes.DUP -> 1
-                    Opcodes.DUP2 -> 2
-                    Opcodes.SWAP -> 0
-                    Opcodes.ACONST_NULL, Opcodes.ICONST_0, Opcodes.ICONST_1, Opcodes.ICONST_2,
-                    Opcodes.ICONST_3, Opcodes.ICONST_4, Opcodes.ICONST_5, Opcodes.ICONST_M1,
-                    -> 1
-                    Opcodes.LCONST_0, Opcodes.LCONST_1, Opcodes.DCONST_0, Opcodes.DCONST_1,
-                    Opcodes.FCONST_0, Opcodes.FCONST_1, Opcodes.FCONST_2,
-                    -> 2
-                    else -> 0
-                }
-            }
-            is LdcInsnNode -> {
-                val cst = insn.cst
-                when (cst) {
-                    is Long, is Double -> 2
-                    else -> 1
-                }
-            }
-            is IntInsnNode -> {
-                if (insn.opcode == Opcodes.BIPUSH || insn.opcode == Opcodes.SIPUSH) 1 else 0
-            }
-            else -> 0
-        }
-
-    /**
      * 重新计算 maxLocals
      * 确保包含所有使用的局部变量索引
      */
@@ -870,6 +711,55 @@ class OverwriteInjector(
         // 确保 maxLocals 至少为 1（即使是静态方法也可能有局部变量）
         // 并且不超过有效范围
         target.maxLocals = maxOf(1, minOf(maxIndex, 65535))
+    }
+
+    /**
+     * Kotlin object 的非 @JvmStatic 方法体内，ALOAD 0 是 object receiver，而不是目标类 this。
+     *
+     * Shadow/Copy 调用已经在前一步改写到目标类，剩余 owner 仍为 ASM 类的实例调用需要继续通过 INSTANCE 调用。
+     */
+    private fun adaptKotlinObjectSelfReceivers(target: MethodNode) {
+        if (!isKotlinObject()) {
+            return
+        }
+
+        val asmClassName = Type.getType(asmInfo.asmClass).internalName
+        val instructions = target.instructions
+        val insns = instructions.toArray()
+        val frames =
+            Analyzer(SourceInterpreter()).analyze(asmClassName, target)
+
+        for (index in insns.indices) {
+            val insn = insns[index]
+            if (insn !is MethodInsnNode ||
+                insn.owner != asmClassName ||
+                insn.opcode == Opcodes.INVOKESTATIC ||
+                insn.name == "<init>"
+            ) {
+                continue
+            }
+
+            val frame = frames[index] ?: continue
+            val argumentSlots = Type.getArgumentTypes(insn.desc).sumOf { it.size }
+            val receiverIndex = frame.stackSize - argumentSlots - 1
+            if (receiverIndex < 0) {
+                continue
+            }
+
+            val receiverSource = frame.getStack(receiverIndex).insns.singleOrNull()
+            if (receiverSource is VarInsnNode &&
+                receiverSource.opcode == Opcodes.ALOAD &&
+                receiverSource.`var` == 0
+            ) {
+                instructions[receiverSource] =
+                    FieldInsnNode(
+                        Opcodes.GETSTATIC,
+                        asmClassName,
+                        "INSTANCE",
+                        "L$asmClassName;",
+                    )
+            }
+        }
     }
 
     /**

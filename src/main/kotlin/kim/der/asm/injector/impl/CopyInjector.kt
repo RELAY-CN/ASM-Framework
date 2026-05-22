@@ -12,6 +12,8 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
+import org.objectweb.asm.tree.analysis.Analyzer
+import org.objectweb.asm.tree.analysis.SourceInterpreter
 import java.lang.reflect.Method
 
 /**
@@ -66,14 +68,13 @@ class CopyInjector(
         // 适配参数和返回值
         adaptMethodSignature(asmMethodNode, newMethod)
 
-        // 处理 Kotlin object 兼容性
-        adaptKotlinObjectCalls(asmMethodNode, newMethod)
-
         // 转换 Shadow 字段和方法调用
         val targetClassName = asmInfo.targets.firstOrNull()?.replace('.', '/')
         if (targetClassName != null) {
             transformShadowReferences(newMethod, targetClassName)
         }
+        recalculateMaxLocals(newMethod)
+        adaptKotlinObjectSelfReceivers(newMethod)
 
         // 重新计算 maxLocals
         recalculateMaxLocals(newMethod)
@@ -435,7 +436,18 @@ class CopyInjector(
                     if (isThisParam) {
                         when (insn.opcode) {
                             Opcodes.ALOAD -> {
-                                toRemove.add(insn)
+                                if (isKotlinObject()) {
+                                    val instanceType = Type.getType(asmInfo.asmClass)
+                                    instructions[insn] =
+                                        FieldInsnNode(
+                                            Opcodes.GETSTATIC,
+                                            instanceType.internalName,
+                                            "INSTANCE",
+                                            "L${instanceType.internalName};",
+                                        )
+                                } else {
+                                    toRemove.add(insn)
+                                }
                             }
                             Opcodes.ASTORE -> {
                                 toRemove.add(insn)
@@ -618,156 +630,6 @@ class CopyInjector(
         }
 
     /**
-     * 适配 Kotlin object 调用
-     */
-    private fun adaptKotlinObjectCalls(
-        source: MethodNode,
-        target: MethodNode,
-    ) {
-        val isKotlinObject = isKotlinObject()
-        val targetIsStatic = (target.access and Opcodes.ACC_STATIC) != 0
-        val sourceIsStatic = (source.access and Opcodes.ACC_STATIC) != 0
-
-        if (isKotlinObject && targetIsStatic && !sourceIsStatic) {
-            convertInstanceCallsToStatic(target)
-        }
-    }
-
-    /**
-     * 将方法体中的实例调用转换为静态调用
-     */
-    private fun convertInstanceCallsToStatic(target: MethodNode) {
-        val asmClassName = Type.getType(asmInfo.asmClass).internalName
-        val instructions = target.instructions
-        val insns = instructions.toArray()
-        val toRemove = mutableSetOf<AbstractInsnNode>()
-        val toConvert = mutableSetOf<MethodInsnNode>()
-
-        // 遍历指令，查找 GETSTATIC INSTANCE 后跟 INVOKEVIRTUAL 的模式
-        for (i in insns.indices) {
-            val insn = insns[i]
-
-            if (insn is FieldInsnNode &&
-                insn.opcode == Opcodes.GETSTATIC &&
-                insn.owner == asmClassName &&
-                insn.name == "INSTANCE"
-            ) {
-                var stackDepth = 1
-                var foundCall = false
-
-                for (j in (i + 1) until insns.size) {
-                    val nextInsn = insns[j]
-
-                    if (j > i + 1) {
-                        val prevInsn = insns[j - 1]
-                        val delta = getStackDelta(prevInsn)
-                        stackDepth += delta
-                    }
-
-                    if (nextInsn is MethodInsnNode &&
-                        nextInsn.owner == asmClassName &&
-                        (nextInsn.opcode == Opcodes.INVOKEVIRTUAL || nextInsn.opcode == Opcodes.INVOKESPECIAL) &&
-                        nextInsn.name != "<init>"
-                    ) {
-                        val paramCount = Type.getArgumentTypes(nextInsn.desc).size
-                        val totalNeeded = paramCount + 1
-
-                        if (stackDepth == totalNeeded) {
-                            toRemove.add(insn)
-                            toConvert.add(nextInsn)
-                            foundCall = true
-                            break
-                        }
-                    }
-
-                    if (stackDepth <= 0) {
-                        break
-                    }
-
-                    if (j - i > 100) {
-                        break
-                    }
-                }
-            }
-        }
-
-        // 转换所有标记的方法调用
-        for (methodCall in toConvert) {
-            methodCall.opcode = Opcodes.INVOKESTATIC
-        }
-
-        // 移除所有标记的 INSTANCE 加载指令
-        for (insn in toRemove) {
-            instructions.remove(insn)
-        }
-    }
-
-    /**
-     * 计算指令对栈深度的影响
-     */
-    private fun getStackDelta(insn: AbstractInsnNode): Int =
-        when (insn) {
-            is VarInsnNode -> {
-                when (insn.opcode) {
-                    Opcodes.ALOAD, Opcodes.ILOAD, Opcodes.FLOAD -> 1
-                    Opcodes.LLOAD, Opcodes.DLOAD -> 2
-                    Opcodes.ASTORE, Opcodes.ISTORE, Opcodes.FSTORE -> -1
-                    Opcodes.LSTORE, Opcodes.DSTORE -> -2
-                    else -> 0
-                }
-            }
-            is FieldInsnNode -> {
-                when (insn.opcode) {
-                    Opcodes.GETFIELD -> 0
-                    Opcodes.GETSTATIC -> 1
-                    Opcodes.PUTFIELD -> -2
-                    Opcodes.PUTSTATIC -> -1
-                    else -> 0
-                }
-            }
-            is MethodInsnNode -> {
-                val returnType = Type.getReturnType(insn.desc)
-                val argCount = Type.getArgumentTypes(insn.desc).size
-                val isStatic = insn.opcode == Opcodes.INVOKESTATIC
-                val consumed = argCount + (if (isStatic) 0 else 1)
-                val produced =
-                    if (returnType == Type.VOID_TYPE) {
-                        0
-                    } else {
-                        if (returnType.sort == Type.LONG || returnType.sort == Type.DOUBLE) 2 else 1
-                    }
-                produced - consumed
-            }
-            is InsnNode -> {
-                when (insn.opcode) {
-                    Opcodes.POP -> -1
-                    Opcodes.POP2 -> -2
-                    Opcodes.DUP -> 1
-                    Opcodes.DUP2 -> 2
-                    Opcodes.SWAP -> 0
-                    Opcodes.ACONST_NULL, Opcodes.ICONST_0, Opcodes.ICONST_1, Opcodes.ICONST_2,
-                    Opcodes.ICONST_3, Opcodes.ICONST_4, Opcodes.ICONST_5, Opcodes.ICONST_M1,
-                    -> 1
-                    Opcodes.LCONST_0, Opcodes.LCONST_1, Opcodes.DCONST_0, Opcodes.DCONST_1,
-                    Opcodes.FCONST_0, Opcodes.FCONST_1, Opcodes.FCONST_2,
-                    -> 2
-                    else -> 0
-                }
-            }
-            is LdcInsnNode -> {
-                val cst = insn.cst
-                when (cst) {
-                    is Long, is Double -> 2
-                    else -> 1
-                }
-            }
-            is IntInsnNode -> {
-                if (insn.opcode == Opcodes.BIPUSH || insn.opcode == Opcodes.SIPUSH) 1 else 0
-            }
-            else -> 0
-        }
-
-    /**
      * 转换 Shadow 字段和方法引用
      */
     private fun transformShadowReferences(
@@ -879,6 +741,55 @@ class CopyInjector(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Kotlin object 的非 @JvmStatic 方法体内，ALOAD 0 是 object receiver，而不是目标类 this。
+     *
+     * Shadow/Copy 调用已经在前一步改写到目标类，剩余 owner 仍为 ASM 类的实例调用需要继续通过 INSTANCE 调用。
+     */
+    private fun adaptKotlinObjectSelfReceivers(target: MethodNode) {
+        if (!isKotlinObject()) {
+            return
+        }
+
+        val asmClassName = Type.getType(asmInfo.asmClass).internalName
+        val instructions = target.instructions
+        val insns = instructions.toArray()
+        val frames =
+            Analyzer(SourceInterpreter()).analyze(asmClassName, target)
+
+        for (index in insns.indices) {
+            val insn = insns[index]
+            if (insn !is MethodInsnNode ||
+                insn.owner != asmClassName ||
+                insn.opcode == Opcodes.INVOKESTATIC ||
+                insn.name == "<init>"
+            ) {
+                continue
+            }
+
+            val frame = frames[index] ?: continue
+            val argumentSlots = Type.getArgumentTypes(insn.desc).sumOf { it.size }
+            val receiverIndex = frame.stackSize - argumentSlots - 1
+            if (receiverIndex < 0) {
+                continue
+            }
+
+            val receiverSource = frame.getStack(receiverIndex).insns.singleOrNull()
+            if (receiverSource is VarInsnNode &&
+                receiverSource.opcode == Opcodes.ALOAD &&
+                receiverSource.`var` == 0
+            ) {
+                instructions[receiverSource] =
+                    FieldInsnNode(
+                        Opcodes.GETSTATIC,
+                        asmClassName,
+                        "INSTANCE",
+                        "L$asmClassName;",
+                    )
             }
         }
     }

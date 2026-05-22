@@ -412,6 +412,41 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun kotlinObjectOverwriteStaticTargetPreservesObjectReceiverForHelperCall() {
+        AsmRegistry.register(ObjectInstanceStaticOverwriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticReturnTarget", staticReturnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticReturnTarget", transformed)
+        val result = clazz.getMethod("value").invoke(null)
+
+        assertEquals("helper", result)
+    }
+
+    @Test
+    fun kotlinObjectOverwriteInstanceTargetPreservesObjectReceiverForHelperCall() {
+        AsmRegistry.register(ObjectInstanceOverwriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("helper", result)
+    }
+
+    @Test
+    fun kotlinObjectCopyPreservesObjectReceiverForHelperCall() {
+        AsmRegistry.register(ObjectInstanceCopyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("copied").invoke(instance)
+
+        assertEquals("helper", result)
+    }
+
+    @Test
     fun accessorMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingAccessorMixin::class.java)
 
@@ -784,6 +819,30 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = original
     }
 
+    @AsmMixin("StaticReturnTarget")
+    object ObjectInstanceStaticOverwriteMixin {
+        @Overwrite("value()Ljava/lang/String;")
+        fun value(): String = helper()
+
+        fun helper(): String = "helper"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ObjectInstanceOverwriteMixin {
+        @Overwrite("value()Ljava/lang/String;")
+        fun value(): String = helper()
+
+        fun helper(): String = "helper"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ObjectInstanceCopyMixin {
+        @Copy("copied()Ljava/lang/String;")
+        fun copied(): String = helper()
+
+        fun helper(): String = "helper"
+    }
+
     @AsmMixin("AccessorConflictTarget")
     class ConflictingAccessorMixin {
         @Accessor("name")
@@ -1105,6 +1164,22 @@ class FrameworkReliabilityTest {
         val classNode = ClassNode()
         ClassReader(bytes).accept(classNode, ClassReader.EXPAND_FRAMES)
         return classNode
+    }
+
+    private fun loadClass(
+        className: String,
+        bytes: ByteArray,
+    ): Class<*> {
+        val loader =
+            object : ClassLoader(Thread.currentThread().contextClassLoader) {
+                override fun findClass(name: String): Class<*> {
+                    if (name == className) {
+                        return defineClass(name, bytes, 0, bytes.size)
+                    }
+                    throw ClassNotFoundException(name)
+                }
+            }
+        return loader.loadClass(className)
     }
 }
 
