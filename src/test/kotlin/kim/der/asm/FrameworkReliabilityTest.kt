@@ -264,6 +264,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeAfterInjectionPreservesCallReturnValueWhenUsingCallbackInfo() {
+        AsmRegistry.register(InvokeAfterCallbackInfoMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
     fun headInjectionDropsWideUnusedHandlerReturnValueOnVoidTarget() {
         AsmRegistry.register(HeadWideReturningHandlerMixin::class.java)
 
@@ -897,6 +909,23 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun inject(): Long = 1L
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InvokeAfterCallbackInfoMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.AFTER,
+            ),
+        )
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.isCancelled()
+        }
     }
 
     @AsmMixin("StrictTarget")

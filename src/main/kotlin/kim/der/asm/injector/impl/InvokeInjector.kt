@@ -219,7 +219,7 @@ class InvokeInjector(
             // 保存返回值
             saveReturnValue(il, returnType, returnVarIndex)
 
-            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, emptyArray(), emptyList(), null)
+            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, arrayOf(returnType), listOf(returnVarIndex), null)
 
             // 生成调用 ASM 方法的指令
             val mockTarget = createMockMethodNode(targetMethod, callInsn)
