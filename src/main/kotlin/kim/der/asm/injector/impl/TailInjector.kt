@@ -59,12 +59,7 @@ class TailInjector(
         for (insn in instructions.toArray()) {
             if (insn is InsnNode && insn.opcode in RETURN_OPS) {
                 // 复制指令列表以避免重复插入
-                val copy = InsnList()
-                val labelMap = mutableMapOf<LabelNode, LabelNode>()
-                for (node in il) {
-                    copy.add(node.clone(labelMap))
-                }
-                instructions.insertBefore(insn, copy)
+                instructions.insertBefore(insn, cloneInsnList(il))
                 foundReturn = true
             }
         }
@@ -77,6 +72,19 @@ class TailInjector(
         }
 
         return foundReturn || instructions.size() > 0
+    }
+
+    private fun cloneInsnList(source: InsnList): InsnList {
+        val labelMap = mutableMapOf<LabelNode, LabelNode>()
+        source.toArray().filterIsInstance<LabelNode>().forEach { label ->
+            labelMap[label] = LabelNode()
+        }
+
+        val cloned = InsnList()
+        for (insn in source) {
+            cloned.add(insn.clone(labelMap))
+        }
+        return cloned
     }
 
     /**

@@ -157,6 +157,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun tailInjectionWithClassMixinClonesLabelsSafely() {
+        AsmRegistry.register(ClassTailInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -670,6 +682,13 @@ class FrameworkReliabilityTest {
         @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN, inline = true)
         @JvmStatic
         fun injectInline(): String = "handler"
+    }
+
+    @AsmMixin("ReturnTarget")
+    class ClassTailInjectMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.TAIL)
+        fun injectTail() {
+        }
     }
 
     @AsmMixin("InlineTarget")
