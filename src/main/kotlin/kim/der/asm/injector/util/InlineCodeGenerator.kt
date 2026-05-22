@@ -40,6 +40,11 @@ object InlineCodeGenerator {
             extractAsmMethodNode(asmInfo, asmMethod)
                 ?: throw IllegalStateException("Cannot extract method ${asmMethod.name} from asm class ${asmInfo.asmClass.name}")
 
+        if (asmMethodNode.tryCatchBlocks.isNotEmpty()) {
+            throw IllegalStateException(
+                "Cannot inline method ${asmMethod.name} from ${asmInfo.asmClass.name}: try/catch blocks are not supported by inline injection",
+            )
+        }
         // 创建标签映射
         val labelMap = mutableMapOf<LabelNode, LabelNode>()
 
@@ -403,3 +408,4 @@ object InlineCodeGenerator {
         }
     }
 }
+
