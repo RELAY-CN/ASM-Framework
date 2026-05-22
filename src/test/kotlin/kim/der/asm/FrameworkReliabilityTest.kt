@@ -315,6 +315,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeInjectMatchesCallTargetWithoutOwner() {
+        AsmRegistry.register(InvokeWithoutOwnerTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "call" }
+        val handlerCalls = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>().filter {
+            it.name == "inject"
+        }
+
+        assertEquals(1, handlerCalls.size)
+    }
+
+    @Test
     fun redirectAllMethodsDoesNotRequireExplicitMethodTarget() {
         AsmRegistry.register(RedirectAllTrimMixin::class.java)
 
@@ -645,6 +659,21 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "keep()V")
         @JvmStatic
         fun modify(original: String): String = original
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InvokeWithoutOwnerTargetMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun inject() {
+        }
     }
 
     @AsmMixin("RedirectAllTarget")
