@@ -153,24 +153,22 @@ class InvokeInjector(
         // 保存方法调用的参数到局部变量
         val paramTypes = Type.getArgumentTypes(callInsn.desc)
         val savedParams = mutableListOf<Int>()
-        var varIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
+        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
 
         // 保存所有参数（从右到左）
         for (i in paramTypes.indices.reversed()) {
             val paramType = paramTypes[i]
-            val needsDoubleSlot = paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE
 
-            // 保存参数
-            saveParameter(il, paramType, varIndex)
-            savedParams.add(0, varIndex)
-
-            varIndex -= if (needsDoubleSlot) 2 else 1
+            nextVarIndex -= paramType.size
+            saveParameter(il, paramType, nextVarIndex)
+            savedParams.add(0, nextVarIndex)
         }
 
         // 如果是实例方法调用，保存实例引用
         var savedInstanceIndex: Int? = null
         if (callInsn.opcode != Opcodes.INVOKESTATIC) {
-            savedInstanceIndex = varIndex
+            nextVarIndex -= 1
+            savedInstanceIndex = nextVarIndex
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
         }
 
@@ -268,21 +266,20 @@ class InvokeInjector(
         // 保存参数
         val paramTypes = Type.getArgumentTypes(callInsn.desc)
         val savedParams = mutableListOf<Int>()
-        var varIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
+        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
 
         for (i in paramTypes.indices.reversed()) {
             val paramType = paramTypes[i]
-            val needsDoubleSlot = paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE
 
-            saveParameter(il, paramType, varIndex)
-            savedParams.add(0, varIndex)
-
-            varIndex -= if (needsDoubleSlot) 2 else 1
+            nextVarIndex -= paramType.size
+            saveParameter(il, paramType, nextVarIndex)
+            savedParams.add(0, nextVarIndex)
         }
 
         var savedInstanceIndex: Int? = null
         if (callInsn.opcode != Opcodes.INVOKESTATIC) {
-            savedInstanceIndex = varIndex
+            nextVarIndex -= 1
+            savedInstanceIndex = nextVarIndex
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
         }
 
