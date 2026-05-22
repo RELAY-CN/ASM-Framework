@@ -88,8 +88,7 @@ object BytecodeUtil {
         }
         return CONSTANTS_ALL.contains(insn.opcode) ||
             insn is LdcInsnNode ||
-            (insn is IntInsnNode && (insn.opcode == Opcodes.BIPUSH || insn.opcode == Opcodes.SIPUSH)) ||
-            (insn is TypeInsnNode && insn.opcode >= Opcodes.CHECKCAST)
+            (insn is IntInsnNode && (insn.opcode == Opcodes.BIPUSH || insn.opcode == Opcodes.SIPUSH))
     }
 
     /**
@@ -107,12 +106,6 @@ object BytecodeUtil {
                     return insn.operand
                 }
                 throw IllegalArgumentException("IntInsnNode with invalid opcode ${insn.opcode} in getConstant")
-            }
-            is TypeInsnNode -> {
-                if (insn.opcode >= Opcodes.CHECKCAST) {
-                    return Type.getObjectType(insn.desc)
-                }
-                return null // NEW 和 ANEWARRAY 不算常量
             }
         }
 
@@ -140,12 +133,6 @@ object BytecodeUtil {
                     is Type -> Type.getType("Ljava/lang/Class;")
                     else -> null
                 }
-            }
-            is TypeInsnNode -> {
-                if (insn.opcode >= Opcodes.CHECKCAST) {
-                    return Type.getType("Ljava/lang/Class;")
-                }
-                return null
             }
         }
 

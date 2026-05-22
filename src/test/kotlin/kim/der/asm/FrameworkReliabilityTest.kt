@@ -251,6 +251,40 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantDoesNotTreatNewInstructionAsClassConstant() {
+        AsmRegistry.register(ClassConstantModifyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "create" }
+        val hasNewStringBuilder = method.instructions.toArray().any {
+            it is org.objectweb.asm.tree.TypeInsnNode &&
+                it.opcode == Opcodes.NEW &&
+                it.desc == "java/lang/StringBuilder"
+        }
+
+        assertEquals(true, hasNewStringBuilder)
+    }
+
+    @Test
+    fun modifyConstantDoesNotTreatCheckcastAsClassConstant() {
+        AsmRegistry.register(CheckcastConstantModifyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "cast" }
+        val methodCalls = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>().map { it.name }
+        val hasCheckcast = method.instructions.toArray().any {
+            it is org.objectweb.asm.tree.TypeInsnNode &&
+                it.opcode == Opcodes.CHECKCAST &&
+                it.desc == "java/lang/String"
+        }
+
+        assertEquals(true, hasCheckcast)
+        assertEquals(false, methodCalls.contains("modify"))
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -446,6 +480,20 @@ class FrameworkReliabilityTest {
         fun invokeTarget(): String = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("NewInstructionTarget")
+    object ClassConstantModifyMixin {
+        @ModifyConstant(method = "create()Ljava/lang/StringBuilder;")
+        @JvmStatic
+        fun modify(type: Class<*>): Class<*> = type
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object CheckcastConstantModifyMixin {
+        @ModifyConstant(method = "cast(Ljava/lang/Object;)Ljava/lang/String;")
+        @JvmStatic
+        fun modify(type: Class<*>): Class<*> = type
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -550,6 +598,37 @@ class FrameworkReliabilityTest {
             visitLdcInsn("existing")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun newInstructionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NewInstructionTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "create", "()Ljava/lang/StringBuilder;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun castInstructionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "CastInstructionTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "cast", "(Ljava/lang/Object;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()
