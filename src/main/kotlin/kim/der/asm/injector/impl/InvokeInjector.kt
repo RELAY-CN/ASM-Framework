@@ -15,6 +15,7 @@ import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
 
 /**
  * Invoke 注入器
@@ -175,13 +176,11 @@ class InvokeInjector(
 
         val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
 
-        // 生成调用 ASM 方法的指令
-        val mockTarget = createMockMethodNode(targetMethod, callInsn)
-        AsmMethodCallGenerator.generateMethodCall(
+        // 生成调用 ASM 方法的指令，参数来自已保存的调用点参数
+        generateCallSiteHandlerCall(
             il,
-            asmMethod,
-            asmInfo,
-            mockTarget,
+            paramTypes,
+            savedParams,
             callbackVarIndex,
         )
         dropUnusedHandlerReturnValue(il)
@@ -325,6 +324,119 @@ class InvokeInjector(
         }
 
         il.add(InsnNode(if (returnType.size == 2) Opcodes.POP2 else Opcodes.POP))
+    }
+
+    private fun generateCallSiteHandlerCall(
+        il: InsnList,
+        callParamTypes: Array<Type>,
+        savedParamIndexes: List<Int>,
+        callbackVarIndex: Int?,
+    ) {
+        val instanceType = Type.getType(asmInfo.asmClass)
+        val useStaticCall = Modifier.isStatic(asmMethod.modifiers)
+
+        if (!useStaticCall) {
+            loadAsmHandlerReceiver(il, instanceType)
+        }
+
+        if (callbackVarIndex != null) {
+            il.add(VarInsnNode(Opcodes.ALOAD, callbackVarIndex))
+        }
+
+        loadCallSiteHandlerArguments(il, callParamTypes, savedParamIndexes, callbackVarIndex != null)
+
+        il.add(
+            MethodInsnNode(
+                if (useStaticCall) Opcodes.INVOKESTATIC else Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun loadAsmHandlerReceiver(
+        il: InsnList,
+        instanceType: Type,
+    ) {
+        if (isKotlinObject()) {
+            il.add(
+                FieldInsnNode(
+                    Opcodes.GETSTATIC,
+                    instanceType.internalName,
+                    "INSTANCE",
+                    "L${instanceType.internalName};",
+                ),
+            )
+            return
+        }
+
+        val targetClassInternalName =
+            asmInfo.targets.firstOrNull()?.replace('.', '/')
+                ?: instanceType.internalName
+        val singletonFieldName = "\$asmInstance\$${asmInfo.asmClass.simpleName}"
+        val singletonFieldDesc = "L${instanceType.internalName};"
+        val notNullLabel = LabelNode()
+        val endLabel = LabelNode()
+
+        il.add(FieldInsnNode(Opcodes.GETSTATIC, targetClassInternalName, singletonFieldName, singletonFieldDesc))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(JumpInsnNode(Opcodes.IFNONNULL, notNullLabel))
+        il.add(InsnNode(Opcodes.POP))
+        il.add(TypeInsnNode(Opcodes.NEW, instanceType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, instanceType.internalName, "<init>", "()V", false))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(FieldInsnNode(Opcodes.PUTSTATIC, targetClassInternalName, singletonFieldName, singletonFieldDesc))
+        il.add(JumpInsnNode(Opcodes.GOTO, endLabel))
+        il.add(notNullLabel)
+        il.add(endLabel)
+    }
+
+    private fun loadCallSiteHandlerArguments(
+        il: InsnList,
+        callParamTypes: Array<Type>,
+        savedParamIndexes: List<Int>,
+        skipCallbackInfo: Boolean,
+    ) {
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        val callParamStart = if (skipCallbackInfo) 1 else 0
+        val requestedCallParamCount = asmParamTypes.size - callParamStart
+
+        if (requestedCallParamCount > callParamTypes.size) {
+            throw IllegalStateException(
+                "Invoke handler ${asmMethod.name} requests $requestedCallParamCount call argument(s), " +
+                    "but matched call has only ${callParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedCallParamCount) {
+            val expected = callParamTypes[index]
+            val actual = asmParamTypes[callParamStart + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Invoke handler ${asmMethod.name} parameter #${callParamStart + index} mismatch: " +
+                        "expected call argument $expected, actual $actual",
+                )
+            }
+
+            InstructionUtil.loadParam(expected, savedParamIndexes[index]).let { il.add(it) }
+        }
+    }
+
+    private fun isHandlerParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
+            return actual.sort == Type.OBJECT &&
+                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        }
+        return false
     }
 
     /**
