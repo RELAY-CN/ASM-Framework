@@ -251,6 +251,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeBeforeInjectionMapsStaticCallArguments() {
+        AsmRegistry.register(InvokeBeforeStaticCallArgumentMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticInvokeArgTarget", staticInvokeArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticInvokeArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("42", result)
+    }
+
+    @Test
     fun modifyArgWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyArgParametersMixin::class.java)
 
@@ -808,6 +820,23 @@ class FrameworkReliabilityTest {
         fun inject(): Long = 1L
     }
 
+    @AsmMixin("StaticInvokeArgTarget")
+    object InvokeBeforeStaticCallArgumentMixin {
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(value: Int) {
+            value.toString()
+        }
+    }
+
     @AsmMixin("ArgTarget")
     object TooManyModifyArgParametersMixin {
         @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
@@ -1175,6 +1204,23 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun staticInvokeArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticInvokeArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitIntInsn(Opcodes.BIPUSH, 42)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun argTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ArgTarget", null, "java/lang/Object", null)
