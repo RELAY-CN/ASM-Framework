@@ -58,9 +58,6 @@ class ModifyArgInjector(
             varIndex += if (pType.sort == Type.LONG || pType.sort == Type.DOUBLE) 2 else 1
         }
 
-        // 加载原始参数值用于 ASM 方法调用（直接加载，不需要保存到临时变量）
-        loadFromVariable(il, paramType, varIndex)
-
         // 调用 ASM 方法修改参数
         // ASM 方法应该接收原始参数值并返回修改后的值
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
@@ -75,29 +72,15 @@ class ModifyArgInjector(
             throw IllegalArgumentException("ASM method return type ($asmReturnType) must match parameter type ($paramType)")
         }
 
-        // 创建模拟方法节点，只有一个参数（要修改的参数）
-        val mockTarget = createMockMethodNode(target, argIndex, paramType)
-
         // 获取 ASM 实例并生成调用
         val instanceType =
             Type
                 .getType(asmInfo.asmClass)
         val isKotlinObject = isKotlinObject()
         val isMethodStatic = (asmMethod.modifiers and Modifier.STATIC) != 0
-        val targetIsStatic = (target.access and Opcodes.ACC_STATIC) != 0
 
-        // 确定调用方式
-        val useStaticCall =
-            if (isMethodStatic) {
-                // 方法本身是静态的（@JvmStatic），使用 INVOKESTATIC
-                true
-            } else if (isKotlinObject && targetIsStatic) {
-                // Kotlin object 的方法，但目标方法是静态的，转换为静态调用
-                true
-            } else {
-                // 需要实例调用
-                false
-            }
+        // 只有方法本身是静态的（例如 @JvmStatic 生成的方法）才能使用 INVOKESTATIC。
+        val useStaticCall = isMethodStatic
 
         if (!useStaticCall) {
             if (isKotlinObject) {
@@ -130,7 +113,9 @@ class ModifyArgInjector(
             }
         }
 
-        // 参数已经在栈顶（刚刚加载的原始参数值）
+        // 实例调用必须先加载 receiver，再加载方法参数。
+        loadFromVariable(il, paramType, varIndex)
+
         il.add(
             MethodInsnNode(
                 if (useStaticCall) Opcodes.INVOKESTATIC else Opcodes.INVOKEVIRTUAL,
