@@ -62,6 +62,41 @@ class ModifyReturnValueInjector(
                 // 确定第一个参数是否是返回值
                 val firstParamIsReturnValue = asmParamTypes.isNotEmpty() && asmParamTypes[0] == returnType
 
+                // 获取 ASM 实例并生成调用
+                val instanceType = Type.getType(asmInfo.asmClass)
+                val isKotlinObject = isKotlinObject()
+                val isMethodStatic = (asmMethod.modifiers and Modifier.STATIC) != 0
+
+                // 只有方法本身是静态的（例如 @JvmStatic 生成的方法）才能使用 INVOKESTATIC。
+                val useStaticCall = isMethodStatic
+
+                if (!useStaticCall) {
+                    if (isKotlinObject) {
+                        // Kotlin object：加载 INSTANCE 字段
+                        il.add(
+                            FieldInsnNode(
+                                Opcodes.GETSTATIC,
+                                instanceType.internalName,
+                                "INSTANCE",
+                                "L${instanceType.internalName};",
+                            ),
+                        )
+                    } else {
+                        // 普通类：创建新实例
+                        il.add(TypeInsnNode(Opcodes.NEW, instanceType.internalName))
+                        il.add(InsnNode(Opcodes.DUP))
+                        il.add(
+                            MethodInsnNode(
+                                Opcodes.INVOKESPECIAL,
+                                instanceType.internalName,
+                                "<init>",
+                                "()V",
+                                false,
+                            ),
+                        )
+                    }
+                }
+
                 // 如果第一个参数是返回值，从保存的局部变量加载返回值
                 if (firstParamIsReturnValue) {
                     loadReturnValueForModification(il, returnType, returnVar)
@@ -102,53 +137,6 @@ class ModifyReturnValueInjector(
                     )
                 }
 
-                // 获取 ASM 实例并生成调用
-                val instanceType = Type.getType(asmInfo.asmClass)
-                val isKotlinObject = isKotlinObject()
-                val isMethodStatic = (asmMethod.modifiers and Modifier.STATIC) != 0
-                val targetIsStatic = (target.access and Opcodes.ACC_STATIC) != 0
-
-                // 确定调用方式
-                val useStaticCall =
-                    if (isMethodStatic) {
-                        // 方法本身是静态的（@JvmStatic），使用 INVOKESTATIC
-                        true
-                    } else if (isKotlinObject && targetIsStatic) {
-                        // Kotlin object 的方法，但目标方法是静态的，转换为静态调用
-                        true
-                    } else {
-                        // 需要实例调用
-                        false
-                    }
-
-                if (!useStaticCall) {
-                    if (isKotlinObject) {
-                        // Kotlin object：加载 INSTANCE 字段
-                        il.add(
-                            FieldInsnNode(
-                                Opcodes.GETSTATIC,
-                                instanceType.internalName,
-                                "INSTANCE",
-                                "L${instanceType.internalName};",
-                            ),
-                        )
-                    } else {
-                        // 普通类：创建新实例
-                        il.add(TypeInsnNode(Opcodes.NEW, instanceType.internalName))
-                        il.add(InsnNode(Opcodes.DUP))
-                        il.add(
-                            MethodInsnNode(
-                                Opcodes.INVOKESPECIAL,
-                                instanceType.internalName,
-                                "<init>",
-                                "()V",
-                                false,
-                            ),
-                        )
-                    }
-                }
-
-                // 参数（返回值）已经在栈顶
                 il.add(
                     MethodInsnNode(
                         if (useStaticCall) Opcodes.INVOKESTATIC else Opcodes.INVOKEVIRTUAL,

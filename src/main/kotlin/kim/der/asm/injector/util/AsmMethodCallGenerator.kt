@@ -38,20 +38,10 @@ object AsmMethodCallGenerator {
         val instanceType = Type.getType(asmInfo.asmClass)
         val isKotlinObject = isKotlinObject(asmInfo)
         val isMethodStatic = (asmMethod.modifiers and Modifier.STATIC) != 0
-        val targetIsStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
 
         // 确定调用方式
-        val useStaticCall =
-            if (isMethodStatic) {
-                // 方法本身是静态的（@JvmStatic），使用 INVOKESTATIC
-                true
-            } else if (isKotlinObject && targetIsStatic) {
-                // Kotlin object 的方法，但目标方法是静态的，转换为静态调用
-                true
-            } else {
-                // 需要实例调用
-                false
-            }
+        // 只有方法本身是静态的（例如 @JvmStatic 生成的方法）才能使用 INVOKESTATIC。
+        val useStaticCall = isMethodStatic
 
         // 如果需要实例调用，加载实例
         if (!useStaticCall) {

@@ -336,6 +336,82 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun kotlinObjectHandlerForStaticTargetUsesInstanceCallWhenNotJvmStatic() {
+        AsmRegistry.register(ObjectInstanceStaticHeadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticHeadTarget", staticHeadTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "run" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ObjectInstanceStaticHeadMixin::class.java)
+        val handlerCalls = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>().filter {
+            it.owner == mixinOwner && it.name == "inject"
+        }
+        val instanceLoads = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.FieldInsnNode>().filter {
+            it.owner == mixinOwner && it.name == "INSTANCE" && it.opcode == Opcodes.GETSTATIC
+        }
+
+        assertEquals(1, handlerCalls.size)
+        assertEquals(Opcodes.INVOKEVIRTUAL, handlerCalls.single().opcode)
+        assertEquals(1, instanceLoads.size)
+    }
+
+    @Test
+    fun kotlinObjectModifyArgHandlerForStaticTargetUsesInstanceCallWhenNotJvmStatic() {
+        AsmRegistry.register(ObjectInstanceStaticModifyArgMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticArgTarget", staticArgTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "echo" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ObjectInstanceStaticModifyArgMixin::class.java)
+        val instructions = method.instructions.toArray()
+        val callIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode && it.owner == mixinOwner && it.name == "modify"
+        }
+        assertEquals(true, callIndex >= 0)
+        val call = instructions[callIndex] as org.objectweb.asm.tree.MethodInsnNode
+        val instructionsBeforeCall = instructions.take(callIndex)
+        val instanceLoad = instructionsBeforeCall.filterIsInstance<org.objectweb.asm.tree.FieldInsnNode>().lastOrNull {
+            it.owner == mixinOwner && it.name == "INSTANCE" && it.opcode == Opcodes.GETSTATIC
+        }
+        val argumentLoad = instructionsBeforeCall.filterIsInstance<org.objectweb.asm.tree.VarInsnNode>().lastOrNull {
+            it.opcode == Opcodes.ALOAD && it.`var` == 0
+        }
+
+        assertEquals(Opcodes.INVOKEVIRTUAL, call.opcode)
+        assertEquals(true, instanceLoad != null)
+        assertEquals(true, argumentLoad != null)
+        assertEquals(true, instructionsBeforeCall.indexOf(instanceLoad) < instructionsBeforeCall.indexOf(argumentLoad))
+    }
+
+    @Test
+    fun kotlinObjectModifyReturnHandlerForStaticTargetUsesInstanceCallWhenNotJvmStatic() {
+        AsmRegistry.register(ObjectInstanceStaticModifyReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticReturnTarget", staticReturnTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "value" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ObjectInstanceStaticModifyReturnMixin::class.java)
+        val instructions = method.instructions.toArray()
+        val callIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode && it.owner == mixinOwner && it.name == "modify"
+        }
+        assertEquals(true, callIndex >= 0)
+        val call = instructions[callIndex] as org.objectweb.asm.tree.MethodInsnNode
+        val instructionsBeforeCall = instructions.take(callIndex)
+        val instanceLoad = instructionsBeforeCall.filterIsInstance<org.objectweb.asm.tree.FieldInsnNode>().lastOrNull {
+            it.owner == mixinOwner && it.name == "INSTANCE" && it.opcode == Opcodes.GETSTATIC
+        }
+        val returnValueLoad = instructionsBeforeCall.filterIsInstance<org.objectweb.asm.tree.VarInsnNode>().lastOrNull {
+            it.opcode == Opcodes.ALOAD && it.`var` == 0
+        }
+
+        assertEquals(Opcodes.INVOKEVIRTUAL, call.opcode)
+        assertEquals(true, instanceLoad != null)
+        assertEquals(true, returnValueLoad != null)
+        assertEquals(true, instructionsBeforeCall.indexOf(instanceLoad) < instructionsBeforeCall.indexOf(returnValueLoad))
+    }
+
+    @Test
     fun accessorMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingAccessorMixin::class.java)
 
@@ -689,6 +765,25 @@ class FrameworkReliabilityTest {
         fun redirect(value: String): String = value
     }
 
+    @AsmMixin("StaticHeadTarget")
+    object ObjectInstanceStaticHeadMixin {
+        @AsmInject(method = "run()V")
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("StaticArgTarget")
+    object ObjectInstanceStaticModifyArgMixin {
+        @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("StaticReturnTarget")
+    object ObjectInstanceStaticModifyReturnMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/String;")
+        fun modify(original: String): String = original
+    }
+
     @AsmMixin("AccessorConflictTarget")
     class ConflictingAccessorMixin {
         @Accessor("name")
@@ -774,6 +869,50 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticHeadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticHeadTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "echo", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticReturnTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticReturnTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("value")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 0)
             visitEnd()
         }
         cw.visitEnd()
