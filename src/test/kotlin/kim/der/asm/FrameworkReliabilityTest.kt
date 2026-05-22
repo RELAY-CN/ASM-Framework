@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Invoker
 import kim.der.asm.api.annotation.ModifyArg
 import kim.der.asm.api.annotation.ModifyConstant
 import kim.der.asm.api.annotation.ModifyReturnValue
@@ -232,6 +233,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun accessorMethodConflictFailsDuringTransform() {
+        AsmRegistry.register(ConflictingAccessorMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("AccessorConflictTarget", accessorConflictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun invokerMethodConflictFailsDuringTransform() {
+        AsmRegistry.register(ConflictingInvokerMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("InvokerConflictTarget", invokerConflictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -415,6 +434,18 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("AccessorConflictTarget")
+    class ConflictingAccessorMixin {
+        @Accessor("name")
+        fun getName(): String = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("InvokerConflictTarget")
+    class ConflictingInvokerMixin {
+        @Invoker("target")
+        fun invokeTarget(): String = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -485,6 +516,42 @@ class FrameworkReliabilityTest {
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldTarget", null, "java/lang/Object", null)
         cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
         addDefaultConstructor(cw)
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun accessorConflictTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "AccessorConflictTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "getName", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("existing")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun invokerConflictTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokerConflictTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "target", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "invokeTarget", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("existing")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
         cw.visitEnd()
         return cw.toByteArray()
     }

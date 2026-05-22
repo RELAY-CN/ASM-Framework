@@ -407,6 +407,7 @@ class TargetClassContext(
 
         // 生成访问器方法
         val accessorMethod = generateAccessorMethod(method, targetField, targetFieldName)
+        ensureGeneratedMethodAbsent(accessorMethod.name, accessorMethod.desc)
         classNode.methods.add(accessorMethod)
 
         return true
@@ -433,6 +434,7 @@ class TargetClassContext(
 
         // 生成调用器方法
         val invokerMethod = generateInvokerMethod(method, targetMethod, targetMethodName)
+        ensureGeneratedMethodAbsent(invokerMethod.name, invokerMethod.desc)
         classNode.methods.add(invokerMethod)
 
         return true
@@ -651,6 +653,16 @@ class TargetClassContext(
         methodNode.maxStack = maxStack
 
         return methodNode
+    }
+
+    private fun ensureGeneratedMethodAbsent(
+        methodName: String,
+        methodDesc: String,
+    ) {
+        val existingMethod = classNode.methods.find { it.name == methodName && it.desc == methodDesc }
+        if (existingMethod != null) {
+            throw IllegalStateException("Generated method $methodName$methodDesc already exists in $className")
+        }
     }
 
     /**
