@@ -50,6 +50,9 @@ class ModifyConstantInjector(
             // 检查 ASM 方法的返回类型是否匹配
             val asmReturnType = Type.getReturnType(asmMethod)
             if (asmReturnType != constantType) {
+                if (constantValue == null) {
+                    continue
+                }
                 throw IllegalArgumentException(
                     "ASM method ${asmMethod.name} return type ($asmReturnType) must match constant type ($constantType)",
                 )
