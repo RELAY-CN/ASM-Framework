@@ -9,6 +9,8 @@ import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.ModifyArg
+import kim.der.asm.api.annotation.ModifyConstant
 import kim.der.asm.api.annotation.ModifyReturnValue
 import kim.der.asm.api.annotation.Redirect
 import kim.der.asm.api.annotation.Copy
@@ -143,6 +145,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgWithTooManyHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(TooManyModifyArgParametersMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ArgTarget", argTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyConstantWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleModifyConstantMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -260,6 +280,23 @@ class FrameworkReliabilityTest {
         fun replace(): Int = 1
     }
 
+    @AsmMixin("ArgTarget")
+    object TooManyModifyArgParametersMixin {
+        @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
+        @JvmStatic
+        fun modify(
+            original: String,
+            unavailable: String,
+        ): String = "$original$unavailable"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object IncompatibleModifyConstantMixin {
+        @ModifyConstant(method = "value()Ljava/lang/String;", constant = "value")
+        @JvmStatic
+        fun modify(original: String): Int = original.length
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -306,6 +343,20 @@ class FrameworkReliabilityTest {
             visitLdcInsn("value")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun argTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "echo", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()
