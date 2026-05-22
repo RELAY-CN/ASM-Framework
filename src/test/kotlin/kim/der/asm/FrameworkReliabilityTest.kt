@@ -163,6 +163,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantWithoutExplicitValueSkipsOtherConstantTypes() {
+        AsmRegistry.register(StringOnlyModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "value" }
+        val constants = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.LdcInsnNode>().map { it.cst }
+        val methodCalls = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>().map { it.name }
+
+        assertEquals(true, constants.contains(1))
+        assertEquals(true, methodCalls.contains("modify"))
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -297,6 +311,13 @@ class FrameworkReliabilityTest {
         fun modify(original: String): Int = original.length
     }
 
+    @AsmMixin("MixedConstantTarget")
+    object StringOnlyModifyConstantMixin {
+        @ModifyConstant(method = "value()Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -357,6 +378,22 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun mixedConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(1)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("original")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
             visitEnd()
         }
         cw.visitEnd()
