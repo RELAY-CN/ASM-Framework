@@ -14,6 +14,7 @@ import kim.der.asm.api.annotation.ModifyArg
 import kim.der.asm.api.annotation.ModifyConstant
 import kim.der.asm.api.annotation.ModifyReturnValue
 import kim.der.asm.api.annotation.Redirect
+import kim.der.asm.api.annotation.RedirectAllMethods
 import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Overwrite
 import kim.der.asm.api.annotation.RemoveMethod
@@ -230,6 +231,58 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun injectWithMissingTargetMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingInjectTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyArgWithMissingTargetMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingModifyArgTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun redirectWithMissingTargetMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingRedirectTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyReturnValueWithMissingTargetMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingModifyReturnTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyConstantWithMissingTargetMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingModifyConstantTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun redirectAllMethodsDoesNotRequireExplicitMethodTarget() {
+        AsmRegistry.register(RedirectAllTrimMixin::class.java)
+
+        AsmProcessor().transform("RedirectAllTarget", redirectAllTargetBytes(), javaClass.classLoader)
     }
 
     @Test
@@ -477,6 +530,61 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("StrictTarget")
+    object MissingInjectTargetMixin {
+        @AsmInject(method = "missing()V")
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingModifyArgTargetMixin {
+        @ModifyArg(method = "missing(Ljava/lang/String;)Ljava/lang/String;", index = 0)
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingRedirectTargetMixin {
+        @Redirect(
+            method = "missing()V",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingModifyReturnTargetMixin {
+        @ModifyReturnValue(method = "missing()Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingModifyConstantTargetMixin {
+        @ModifyConstant(method = "missing()Ljava/lang/String;", constant = "value")
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("RedirectAllTarget")
+    @RedirectAllMethods
+    object RedirectAllTrimMixin {
+        @Redirect(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
+    }
+
     @AsmMixin("AccessorConflictTarget")
     class ConflictingAccessorMixin {
         @Accessor("name")
@@ -551,6 +659,23 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun redirectAllTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RedirectAllTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "call", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" value ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun returnTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReturnTarget", null, "java/lang/Object", null)

@@ -133,7 +133,7 @@ class TargetClassContext(
                         transformed = true
                     }
                 }
-                redirectAnnotation != null -> {
+                redirectAnnotation != null && redirectAllAnnotation == null -> {
                     if (applyRedirect(method, redirectAnnotation)) {
                         transformed = true
                     }
@@ -376,7 +376,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyConstant,
     ): Boolean {
-        val targetMethod = findTargetMethod(annotation.method) ?: return false
+        val targetMethod = requireTargetMethod(annotation.method)
         val injector =
             AsmInjectorFactory.createModifyConstantInjector(
                 method,
@@ -679,7 +679,7 @@ class TargetClassContext(
         method: Method,
         annotation: AsmInject,
     ): Boolean {
-        val targetMethod = findTargetMethod(annotation.method) ?: return false
+        val targetMethod = requireTargetMethod(annotation.method)
 
         // 如果设置了 inline=true，则内联 ASM 方法的字节码
         if (annotation.inline) {
@@ -787,7 +787,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyArg,
     ): Boolean {
-        val targetMethod = findTargetMethod(annotation.method) ?: return false
+        val targetMethod = requireTargetMethod(annotation.method)
         val injector = AsmInjectorFactory.createModifyArgInjector(method, asmInfo, annotation.index)
         return injector.inject(targetMethod)
     }
@@ -799,7 +799,7 @@ class TargetClassContext(
         method: Method,
         annotation: Redirect,
     ): Boolean {
-        val targetMethod = findTargetMethod(annotation.method) ?: return false
+        val targetMethod = requireTargetMethod(annotation.method)
 
         // 组合 target 和 at.target 来构建完整的方法签名
         val redirectTarget = buildRedirectTarget(annotation.target, annotation.at.target)
@@ -975,7 +975,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyReturnValue,
     ): Boolean {
-        val targetMethod = findTargetMethod(annotation.method) ?: return false
+        val targetMethod = requireTargetMethod(annotation.method)
         val injector = AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo)
         return injector.inject(targetMethod)
     }
@@ -1005,6 +1005,10 @@ class TargetClassContext(
             method.name == methodName && (methodDesc.isEmpty() || method.desc == methodDesc)
         }
     }
+
+    private fun requireTargetMethod(methodSignature: String): MethodNode =
+        findTargetMethod(methodSignature)
+            ?: throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
 
     /**
      * 解析方法签名
