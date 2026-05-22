@@ -207,27 +207,65 @@ class InvokeInjector(
         targetMethod: MethodNode,
     ) {
         // 查找调用后的位置
-        var nextInsn = callInsn.next
+        val nextInsn = callInsn.next
+        val paramTypes = Type.getArgumentTypes(callInsn.desc)
+        val savedParams = mutableListOf<Int>()
+        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
+        val beforeCall = InsnList()
+
+        for (i in paramTypes.indices.reversed()) {
+            val paramType = paramTypes[i]
+
+            nextVarIndex -= paramType.size
+            saveParameter(beforeCall, paramType, nextVarIndex)
+            savedParams.add(0, nextVarIndex)
+        }
+
+        var savedInstanceIndex: Int? = null
+        if (callInsn.opcode != Opcodes.INVOKESTATIC) {
+            nextVarIndex -= 1
+            savedInstanceIndex = nextVarIndex
+            beforeCall.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
+        }
+
+        if (savedInstanceIndex != null) {
+            beforeCall.add(VarInsnNode(Opcodes.ALOAD, savedInstanceIndex))
+        }
+
+        for (savedIndex in savedParams) {
+            val paramIndex = savedParams.indexOf(savedIndex)
+            val paramType = paramTypes[paramIndex]
+            InstructionUtil.loadParam(paramType, savedIndex).let { beforeCall.add(it) }
+        }
+
+        if (beforeCall.size() > 0) {
+            instructions.insertBefore(callInsn, beforeCall)
+        }
 
         // 跳过调用本身（如果有返回值，跳过返回值）
         val returnType = Type.getReturnType(callInsn.desc)
         if (returnType != Type.VOID_TYPE) {
             // 返回值在栈顶，需要保存
             val il = InsnList()
-            val returnVarIndex = allocateVariableForReturn(targetMethod, returnType)
+            val returnVarIndex = allocateVariableAfterSavedCallState(targetMethod, paramTypes, savedParams, savedInstanceIndex)
 
             // 保存返回值
             saveReturnValue(il, returnType, returnVarIndex)
 
-            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, arrayOf(returnType), listOf(returnVarIndex), null)
+            val callbackVarIndex =
+                createCallbackInfoIfNeeded(
+                    il,
+                    targetMethod,
+                    paramTypes + returnType,
+                    savedParams + returnVarIndex,
+                    savedInstanceIndex,
+                )
 
             // 生成调用 ASM 方法的指令
-            val mockTarget = createMockMethodNode(targetMethod, callInsn)
-            AsmMethodCallGenerator.generateMethodCall(
+            generateCallSiteHandlerCall(
                 il,
-                asmMethod,
-                asmInfo,
-                mockTarget,
+                paramTypes,
+                savedParams,
                 callbackVarIndex,
             )
             dropUnusedHandlerReturnValue(il)
@@ -239,13 +277,11 @@ class InvokeInjector(
         } else {
             // 无返回值，直接在调用后插入
             val il = InsnList()
-            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, emptyArray(), emptyList(), null)
-            val mockTarget = createMockMethodNode(targetMethod, callInsn)
-            AsmMethodCallGenerator.generateMethodCall(
+            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
+            generateCallSiteHandlerCall(
                 il,
-                asmMethod,
-                asmInfo,
-                mockTarget,
+                paramTypes,
+                savedParams,
                 callbackVarIndex,
             )
             dropUnusedHandlerReturnValue(il)
