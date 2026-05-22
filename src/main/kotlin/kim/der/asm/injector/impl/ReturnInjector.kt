@@ -190,7 +190,7 @@ class ReturnInjector(
 
                 // 如果方法有返回值且目标方法是 void，需要弹出
                 if (Type.getReturnType(asmMethod) != Type.VOID_TYPE && returnType == Type.VOID_TYPE) {
-                    il.add(InsnNode(Opcodes.POP))
+                    AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
                 }
 
                 instructions.insertBefore(insn, il)

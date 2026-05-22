@@ -175,6 +175,19 @@ object AsmMethodCallGenerator {
             Type.getReturnType(targetMethod.desc) == Type.VOID_TYPE
 
     /**
+     * 弹出 ASM 方法未使用的返回值。
+     */
+    fun generatePopReturnValue(
+        il: InsnList,
+        asmMethod: Method,
+    ) {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType != Type.VOID_TYPE) {
+            il.add(InsnNode(if (returnType.size == 2) Opcodes.POP2 else Opcodes.POP))
+        }
+    }
+
+    /**
      * 检查是否是 Kotlin object（有 INSTANCE 字段）
      */
     private fun isKotlinObject(asmInfo: AsmInfo): Boolean =

@@ -264,6 +264,39 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun headInjectionDropsWideUnusedHandlerReturnValueOnVoidTarget() {
+        AsmRegistry.register(HeadWideReturningHandlerMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StrictTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("keep").invoke(instance)
+    }
+
+    @Test
+    fun tailInjectionDropsWideUnusedHandlerReturnValueOnVoidTarget() {
+        AsmRegistry.register(TailWideReturningHandlerMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StrictTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("keep").invoke(instance)
+    }
+
+    @Test
+    fun returnInjectionDropsWideUnusedHandlerReturnValueOnVoidTarget() {
+        AsmRegistry.register(ReturnWideReturningHandlerMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StrictTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("keep").invoke(instance)
+    }
+
+    @Test
     fun invokeBeforeInjectionMapsStaticCallArguments() {
         AsmRegistry.register(InvokeBeforeStaticCallArgumentMixin::class.java)
 
@@ -850,6 +883,27 @@ class FrameworkReliabilityTest {
                 shift = Shift.AFTER,
             ),
         )
+        @JvmStatic
+        fun inject(): Long = 1L
+    }
+
+    @AsmMixin("StrictTarget")
+    object HeadWideReturningHandlerMixin {
+        @AsmInject(method = "keep()V", target = InjectionPoint.HEAD)
+        @JvmStatic
+        fun inject(): Long = 1L
+    }
+
+    @AsmMixin("StrictTarget")
+    object TailWideReturningHandlerMixin {
+        @AsmInject(method = "keep()V", target = InjectionPoint.TAIL)
+        @JvmStatic
+        fun inject(): Double = 1.0
+    }
+
+    @AsmMixin("StrictTarget")
+    object ReturnWideReturningHandlerMixin {
+        @AsmInject(method = "keep()V", target = InjectionPoint.RETURN)
         @JvmStatic
         fun inject(): Long = 1L
     }
