@@ -217,6 +217,40 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeBeforeInjectionDropsUnusedHandlerReturnValue() {
+        AsmRegistry.register(InvokeBeforeReturningHandlerMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "call" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeBeforeReturningHandlerMixin::class.java)
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode && it.owner == mixinOwner && it.name == "inject"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(Opcodes.POP, instructions[handlerCallIndex + 1].opcode)
+    }
+
+    @Test
+    fun invokeAfterInjectionDropsWideUnusedHandlerReturnValue() {
+        AsmRegistry.register(InvokeAfterWideReturningHandlerMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "call" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeAfterWideReturningHandlerMixin::class.java)
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode && it.owner == mixinOwner && it.name == "inject"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(Opcodes.POP2, instructions[handlerCallIndex + 1].opcode)
+    }
+
+    @Test
     fun modifyArgWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyArgParametersMixin::class.java)
 
@@ -742,6 +776,36 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun replace(): Int = 1
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InvokeBeforeReturningHandlerMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(): Int = 1
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InvokeAfterWideReturningHandlerMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.AFTER,
+            ),
+        )
+        @JvmStatic
+        fun inject(): Long = 1L
     }
 
     @AsmMixin("ArgTarget")

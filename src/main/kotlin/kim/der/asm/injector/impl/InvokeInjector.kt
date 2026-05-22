@@ -184,6 +184,7 @@ class InvokeInjector(
             mockTarget,
             callbackVarIndex,
         )
+        dropUnusedHandlerReturnValue(il)
 
         // 恢复参数（从左到右）
         if (savedInstanceIndex != null) {
@@ -232,6 +233,7 @@ class InvokeInjector(
                 mockTarget,
                 callbackVarIndex,
             )
+            dropUnusedHandlerReturnValue(il)
 
             // 恢复返回值
             loadReturnValue(il, returnType, returnVarIndex)
@@ -249,6 +251,7 @@ class InvokeInjector(
                 mockTarget,
                 callbackVarIndex,
             )
+            dropUnusedHandlerReturnValue(il)
             instructions.insertBefore(nextInsn, il)
         }
     }
@@ -313,6 +316,15 @@ class InvokeInjector(
         // 替换原始调用
         instructions.insertBefore(callInsn, il)
         instructions.remove(callInsn)
+    }
+
+    private fun dropUnusedHandlerReturnValue(il: InsnList) {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType == Type.VOID_TYPE) {
+            return
+        }
+
+        il.add(InsnNode(if (returnType.size == 2) Opcodes.POP2 else Opcodes.POP))
     }
 
     /**
