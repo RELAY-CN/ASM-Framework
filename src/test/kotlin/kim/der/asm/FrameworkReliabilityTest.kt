@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.ModifyReturnValue
 import kim.der.asm.api.annotation.Redirect
 import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Overwrite
@@ -112,6 +113,25 @@ class FrameworkReliabilityTest {
             AsmProcessor().transform("InlineTarget", inlineTargetBytes(), javaClass.classLoader)
         }
     }
+
+    @Test
+    fun injectWithUnmappableHandlerParameterFailsDuringTransform() {
+        AsmRegistry.register(UnmappableInjectParameterMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyReturnValueWithTooManyHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(TooManyModifyReturnParametersMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        }
+    }
+
     @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
@@ -196,6 +216,26 @@ class FrameworkReliabilityTest {
             }
         }
     }
+
+    @AsmMixin("StrictTarget")
+    object UnmappableInjectParameterMixin {
+        @AsmInject(method = "keep()V")
+        @JvmStatic
+        fun inject(unavailable: String) {
+            unavailable.length
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object TooManyModifyReturnParametersMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/String;")
+        @JvmStatic
+        fun modify(
+            original: String,
+            unavailable: Int,
+        ): String = "$original$unavailable"
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")

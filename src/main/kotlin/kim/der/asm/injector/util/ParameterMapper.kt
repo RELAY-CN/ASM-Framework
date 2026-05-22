@@ -9,7 +9,6 @@ import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.InsnList
-import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
@@ -74,14 +73,18 @@ object ParameterMapper {
                     targetVarIndex += if (targetParamType.sort == Type.LONG || targetParamType.sort == Type.DOUBLE) 2 else 1
                     asmParamIndex++
                 } else {
-                    // 类型不匹配，尝试使用默认值或跳过
-                    loadDefaultValue(il, Type.getType(asmParamType))
-                    asmParamIndex++
+                    throw IllegalStateException(
+                        "Cannot map ASM method parameter #$asmParamIndex " +
+                            "(${Type.getType(asmParamType)}) to target method ${targetMethod.name}${targetMethod.desc}: " +
+                            "target parameter type is $targetParamType",
+                    )
                 }
             } else {
-                // 目标方法参数不足，使用默认值
-                loadDefaultValue(il, Type.getType(asmParamType))
-                asmParamIndex++
+                throw IllegalStateException(
+                    "Cannot map ASM method parameter #$asmParamIndex " +
+                        "(${Type.getType(asmParamType)}) to target method ${targetMethod.name}${targetMethod.desc}: " +
+                        "target method has only ${targetParamTypes.size} parameter(s)",
+                )
             }
         }
     }
@@ -95,32 +98,6 @@ object ParameterMapper {
         varIndex: Int,
     ) {
         il.add(InstructionUtil.loadParam(paramType, varIndex))
-    }
-
-    /**
-     * 加载默认值
-     */
-    private fun loadDefaultValue(
-        il: InsnList,
-        paramType: Type,
-    ) {
-        when (paramType.sort) {
-            Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR -> {
-                il.add(InsnNode(Opcodes.ICONST_0))
-            }
-            Type.LONG -> {
-                il.add(InsnNode(Opcodes.LCONST_0))
-            }
-            Type.FLOAT -> {
-                il.add(InsnNode(Opcodes.FCONST_0))
-            }
-            Type.DOUBLE -> {
-                il.add(InsnNode(Opcodes.DCONST_0))
-            }
-            else -> {
-                il.add(InsnNode(Opcodes.ACONST_NULL))
-            }
-        }
     }
 
     /**
@@ -161,7 +138,7 @@ object ParameterMapper {
             try {
                 val fromClass = Class.forName(fromClassName)
                 val toClass = Class.forName(toClassName)
-                return toClass.isAssignableFrom(fromClass)
+                return fromClass.isAssignableFrom(toClass)
             } catch (e: Exception) {
                 // 如果无法加载类，使用名称匹配
                 // 也检查简单名称匹配（处理默认包的情况）
