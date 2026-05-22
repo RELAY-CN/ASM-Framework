@@ -383,7 +383,16 @@ class TargetClassContext(
                 asmInfo,
                 if (annotation.constant.isEmpty()) null else annotation.constant,
             )
-        return injector.inject(targetMethod)
+        val transformed = injector.inject(targetMethod)
+        if (annotation.constant.isEmpty()) {
+            return transformed
+        }
+        return requireInjectorMatched(
+            transformed,
+            "@ModifyConstant",
+            method,
+            annotation.method,
+        )
     }
 
     /**
@@ -688,7 +697,12 @@ class TargetClassContext(
 
         // 否则使用普通的注入器在指定位置注入代码
         val injector = AsmInjectorFactory.createInjector(annotation.target, method, asmInfo)
-        return injector.inject(targetMethod)
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@AsmInject",
+            method,
+            annotation.method,
+        )
     }
 
     /**
@@ -789,7 +803,12 @@ class TargetClassContext(
     ): Boolean {
         val targetMethod = requireTargetMethod(annotation.method)
         val injector = AsmInjectorFactory.createModifyArgInjector(method, asmInfo, annotation.index)
-        return injector.inject(targetMethod)
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@ModifyArg",
+            method,
+            annotation.method,
+        )
     }
 
     /**
@@ -805,7 +824,12 @@ class TargetClassContext(
         val redirectTarget = buildRedirectTarget(annotation.target, annotation.at.target)
 
         val injector = AsmInjectorFactory.createRedirectInjector(method, asmInfo, redirectTarget)
-        return injector.inject(targetMethod)
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@Redirect",
+            method,
+            annotation.method,
+        )
     }
 
     /**
@@ -977,7 +1001,12 @@ class TargetClassContext(
     ): Boolean {
         val targetMethod = requireTargetMethod(annotation.method)
         val injector = AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo)
-        return injector.inject(targetMethod)
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@ModifyReturnValue",
+            method,
+            annotation.method,
+        )
     }
 
     /**
@@ -1009,6 +1038,21 @@ class TargetClassContext(
     private fun requireTargetMethod(methodSignature: String): MethodNode =
         findTargetMethod(methodSignature)
             ?: throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
+
+    private fun requireInjectorMatched(
+        transformed: Boolean,
+        annotationName: String,
+        method: Method,
+        targetMethodSignature: String,
+    ): Boolean {
+        if (!transformed) {
+            throw IllegalStateException(
+                "$annotationName handler ${method.name} did not match any bytecode in " +
+                    "target method $targetMethodSignature of class $className",
+            )
+        }
+        return true
+    }
 
     /**
      * 解析方法签名

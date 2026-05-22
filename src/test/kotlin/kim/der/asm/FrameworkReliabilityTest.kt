@@ -279,6 +279,42 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeInjectWithMissingCallTargetFailsDuringTransform() {
+        AsmRegistry.register(MissingInvokeCallTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun redirectWithMissingCallTargetFailsDuringTransform() {
+        AsmRegistry.register(MissingRedirectCallTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyConstantWithMissingConstantFailsDuringTransform() {
+        AsmRegistry.register(MissingModifyConstantValueMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun modifyReturnValueOnVoidTargetFailsDuringTransform() {
+        AsmRegistry.register(VoidModifyReturnValueMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun redirectAllMethodsDoesNotRequireExplicitMethodTarget() {
         AsmRegistry.register(RedirectAllTrimMixin::class.java)
 
@@ -568,6 +604,45 @@ class FrameworkReliabilityTest {
     @AsmMixin("StrictTarget")
     object MissingModifyConstantTargetMixin {
         @ModifyConstant(method = "missing()Ljava/lang/String;", constant = "value")
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("RedirectTarget")
+    object MissingInvokeCallTargetMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(target = "java/lang/String.strip()Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("RedirectTarget")
+    object MissingRedirectCallTargetMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.strip()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
+    }
+
+    @AsmMixin("ReturnTarget")
+    object MissingModifyConstantValueMixin {
+        @ModifyConstant(method = "value()Ljava/lang/String;", constant = "missing")
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("StrictTarget")
+    object VoidModifyReturnValueMixin {
+        @ModifyReturnValue(method = "keep()V")
         @JvmStatic
         fun modify(original: String): String = original
     }
