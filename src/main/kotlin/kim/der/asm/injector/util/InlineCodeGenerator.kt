@@ -11,6 +11,8 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
+import org.objectweb.asm.tree.analysis.Analyzer
+import org.objectweb.asm.tree.analysis.SourceInterpreter
 import java.lang.reflect.Method
 
 /**
@@ -78,10 +80,11 @@ object InlineCodeGenerator {
         }
 
         // 调整局部变量索引和参数映射
-        adjustLocalVariables(il, asmMethodNode, target)
+        adjustLocalVariables(il, asmMethodNode, target, asmInfo)
 
         // 转换 Shadow 字段和方法调用
         transformShadowReferences(il, asmInfo, targetClassName)
+        adaptKotlinObjectSelfReceivers(il, target, asmInfo, targetClassName)
 
         return il
     }
@@ -122,12 +125,15 @@ object InlineCodeGenerator {
         il: InsnList,
         source: MethodNode,
         target: MethodNode,
+        asmInfo: AsmInfo,
     ) {
         val sourceParamTypes = Type.getArgumentTypes(source.desc)
         val targetParamTypes = Type.getArgumentTypes(target.desc)
 
         val sourceIsStatic = (source.access and Opcodes.ACC_STATIC) != 0
         val targetIsStatic = (target.access and Opcodes.ACC_STATIC) != 0
+        val isKotlinObject = isKotlinObject(asmInfo)
+        val asmClassName = Type.getType(asmInfo.asmClass).internalName
 
         // 计算参数占用的局部变量数
         val sourceParamSlots = calculateParamSlots(source)
@@ -145,8 +151,18 @@ object InlineCodeGenerator {
                     val isThisParam = !sourceIsStatic && targetIsStatic && oldIndex == 0
 
                     if (isThisParam) {
-                        // 如果源方法是实例方法而目标方法是静态方法，且访问的是 this，需要移除
-                        il.remove(insn)
+                        if (isKotlinObject && insn.opcode == Opcodes.ALOAD) {
+                            il[insn] =
+                                FieldInsnNode(
+                                    Opcodes.GETSTATIC,
+                                    asmClassName,
+                                    "INSTANCE",
+                                    "L$asmClassName;",
+                                )
+                        } else {
+                            // 如果源方法是实例方法而目标方法是静态方法，且访问的是 this，需要移除
+                            il.remove(insn)
+                        }
                         continue
                     }
 
@@ -186,6 +202,105 @@ object InlineCodeGenerator {
             }
         }
     }
+
+    /**
+     * Kotlin object 的非 @JvmStatic 方法体内，ALOAD 0 是 object receiver，而不是目标类 this。
+     *
+     * Shadow/Copy 调用已经在前一步改写到目标类，剩余 owner 仍为 ASM 类的实例调用需要继续通过 INSTANCE 调用。
+     */
+    private fun adaptKotlinObjectSelfReceivers(
+        il: InsnList,
+        target: MethodNode,
+        asmInfo: AsmInfo,
+        targetClassName: String,
+    ) {
+        if (!isKotlinObject(asmInfo)) {
+            return
+        }
+
+        val asmClassName = Type.getType(asmInfo.asmClass).internalName
+        val tempMethod =
+            MethodNode(
+                target.access,
+                target.name,
+                target.desc,
+                target.signature,
+                target.exceptions?.toTypedArray(),
+        )
+        tempMethod.instructions = il
+        tempMethod.maxLocals = calculateMaxLocals(target, il)
+        tempMethod.maxStack = calculateMaxStackUpperBound(target, il)
+
+        val insns = il.toArray()
+        val frames =
+            Analyzer(SourceInterpreter()).analyze(targetClassName, tempMethod)
+
+        for (index in insns.indices) {
+            val insn = insns[index]
+            if (insn !is MethodInsnNode ||
+                insn.owner != asmClassName ||
+                insn.opcode == Opcodes.INVOKESTATIC ||
+                insn.name == "<init>"
+            ) {
+                continue
+            }
+
+            val frame = frames[index] ?: continue
+            val argumentSlots = Type.getArgumentTypes(insn.desc).sumOf { it.size }
+            val receiverIndex = frame.stackSize - argumentSlots - 1
+            if (receiverIndex < 0) {
+                continue
+            }
+
+            val receiverSource = frame.getStack(receiverIndex).insns.singleOrNull()
+            if (receiverSource is VarInsnNode &&
+                receiverSource.opcode == Opcodes.ALOAD &&
+                receiverSource.`var` == 0
+            ) {
+                il[receiverSource] =
+                    FieldInsnNode(
+                        Opcodes.GETSTATIC,
+                        asmClassName,
+                        "INSTANCE",
+                        "L$asmClassName;",
+                    )
+            }
+        }
+    }
+
+    private fun calculateMaxLocals(
+        target: MethodNode,
+        il: InsnList,
+    ): Int {
+        var maxLocals = calculateParamSlots(target)
+
+        for (insn in il.toArray()) {
+            if (insn is VarInsnNode) {
+                val size =
+                    when (insn.opcode) {
+                        Opcodes.LLOAD, Opcodes.LSTORE, Opcodes.DLOAD, Opcodes.DSTORE -> 2
+                        else -> 1
+                    }
+                maxLocals = maxOf(maxLocals, insn.`var` + size)
+            }
+        }
+
+        return maxOf(1, maxLocals)
+    }
+
+    private fun calculateMaxStackUpperBound(
+        target: MethodNode,
+        il: InsnList,
+    ): Int = minOf(65535, maxOf(target.maxStack, il.size() * 2 + 8))
+
+    private fun isKotlinObject(asmInfo: AsmInfo): Boolean =
+        try {
+            val instanceField = asmInfo.asmClass.getDeclaredField("INSTANCE")
+            instanceField.isAccessible = true
+            instanceField.get(null) != null
+        } catch (e: Exception) {
+            false
+        }
 
     /**
      * 计算参数占用的局部变量槽数

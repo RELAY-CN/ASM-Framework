@@ -121,6 +121,27 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
+        AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InlineTarget", inlineTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InlineTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("run").invoke(instance)
+    }
+
+    @Test
+    fun kotlinObjectInlineStaticTargetPreservesObjectReceiverForHelperCall() {
+        AsmRegistry.register(ObjectInstanceStaticInlineMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticHeadTarget", staticHeadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticHeadTarget", transformed)
+
+        clazz.getMethod("run").invoke(null)
+    }
+
+    @Test
     fun injectWithUnmappableHandlerParameterFailsDuringTransform() {
         AsmRegistry.register(UnmappableInjectParameterMixin::class.java)
 
@@ -590,6 +611,26 @@ class FrameworkReliabilityTest {
                 // ignored for test fixture
             }
         }
+    }
+
+    @AsmMixin("InlineTarget")
+    object ObjectInstanceInlineMixin {
+        @AsmInject(method = "run()V", inline = true)
+        fun injectInline() {
+            helper()
+        }
+
+        fun helper(): String = "helper"
+    }
+
+    @AsmMixin("StaticHeadTarget")
+    object ObjectInstanceStaticInlineMixin {
+        @AsmInject(method = "run()V", inline = true)
+        fun injectInline() {
+            helper()
+        }
+
+        fun helper(): String = "helper"
     }
 
     @AsmMixin("StrictTarget")
