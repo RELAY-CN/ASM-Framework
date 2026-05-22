@@ -42,8 +42,11 @@ class InvokeInjector(
         // 解析目标方法签名
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(targetMethodSignature)
 
-        if (targetOwner == null || targetName == null) {
-            return false
+        if (targetName == null || targetDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid target method signature: $targetMethodSignature " +
+                    "(parsed: owner=$targetOwner, name=$targetName, desc=$targetDesc)",
+            )
         }
 
         val instructions = target.instructions
@@ -114,12 +117,12 @@ class InvokeInjector(
      */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
-        targetOwner: String,
+        targetOwner: String?,
         targetName: String,
-        targetDesc: String?,
+        targetDesc: String,
     ): Boolean {
         // 检查所有者
-        if (insn.owner != targetOwner) {
+        if (targetOwner != null && insn.owner != targetOwner) {
             return false
         }
 
@@ -128,8 +131,8 @@ class InvokeInjector(
             return false
         }
 
-        // 检查描述符（如果指定）
-        if (targetDesc != null && targetDesc.isNotEmpty() && insn.desc != targetDesc) {
+        // 检查描述符
+        if (insn.desc != targetDesc) {
             return false
         }
 

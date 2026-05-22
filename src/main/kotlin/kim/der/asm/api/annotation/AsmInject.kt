@@ -88,7 +88,7 @@ enum class InjectionPoint {
  * 当前主要用于 [InjectionPoint.INVOKE]：通过 [target] 指定要匹配的方法调用签名，
  * 并通过 [shift] 指定在调用前/后/替换该调用点。
  *
- * 注意：当前实现要求 [target] 必须包含 owner 与方法描述符，否则注入器会直接跳过处理。
+ * 注意：当前实现要求 [target] 必须包含方法描述符；owner 可省略，省略时只按方法名与描述符匹配。
  *
  * @param value 预留字段，当前实现未使用
  * @param target 目标方法调用签名，例如 `"java/lang/System.gc()V"` 或 `"java.lang.System.gc()V"`
