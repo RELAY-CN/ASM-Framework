@@ -321,6 +321,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeAfterInjectionMapsStaticCallArguments() {
+        AsmRegistry.register(InvokeAfterStaticCallArgumentMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticInvokeArgTarget", staticInvokeArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticInvokeArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("42", result)
+    }
+
+    @Test
     fun invokeBeforeInjectionDoesNotOverlapWideCallArgumentLocals() {
         AsmRegistry.register(InvokeBeforeWideStaticCallArgumentMixin::class.java)
 
@@ -963,6 +975,25 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun inject(value: Int) {
             value.toString()
+        }
+    }
+
+    @AsmMixin("StaticInvokeArgTarget")
+    object InvokeAfterStaticCallArgumentMixin {
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+                shift = Shift.AFTER,
+            ),
+        )
+        @JvmStatic
+        fun inject(value: Int) {
+            if (value != 42) {
+                throw IllegalStateException("Unexpected call argument: $value")
+            }
         }
     }
 
