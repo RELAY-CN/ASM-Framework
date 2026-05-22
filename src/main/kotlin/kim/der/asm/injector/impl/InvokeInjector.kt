@@ -82,33 +82,30 @@ class InvokeInjector(
             return Triple(null, null, null)
         }
 
-        val lastDot = signature.lastIndexOf('.')
-        val lastSlash = signature.lastIndexOf('/')
         val parenIndex = signature.indexOf('(')
 
         if (parenIndex < 0) {
             return Triple(null, signature, null)
         }
 
-        val methodName: String
-        val owner: String?
+        val ownerAndName = signature.substring(0, parenIndex)
         val desc: String
-
+        val lastDot = ownerAndName.lastIndexOf('.')
+        val lastSlash = ownerAndName.lastIndexOf('/')
         val separator = if (lastDot > lastSlash) lastDot else lastSlash
 
-        if (separator > 0 && separator < parenIndex) {
+        return if (separator > 0) {
             // 包含类名
-            owner = signature.substring(0, separator).replace('.', '/')
-            methodName = signature.substring(separator + 1, parenIndex)
+            val owner = ownerAndName.substring(0, separator).replace('.', '/')
+            val methodName = ownerAndName.substring(separator + 1)
             desc = signature.substring(parenIndex)
+            Triple(owner, methodName, desc)
         } else {
             // 只有方法名
-            owner = null
-            methodName = signature.substring(0, parenIndex)
+            val methodName = ownerAndName
             desc = signature.substring(parenIndex)
+            Triple(null, methodName, desc)
         }
-
-        return Triple(owner, methodName, desc)
     }
 
     /**
@@ -280,6 +277,7 @@ class InvokeInjector(
 
         // 调用 ASM 方法替换原调用
         val mockTarget = createMockMethodNode(targetMethod, callInsn)
+        validateReplaceSignature(callInsn)
         AsmMethodCallGenerator.generateMethodCall(
             il,
             asmMethod,
@@ -293,36 +291,11 @@ class InvokeInjector(
         val asmReturnType = Type.getReturnType(asmMethod)
 
         if (asmReturnType != originalReturnType) {
-            if (asmReturnType == Type.VOID_TYPE && originalReturnType != Type.VOID_TYPE) {
-                // ASM 返回 void，但原方法需要返回值，加载默认值
-                loadDefaultReturnValue(il, originalReturnType)
-            } else if (asmReturnType != Type.VOID_TYPE && originalReturnType == Type.VOID_TYPE) {
+            if (asmReturnType != Type.VOID_TYPE && originalReturnType == Type.VOID_TYPE) {
                 // ASM 返回了值，但原方法返回 void，弹出
-                il.add(InsnNode(Opcodes.POP))
-            } else if (asmReturnType != Type.VOID_TYPE && originalReturnType != Type.VOID_TYPE) {
-                // 类型转换
-                if (asmReturnType.sort != originalReturnType.sort) {
-                    val unboxList = InstructionUtil.unbox(asmReturnType)
-                    for (unboxInsn in unboxList) {
-                        il.add(unboxInsn)
-                    }
-                    if (originalReturnType.sort in
-                        setOf(
-                            Type.BOOLEAN,
-                            Type.BYTE,
-                            Type.CHAR,
-                            Type.SHORT,
-                            Type.INT,
-                            Type.LONG,
-                            Type.FLOAT,
-                            Type.DOUBLE,
-                        )
-                    ) {
-                        InstructionUtil.box(originalReturnType)?.let { il.add(it) }
-                    }
-                } else if (originalReturnType.sort == Type.OBJECT || originalReturnType.sort == Type.ARRAY) {
-                    il.add(TypeInsnNode(Opcodes.CHECKCAST, originalReturnType.internalName))
-                }
+                il.add(InsnNode(if (asmReturnType.size == 2) Opcodes.POP2 else Opcodes.POP))
+            } else if (originalReturnType.sort == Type.OBJECT || originalReturnType.sort == Type.ARRAY) {
+                il.add(TypeInsnNode(Opcodes.CHECKCAST, originalReturnType.internalName))
             }
         }
 
@@ -381,30 +354,25 @@ class InvokeInjector(
         il.add(loadInsn)
     }
 
-    /**
-     * 加载默认返回值
-     */
-    private fun loadDefaultReturnValue(
-        il: InsnList,
-        returnType: Type,
-    ) {
-        when (returnType.sort) {
-            Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR -> {
-                il.add(InsnNode(Opcodes.ICONST_0))
-            }
-            Type.LONG -> {
-                il.add(InsnNode(Opcodes.LCONST_0))
-            }
-            Type.FLOAT -> {
-                il.add(InsnNode(Opcodes.FCONST_0))
-            }
-            Type.DOUBLE -> {
-                il.add(InsnNode(Opcodes.DCONST_0))
-            }
-            else -> {
-                il.add(InsnNode(Opcodes.ACONST_NULL))
-            }
+    private fun validateReplaceSignature(callInsn: MethodInsnNode) {
+        val originalReturnType = Type.getReturnType(callInsn.desc)
+        val asmReturnType = Type.getReturnType(asmMethod)
+        if (!isReplaceReturnCompatible(originalReturnType, asmReturnType)) {
+            throw IllegalStateException(
+                "Invoke REPLACE handler ${asmMethod.name} return type mismatch: original $originalReturnType, handler $asmReturnType",
+            )
         }
+    }
+
+    private fun isReplaceReturnCompatible(
+        original: Type,
+        replacement: Type,
+    ): Boolean {
+        if (original == Type.VOID_TYPE) return true
+        if (replacement == Type.VOID_TYPE) return false
+        if (original == replacement) return true
+        return (original.sort == Type.OBJECT || original.sort == Type.ARRAY) &&
+            (replacement.sort == Type.OBJECT || replacement.sort == Type.ARRAY)
     }
 
     /**

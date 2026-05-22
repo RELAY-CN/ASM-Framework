@@ -15,6 +15,7 @@ import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Overwrite
 import kim.der.asm.api.annotation.RemoveMethod
 import kim.der.asm.api.annotation.RemoveSynchronized
+import kim.der.asm.api.annotation.Shift
 import kim.der.asm.transformer.AsmProcessor
 import kim.der.asm.transformer.AsmTransformException
 import org.junit.jupiter.api.AfterEach
@@ -133,6 +134,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeReplaceWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleInvokeReplaceMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -234,6 +244,20 @@ class FrameworkReliabilityTest {
             original: String,
             unavailable: Int,
         ): String = "$original$unavailable"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object IncompatibleInvokeReplaceMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.REPLACE,
+            ),
+        )
+        @JvmStatic
+        fun replace(): Int = 1
     }
 
     @AsmMixin("SyncTarget")
