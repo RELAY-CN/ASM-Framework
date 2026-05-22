@@ -309,6 +309,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeBeforeInjectionDoesNotOverlapWideCallArgumentLocals() {
+        AsmRegistry.register(InvokeBeforeWideStaticCallArgumentMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WideInvokeArgTarget", wideInvokeArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WideInvokeArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("ok", result)
+    }
+
+    @Test
     fun modifyArgWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyArgParametersMixin::class.java)
 
@@ -925,6 +937,28 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("WideInvokeArgTarget")
+    object InvokeBeforeWideStaticCallArgumentMixin {
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WideInvokeArgTarget.combine(DI)Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(
+            value: Double,
+            index: Int,
+        ) {
+            if (value != 1.5 || index != 7) {
+                throw IllegalStateException("Unexpected call arguments: $value, $index")
+            }
+        }
+    }
+
     @AsmMixin("ArgTarget")
     object TooManyModifyArgParametersMixin {
         @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
@@ -1318,6 +1352,30 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wideInvokeArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WideInvokeArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(1.5)
+            visitIntInsn(Opcodes.BIPUSH, 7)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "WideInvokeArgTarget", "combine", "(DI)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "combine", "(DI)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("ok")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
             visitEnd()
         }
         cw.visitEnd()
