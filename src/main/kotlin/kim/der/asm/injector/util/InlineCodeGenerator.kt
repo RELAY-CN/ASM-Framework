@@ -84,9 +84,33 @@ object InlineCodeGenerator {
 
         // 转换 Shadow 字段和方法调用
         transformShadowReferences(il, asmInfo, targetClassName)
+        normalizeInlineReturns(il)
         adaptKotlinObjectSelfReceivers(il, target, asmInfo, targetClassName)
 
         return il
+    }
+
+    /**
+     * inline handler 的 return 只表示 handler 结束，不能变成目标方法 return。
+     */
+    private fun normalizeInlineReturns(il: InsnList) {
+        val returnInsns = il.toArray().filterIsInstance<InsnNode>().filter { it.opcode in RETURN_OPS }
+        if (returnInsns.isEmpty()) {
+            return
+        }
+
+        val endLabel = LabelNode()
+        for (returnInsn in returnInsns) {
+            val replacement = InsnList()
+            when (returnInsn.opcode) {
+                Opcodes.IRETURN, Opcodes.FRETURN, Opcodes.ARETURN -> replacement.add(InsnNode(Opcodes.POP))
+                Opcodes.LRETURN, Opcodes.DRETURN -> replacement.add(InsnNode(Opcodes.POP2))
+            }
+            replacement.add(JumpInsnNode(Opcodes.GOTO, endLabel))
+            il.insertBefore(returnInsn, replacement)
+            il.remove(returnInsn)
+        }
+        il.add(endLabel)
     }
 
     /**
@@ -219,21 +243,26 @@ object InlineCodeGenerator {
         }
 
         val asmClassName = Type.getType(asmInfo.asmClass).internalName
-        val tempMethod =
-            MethodNode(
-                target.access,
-                target.name,
-                target.desc,
-                target.signature,
-                target.exceptions?.toTypedArray(),
-        )
-        tempMethod.instructions = il
-        tempMethod.maxLocals = calculateMaxLocals(target, il)
-        tempMethod.maxStack = calculateMaxStackUpperBound(target, il)
-
         val insns = il.toArray()
+        val syntheticReturnInsns = appendSyntheticReturnForAnalysis(il, Type.getReturnType(target.desc))
         val frames =
-            Analyzer(SourceInterpreter()).analyze(targetClassName, tempMethod)
+            try {
+                val tempMethod =
+                    MethodNode(
+                        target.access,
+                        target.name,
+                        target.desc,
+                        target.signature,
+                        target.exceptions?.toTypedArray(),
+                    )
+                tempMethod.instructions = il
+                tempMethod.maxLocals = calculateMaxLocals(target, il)
+                tempMethod.maxStack = calculateMaxStackUpperBound(target, il)
+
+                Analyzer(SourceInterpreter()).analyze(targetClassName, tempMethod)
+            } finally {
+                syntheticReturnInsns.forEach { il.remove(it) }
+            }
 
         for (index in insns.indices) {
             val insn = insns[index]
@@ -266,6 +295,25 @@ object InlineCodeGenerator {
                     )
             }
         }
+    }
+
+    private fun appendSyntheticReturnForAnalysis(
+        il: InsnList,
+        returnType: Type,
+    ): List<AbstractInsnNode> {
+        val nodes =
+            when (returnType.sort) {
+                Type.VOID -> listOf(InsnNode(Opcodes.RETURN))
+                Type.LONG -> listOf(InsnNode(Opcodes.LCONST_0), InsnNode(Opcodes.LRETURN))
+                Type.FLOAT -> listOf(InsnNode(Opcodes.FCONST_0), InsnNode(Opcodes.FRETURN))
+                Type.DOUBLE -> listOf(InsnNode(Opcodes.DCONST_0), InsnNode(Opcodes.DRETURN))
+                Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR ->
+                    listOf(InsnNode(Opcodes.ICONST_0), InsnNode(Opcodes.IRETURN))
+                else -> listOf(InsnNode(Opcodes.ACONST_NULL), InsnNode(Opcodes.ARETURN))
+            }
+
+        nodes.forEach { il.add(it) }
+        return nodes
     }
 
     private fun calculateMaxLocals(
@@ -530,5 +578,15 @@ object InlineCodeGenerator {
             Pair(signature, "")
         }
     }
+
+    private val RETURN_OPS =
+        setOf(
+            Opcodes.RETURN,
+            Opcodes.IRETURN,
+            Opcodes.LRETURN,
+            Opcodes.FRETURN,
+            Opcodes.DRETURN,
+            Opcodes.ARETURN,
+        )
 }
 

@@ -748,7 +748,7 @@ class TargetClassContext(
                 }
                 // 如果没有找到 RETURN，在末尾添加
                 if (target.instructions.size() == 0 ||
-                    target.instructions.toArray().none { it is InsnNode && (it as InsnNode).opcode in RETURN_OPS }
+                    target.instructions.toArray().none { it is InsnNode && it.opcode in RETURN_OPS }
                 ) {
                     target.instructions.add(il)
                 }
@@ -761,11 +761,7 @@ class TargetClassContext(
                 for (insn in insns) {
                     if (insn is InsnNode && insn.opcode in RETURN_OPS) {
                         // 为每个 RETURN 创建新的指令列表副本
-                        val cloned = InsnList()
-                        for (originalInsn in il) {
-                            cloned.add(originalInsn.clone(null))
-                        }
-                        target.instructions.insertBefore(insn, cloned)
+                        target.instructions.insertBefore(insn, cloneInsnList(il))
                     }
                 }
             }
@@ -780,6 +776,19 @@ class TargetClassContext(
         }
 
         return true
+    }
+
+    private fun cloneInsnList(source: InsnList): InsnList {
+        val labelMap = mutableMapOf<LabelNode, LabelNode>()
+        source.toArray().filterIsInstance<LabelNode>().forEach { label ->
+            labelMap[label] = LabelNode()
+        }
+
+        val cloned = InsnList()
+        for (insn in source) {
+            cloned.add(insn.clone(labelMap))
+        }
+        return cloned
     }
 
     companion object {
