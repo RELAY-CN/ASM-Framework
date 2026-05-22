@@ -5,10 +5,13 @@
 package kim.der.asm
 
 import kim.der.asm.api.annotation.Accessor
+import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Redirect
+import kim.der.asm.api.annotation.Copy
+import kim.der.asm.api.annotation.Overwrite
 import kim.der.asm.api.annotation.RemoveMethod
 import kim.der.asm.api.annotation.RemoveSynchronized
 import kim.der.asm.transformer.AsmProcessor
@@ -85,6 +88,31 @@ class FrameworkReliabilityTest {
         }
     }
     @Test
+    fun overwriteWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleOverwriteMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun copyWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleCopyMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        }
+    }
+    @Test
+    fun inlineMethodWithTryCatchFailsDuringTransform() {
+        AsmRegistry.register(InlineTryCatchMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("InlineTarget", inlineTargetBytes(), javaClass.classLoader)
+        }
+    }
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -143,6 +171,31 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun invalidHandler(unexpected: Int): String = unexpected.toString()
     }
+    @AsmMixin("ReturnTarget")
+    object IncompatibleOverwriteMixin {
+        @Overwrite("value()Ljava/lang/String;")
+        @JvmStatic
+        fun value(): Int = 1
+    }
+
+    @AsmMixin("ReturnTarget")
+    object IncompatibleCopyMixin {
+        @Copy("copied()Ljava/lang/String;")
+        @JvmStatic
+        fun copied(): Int = 1
+    }
+    @AsmMixin("InlineTarget")
+    object InlineTryCatchMixin {
+        @AsmInject(method = "run()V", inline = true)
+        @JvmStatic
+        fun injectInline() {
+            try {
+                " value ".trim()
+            } catch (_: RuntimeException) {
+                // ignored for test fixture
+            }
+        }
+    }
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -175,6 +228,33 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun returnTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReturnTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("value")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun inlineTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InlineTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
             visitEnd()
         }
         cw.visitEnd()
@@ -215,5 +295,7 @@ class FrameworkReliabilityTest {
         return classNode
     }
 }
+
+
 
 

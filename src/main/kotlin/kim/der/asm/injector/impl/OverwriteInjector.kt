@@ -8,7 +8,6 @@ import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
-import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -318,6 +317,10 @@ class OverwriteInjector(
         sourceReturnType: Type,
         targetReturnType: Type,
     ) {
+        if (!isReturnAdaptationSupported(sourceReturnType, targetReturnType)) {
+            throw IllegalStateException("Cannot adapt return type from $sourceReturnType to $targetReturnType")
+        }
+
         val instructions = target.instructions
         val insns = instructions.toArray()
 
@@ -328,49 +331,55 @@ class OverwriteInjector(
                 val targetOpcode = getReturnOpcode(targetReturnType)
 
                 if (opcode == sourceOpcode && opcode != targetOpcode) {
-                    // 需要转换返回值
                     val il = InsnList()
+                    val insnIndex = insns.indexOf(insn)
+                    instructions.remove(insn)
 
-                    // 如果需要从非 void 转换为 void
                     if (targetReturnType == Type.VOID_TYPE) {
-                        instructions.remove(insn)
-                        il.add(InsnNode(Opcodes.POP))
+                        il.add(InsnNode(if (sourceReturnType.size == 2) Opcodes.POP2 else Opcodes.POP))
                         il.add(InsnNode(Opcodes.RETURN))
-                        val insnIndex = insns.indexOf(insn)
-                        if (insnIndex >= 0 && insnIndex + 1 < insns.size) {
-                            instructions.insertBefore(insns[insnIndex + 1], il)
-                        } else {
-                            instructions.add(il)
-                        }
                     } else if (sourceReturnType == Type.VOID_TYPE) {
-                        // 需要从 void 转换为非 void，添加默认返回值
-                        instructions.remove(insn)
                         loadDefaultValue(il, targetReturnType)
                         il.add(InsnNode(targetOpcode))
-                        instructions.add(il)
                     } else {
-                        // 需要类型转换
-                        val insnIndex = insns.indexOf(insn)
-                        if (insnIndex >= 0) {
-                            instructions.remove(insn)
-                            val unboxList = InstructionUtil.unbox(sourceReturnType)
-                            for (unboxInsn in unboxList) {
-                                il.add(unboxInsn)
-                            }
-                            loadDefaultValue(il, targetReturnType)
-                            il.add(InsnNode(targetOpcode))
-                            if (insnIndex + 1 < insns.size) {
-                                instructions.insertBefore(insns[insnIndex + 1], il)
-                            } else {
-                                instructions.add(il)
-                            }
-                        }
+                        il.add(TypeInsnNode(Opcodes.CHECKCAST, targetReturnType.internalName))
+                        il.add(InsnNode(targetOpcode))
+                    }
+
+                    if (insnIndex >= 0 && insnIndex + 1 < insns.size) {
+                        instructions.insertBefore(insns[insnIndex + 1], il)
+                    } else {
+                        instructions.add(il)
                     }
                 }
             }
         }
     }
 
+    private fun isReturnAdaptationSupported(
+        sourceReturnType: Type,
+        targetReturnType: Type,
+    ): Boolean {
+        if (sourceReturnType == targetReturnType) return true
+        if (targetReturnType == Type.VOID_TYPE) return true
+        if (sourceReturnType == Type.VOID_TYPE) return isDefaultReturnSupported(targetReturnType)
+        return sourceReturnType.sort >= Type.ARRAY && targetReturnType.sort >= Type.ARRAY
+    }
+
+    private fun isDefaultReturnSupported(type: Type): Boolean =
+        when (type.sort) {
+            Type.BOOLEAN,
+            Type.BYTE,
+            Type.SHORT,
+            Type.INT,
+            Type.LONG,
+            Type.FLOAT,
+            Type.DOUBLE,
+            Type.CHAR,
+            Type.OBJECT,
+            Type.ARRAY -> true
+            else -> false
+        }
     /**
      * 适配参数指令
      * 调整所有局部变量索引以匹配目标方法的参数布局
@@ -1008,3 +1017,4 @@ class OverwriteInjector(
             )
     }
 }
+
