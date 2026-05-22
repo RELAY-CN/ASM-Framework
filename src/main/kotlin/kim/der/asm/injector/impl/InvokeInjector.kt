@@ -5,6 +5,7 @@
 package kim.der.asm.injector.impl
 
 import kim.der.asm.api.annotation.AsmInject
+import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.Shift
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
@@ -148,7 +149,7 @@ class InvokeInjector(
         // 保存方法调用的参数到局部变量
         val paramTypes = Type.getArgumentTypes(callInsn.desc)
         val savedParams = mutableListOf<Int>()
-        var varIndex = allocateVariablesForParams(targetMethod, paramTypes)
+        var varIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
 
         // 保存所有参数（从右到左）
         for (i in paramTypes.indices.reversed()) {
@@ -169,6 +170,8 @@ class InvokeInjector(
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
         }
 
+        val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
+
         // 生成调用 ASM 方法的指令
         val mockTarget = createMockMethodNode(targetMethod, callInsn)
         AsmMethodCallGenerator.generateMethodCall(
@@ -176,7 +179,7 @@ class InvokeInjector(
             asmMethod,
             asmInfo,
             mockTarget,
-            null,
+            callbackVarIndex,
         )
 
         // 恢复参数（从左到右）
@@ -215,6 +218,8 @@ class InvokeInjector(
             // 保存返回值
             saveReturnValue(il, returnType, returnVarIndex)
 
+            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, emptyArray(), emptyList(), null)
+
             // 生成调用 ASM 方法的指令
             val mockTarget = createMockMethodNode(targetMethod, callInsn)
             AsmMethodCallGenerator.generateMethodCall(
@@ -222,7 +227,7 @@ class InvokeInjector(
                 asmMethod,
                 asmInfo,
                 mockTarget,
-                null,
+                callbackVarIndex,
             )
 
             // 恢复返回值
@@ -232,13 +237,14 @@ class InvokeInjector(
         } else {
             // 无返回值，直接在调用后插入
             val il = InsnList()
+            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, emptyArray(), emptyList(), null)
             val mockTarget = createMockMethodNode(targetMethod, callInsn)
             AsmMethodCallGenerator.generateMethodCall(
                 il,
                 asmMethod,
                 asmInfo,
                 mockTarget,
-                null,
+                callbackVarIndex,
             )
             instructions.insertBefore(nextInsn, il)
         }
@@ -257,7 +263,7 @@ class InvokeInjector(
         // 保存参数
         val paramTypes = Type.getArgumentTypes(callInsn.desc)
         val savedParams = mutableListOf<Int>()
-        var varIndex = allocateVariablesForParams(targetMethod, paramTypes)
+        var varIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
 
         for (i in paramTypes.indices.reversed()) {
             val paramType = paramTypes[i]
@@ -275,6 +281,8 @@ class InvokeInjector(
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
         }
 
+        val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
+
         // 调用 ASM 方法替换原调用
         val mockTarget = createMockMethodNode(targetMethod, callInsn)
         validateReplaceSignature(callInsn)
@@ -283,7 +291,7 @@ class InvokeInjector(
             asmMethod,
             asmInfo,
             mockTarget,
-            null,
+            callbackVarIndex,
         )
 
         // 处理返回值类型转换
@@ -364,6 +372,71 @@ class InvokeInjector(
         }
     }
 
+    private fun createCallbackInfoIfNeeded(
+        il: InsnList,
+        targetMethod: MethodNode,
+        savedParamTypes: Array<Type>,
+        savedParamIndexes: List<Int>,
+        savedInstanceIndex: Int?,
+    ): Int? {
+        if (!AsmMethodCallGenerator.needsCallbackInfo(asmMethod)) {
+            return null
+        }
+
+        AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+        val callbackVarIndex = allocateVariableAfterSavedCallState(targetMethod, savedParamTypes, savedParamIndexes, savedInstanceIndex)
+        il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
+        return callbackVarIndex
+    }
+
+    private fun allocateVariableAfterSavedCallState(
+        targetMethod: MethodNode,
+        savedParamTypes: Array<Type>,
+        savedParamIndexes: List<Int>,
+        savedInstanceIndex: Int?,
+    ): Int {
+        var nextIndex = findLocalEnd(targetMethod)
+
+        savedParamIndexes.forEachIndexed { index, savedIndex ->
+            val paramType = savedParamTypes[index]
+            nextIndex = maxOf(nextIndex, savedIndex + paramType.size)
+        }
+
+        if (savedInstanceIndex != null) {
+            nextIndex = maxOf(nextIndex, savedInstanceIndex + 1)
+        }
+
+        return nextIndex
+    }
+
+    private fun findLocalEnd(targetMethod: MethodNode): Int {
+        val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
+        var maxIndex = if (isStatic) 0 else 1
+
+        val methodParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        for (paramType in methodParamTypes) {
+            maxIndex += paramType.size
+        }
+
+        for (localVar in targetMethod.localVariables) {
+            val size = Type.getType(localVar.desc).size
+            maxIndex = maxOf(maxIndex, localVar.index + size)
+        }
+
+        for (insn in targetMethod.instructions.toArray()) {
+            if (insn is VarInsnNode) {
+                val size =
+                    when (insn.opcode) {
+                        Opcodes.LLOAD, Opcodes.LSTORE, Opcodes.DLOAD, Opcodes.DSTORE -> 2
+                        else -> 1
+                    }
+                maxIndex = maxOf(maxIndex, insn.`var` + size)
+            }
+        }
+
+        return maxIndex
+    }
+
     private fun isReplaceReturnCompatible(
         original: Type,
         replacement: Type,
@@ -381,26 +454,14 @@ class InvokeInjector(
     private fun allocateVariablesForParams(
         targetMethod: MethodNode,
         paramTypes: Array<Type>,
+        reserveInstanceSlot: Boolean,
     ): Int {
-        val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
-        var maxIndex = if (isStatic) 0 else 1
-
-        val methodParamTypes = Type.getArgumentTypes(targetMethod.desc)
-        for (paramType in methodParamTypes) {
-            maxIndex += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
-        }
-
-        for (localVar in targetMethod.localVariables) {
-            val end = localVar.index + (if (needsDoubleSlot(localVar.desc)) 2 else 1)
-            maxIndex = maxOf(maxIndex, end)
-        }
-
-        var neededSlots = 0
+        var neededSlots = if (reserveInstanceSlot) 1 else 0
         for (paramType in paramTypes) {
-            neededSlots += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
+            neededSlots += paramType.size
         }
 
-        return maxIndex + neededSlots
+        return findLocalEnd(targetMethod) + neededSlots
     }
 
     /**
@@ -409,22 +470,7 @@ class InvokeInjector(
     private fun allocateVariableForReturn(
         targetMethod: MethodNode,
         returnType: Type,
-    ): Int {
-        val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
-        var maxIndex = if (isStatic) 0 else 1
-
-        val methodParamTypes = Type.getArgumentTypes(targetMethod.desc)
-        for (paramType in methodParamTypes) {
-            maxIndex += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
-        }
-
-        for (localVar in targetMethod.localVariables) {
-            val end = localVar.index + (if (needsDoubleSlot(localVar.desc)) 2 else 1)
-            maxIndex = maxOf(maxIndex, end)
-        }
-
-        return maxIndex
-    }
+    ): Int = findLocalEnd(targetMethod)
 
     /**
      * 创建模拟方法节点
@@ -445,8 +491,4 @@ class InvokeInjector(
         )
     }
 
-    /**
-     * 检查是否需要双槽
-     */
-    private fun needsDoubleSlot(desc: String): Boolean = desc == "J" || desc == "D"
 }
