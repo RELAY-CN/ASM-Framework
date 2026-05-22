@@ -63,6 +63,13 @@ class ModifyArgInjector(
 
         // 调用 ASM 方法修改参数
         // ASM 方法应该接收原始参数值并返回修改后的值
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        if (asmParamTypes.size != 1 || asmParamTypes[0] != paramType) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} must take exactly one argument of type $paramType, actual ${asmParamTypes.toList()}",
+            )
+        }
+
         val asmReturnType = Type.getReturnType(asmMethod)
         if (asmReturnType != paramType) {
             throw IllegalArgumentException("ASM method return type ($asmReturnType) must match parameter type ($paramType)")
