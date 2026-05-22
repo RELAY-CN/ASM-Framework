@@ -285,6 +285,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun overwriteDoesNotRewriteNonShadowOverloadByNameOnly() {
+        AsmRegistry.register(ShadowOverloadOverwriteMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("ShadowOverloadTarget", shadowOverloadTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -494,6 +503,17 @@ class FrameworkReliabilityTest {
         fun modify(type: Class<*>): Class<*> = type
     }
 
+    @AsmMixin("ShadowOverloadTarget")
+    class ShadowOverloadOverwriteMixin {
+        @Shadow
+        private fun lookup(value: String): String = throw UnsupportedOperationException()
+
+        private fun lookup(value: Int): String = value.toString()
+
+        @Overwrite("value()Ljava/lang/String;")
+        fun value(): String = lookup(1)
+    }
+
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -627,6 +647,27 @@ class FrameworkReliabilityTest {
             visitCode()
             visitVarInsn(Opcodes.ALOAD, 1)
             visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+    private fun shadowOverloadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ShadowOverloadTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("original")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "lookup", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
             visitEnd()

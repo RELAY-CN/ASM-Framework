@@ -797,6 +797,7 @@ class CopyInjector(
 
         // 构建 Shadow 方法映射
         val shadowMethodMap = mutableMapOf<String, String>()
+        val shadowMethodNames = mutableSetOf<String>()
         // 构建 Copy 方法映射：ASM 方法名 -> 目标方法名（通过 @Copy 复制的方法）
         val copyMethodMap = mutableMapOf<String, String>()
 
@@ -804,6 +805,7 @@ class CopyInjector(
             val shadowAnnotation = method.getAnnotation(Shadow::class.java)
             if (shadowAnnotation != null) {
                 val methodName = method.name
+                val methodDesc = Type.getMethodDescriptor(method)
                 val prefix = shadowAnnotation.method
 
                 val targetMethodName =
@@ -813,7 +815,8 @@ class CopyInjector(
                         methodName
                     }
 
-                shadowMethodMap[methodName] = targetMethodName
+                shadowMethodMap["$methodName$methodDesc"] = targetMethodName
+                shadowMethodNames.add(methodName)
             }
 
             // 检查是否是 @Copy 方法
@@ -854,10 +857,15 @@ class CopyInjector(
                     // 如果是调用 ASM 类的方法
                     if (insn.owner == asmClassName) {
                         // 检查是否是 Shadow 方法
-                        if (shadowMethodMap.containsKey(insn.name)) {
-                            val targetMethodName = shadowMethodMap[insn.name]!!
+                        val shadowMethodKey = "${insn.name}${insn.desc}"
+                        if (shadowMethodMap.containsKey(shadowMethodKey)) {
+                            val targetMethodName = shadowMethodMap[shadowMethodKey]!!
                             insn.owner = targetClassName
                             insn.name = targetMethodName
+                        } else if (shadowMethodNames.contains(insn.name)) {
+                            throw IllegalStateException(
+                                "Shadow method call ${insn.name}${insn.desc} does not match declared shadow method signature",
+                            )
                         }
                         // 检查是否是 @Copy 方法（通过方法名和描述符匹配）
                         else {
