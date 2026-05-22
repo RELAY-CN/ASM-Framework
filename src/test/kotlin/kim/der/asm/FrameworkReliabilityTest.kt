@@ -8,6 +8,7 @@ import kim.der.asm.api.annotation.Accessor
 import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Invoker
 import kim.der.asm.api.annotation.ModifyArg
@@ -205,6 +206,18 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun returnInjectionBoxesCharReturnValueWithCharacterWrapper() {
+        AsmRegistry.register(CharReturnCallbackMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CharReturnTarget", charReturnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CharReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals('a', result)
     }
 
     @Test
@@ -776,6 +789,15 @@ class FrameworkReliabilityTest {
         ): String = "$original$unavailable"
     }
 
+    @AsmMixin("CharReturnTarget")
+    object CharReturnCallbackMixin {
+        @AsmInject(method = "value()C", target = InjectionPoint.RETURN)
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.getReturnValue<Char>()
+        }
+    }
+
     @AsmMixin("RedirectTarget")
     object IncompatibleInvokeReplaceMixin {
         @AsmInject(
@@ -1198,6 +1220,21 @@ class FrameworkReliabilityTest {
             visitCode()
             visitLdcInsn("value")
             visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun charReturnTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "CharReturnTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()C", null, null).apply {
+            visitCode()
+            visitIntInsn(Opcodes.BIPUSH, 'a'.code)
+            visitInsn(Opcodes.IRETURN)
             visitMaxs(1, 1)
             visitEnd()
         }

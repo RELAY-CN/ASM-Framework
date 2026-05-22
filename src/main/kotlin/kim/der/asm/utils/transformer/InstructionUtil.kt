@@ -38,7 +38,7 @@ internal object InstructionUtil {
     fun getWrapper(type: Type): Type =
         when (type.sort) {
             Type.BOOLEAN -> Type.getType("Ljava/lang/Boolean;")
-            Type.CHAR -> Type.getType("Ljava/lang/Char;")
+            Type.CHAR -> Type.getType("Ljava/lang/Character;")
             Type.BYTE -> Type.getType("Ljava/lang/Byte;")
             Type.SHORT -> Type.getType("Ljava/lang/Short;")
             Type.INT -> Type.getType("Ljava/lang/Integer;")
