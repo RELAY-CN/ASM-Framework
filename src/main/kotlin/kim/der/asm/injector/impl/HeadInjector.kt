@@ -49,7 +49,7 @@ class HeadInjector(
 
         // 如果方法有返回值且目标方法是 void，需要弹出
         if (AsmMethodCallGenerator.needsPopReturnValue(asmMethod, target)) {
-            il.add(InsnNode(Opcodes.POP))
+            AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
         }
 
         // 如果需要 CallbackInfo，检查是否需要取消

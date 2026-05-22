@@ -49,7 +49,7 @@ class TailInjector(
 
         // 如果方法有返回值且目标方法是 void，需要弹出
         if (AsmMethodCallGenerator.needsPopReturnValue(asmMethod, target)) {
-            il.add(InsnNode(Opcodes.POP))
+            AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
         }
 
         // 查找所有 RETURN 指令并在第一个之前插入
