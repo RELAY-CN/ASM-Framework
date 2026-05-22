@@ -121,6 +121,42 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun inlineHeadIntoNonVoidTargetDoesNotInlineHandlerReturnInstruction() {
+        AsmRegistry.register(InlineVoidHeadReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
+    fun inlineHeadWithReturningHandlerDoesNotReturnFromTarget() {
+        AsmRegistry.register(InlineStringHeadReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
+    fun inlineReturnInjectionDoesNotReturnFromTarget() {
+        AsmRegistry.register(InlineStringReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -611,6 +647,29 @@ class FrameworkReliabilityTest {
                 // ignored for test fixture
             }
         }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object InlineVoidHeadReturnTargetMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", inline = true)
+        @JvmStatic
+        fun injectInline() {
+            "side-effect".length
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object InlineStringHeadReturnTargetMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", inline = true)
+        @JvmStatic
+        fun injectInline(): String = "handler"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object InlineStringReturnTargetMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN, inline = true)
+        @JvmStatic
+        fun injectInline(): String = "handler"
     }
 
     @AsmMixin("InlineTarget")
