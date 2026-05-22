@@ -53,6 +53,7 @@ class ModifyReturnValueInjector(
 
                 // 检查 ASM 方法的参数
                 val asmParamTypes = Type.getArgumentTypes(asmMethod)
+                validateHandlerSignature(target, returnType, asmParamTypes)
 
                 // ASM 方法的参数应该是：
                 // 1. 第一个参数（可选）：原始返回值
@@ -82,8 +83,7 @@ class ModifyReturnValueInjector(
                     var paramVarIndex = if (isStatic) 0 else 1
                     val targetParamTypes = Type.getArgumentTypes(target.desc)
 
-                    // 只加载前 targetParamCount 个参数
-                    for (i in 0 until minOf(targetParamCount, targetParamTypes.size)) {
+                    for (i in 0 until targetParamCount) {
                         val paramType = targetParamTypes[i]
                         InstructionUtil.loadParam(paramType, paramVarIndex).let { il.add(it) }
                         paramVarIndex += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
@@ -167,6 +167,42 @@ class ModifyReturnValueInjector(
         }
 
         return transformed
+    }
+
+    private fun validateHandlerSignature(
+        target: MethodNode,
+        returnType: Type,
+        asmParamTypes: Array<Type>,
+    ) {
+        val asmReturnType = Type.getReturnType(asmMethod)
+        if (asmReturnType != returnType) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} return type ($asmReturnType) must match target method ${target.name}${target.desc} return type ($returnType)",
+            )
+        }
+
+        val firstParamIsReturnValue = asmParamTypes.isNotEmpty() && asmParamTypes[0] == returnType
+        val targetParamStart = if (firstParamIsReturnValue) 1 else 0
+        val expectedTargetParams = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = asmParamTypes.size - targetParamStart
+
+        if (requestedTargetParamCount > expectedTargetParams.size) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${expectedTargetParams.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = expectedTargetParams[index]
+            val actual = asmParamTypes[targetParamStart + index]
+            if (actual != expected) {
+                throw IllegalArgumentException(
+                    "ASM method ${asmMethod.name} parameter #${targetParamStart + index} ($actual) " +
+                        "must match target method ${target.name}${target.desc} parameter #$index ($expected)",
+                )
+            }
+        }
     }
 
     /**
