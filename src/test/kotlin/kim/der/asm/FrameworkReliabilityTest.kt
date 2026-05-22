@@ -6,6 +6,9 @@ package kim.der.asm
 
 import kim.der.asm.api.annotation.Accessor
 import kim.der.asm.api.annotation.AsmMixin
+import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Redirect
 import kim.der.asm.api.annotation.RemoveMethod
 import kim.der.asm.api.annotation.RemoveSynchronized
 import kim.der.asm.transformer.AsmProcessor
@@ -74,6 +77,14 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectWithInvalidHandlerSignatureFailsDuringTransform() {
+        AsmRegistry.register(InvalidRedirectHandlerMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        }
+    }
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -120,6 +131,18 @@ class FrameworkReliabilityTest {
         fun getMissingField(): String = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("RedirectTarget")
+    object InvalidRedirectHandlerMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun invalidHandler(unexpected: Int): String = unexpected.toString()
+    }
     @AsmMixin("SyncTarget")
     object RemoveBlockSynchronizedMixin {
         @RemoveSynchronized("blockSync(Ljava/lang/Object;)V")
@@ -142,6 +165,21 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun redirectTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RedirectTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "call", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" value ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
     private fun syncTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SyncTarget", null, "java/lang/Object", null)
@@ -177,4 +215,5 @@ class FrameworkReliabilityTest {
         return classNode
     }
 }
+
 

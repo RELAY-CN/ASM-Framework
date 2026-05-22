@@ -295,64 +295,27 @@ class TestMixin {
 
         val clazz = loadClass(transformed, "Test")
         val instance = clazz.getDeclaredConstructor().newInstance()
-        
-        println("\n========== Redirect 测试 ==========")
-        
-        // 测试 comprehensiveTest() 方法，验证 Redirect 是否生效
+
         val comprehensiveTest = clazz.getMethod("comprehensiveTest")
         comprehensiveTest.isAccessible = true
         val result = comprehensiveTest.invoke(instance) as String
-        
-        println("原始预期结果应该包含：")
-        println("  - StaticFinalString (testB0)")
-        println("  - DefaultConstructor (testA0)")
-        println("  - ParentMethod (parentMethod)")
-        println("  - InterfaceImpl-Test (interfaceMethod)")
-        println()
-        println("如果 Redirect 生效，结果应该包含：")
-        println("  - Redirected-testB0")
-        println("  - Redirected-testA0")
-        println("  - Redirected-parentMethod")
-        println("  - Redirected-interfaceMethod-Test")
-        println()
-        println("实际结果：")
-        println(result)
-        println()
-        
-        // 验证重定向是否生效
-        val hasRedirectTestB0 = result.contains("Redirected-testB0")
-        val hasRedirectTestA0 = result.contains("Redirected-testA0")
-        val hasRedirectParentMethod = result.contains("Redirected-parentMethod")
-        val hasRedirectInterfaceMethod = result.contains("Redirected-interfaceMethod")
-        
-        println("Redirect 生效检查：")
-        println("  testB0: ${if (hasRedirectTestB0) "✓ 已重定向" else "✗ 未重定向"}")
-        println("  testA0: ${if (hasRedirectTestA0) "✓ 已重定向" else "✗ 未重定向"}")
-        println("  parentMethod: ${if (hasRedirectParentMethod) "✓ 已重定向" else "✗ 未重定向"}")
-        println("  interfaceMethod: ${if (hasRedirectInterfaceMethod) "✓ 已重定向" else "✗ 未重定向"}")
-        println()
-        
-        if (hasRedirectTestB0 || hasRedirectTestA0 || hasRedirectParentMethod || hasRedirectInterfaceMethod) {
-            println("✓ Redirect 功能正常工作！")
-        } else {
-            println("⚠ Redirect 未生效，可能的原因：")
-            println("  1. Redirect 功能尚未实现")
-            println("  2. 方法签名不匹配")
-            println("  3. 注入点查找失败")
-        }
-        println("=====================================\n")
-        
-        assertNotNull(result, "comprehensiveTest 应该返回结果")
-        
-        // 测试 testC0() 方法，验证 println 重定向
-        println("测试 println 重定向：")
+
+        assertEquals(true, result.contains("Redirected-testB0"), "testB0 调用应该被重定向")
+        assertEquals(true, result.contains("Redirected-testA0"), "testA0 调用应该被重定向")
+        assertEquals(true, result.contains("Redirected-parentMethod"), "parentMethod 调用应该被重定向")
+        assertEquals(true, result.contains("Redirected-interfaceMethod-Test"), "interfaceMethod 调用应该被重定向")
+
+        val lambdaTest = clazz.getMethod("lambdaTest")
+        val lambdaResult = lambdaTest.invoke(instance) as String
+        assertEquals(true, lambdaResult.contains("Redirected-Lambda"), "Supplier.get 调用应该被重定向")
+
+        val enumTest = clazz.getMethod("enumTest")
+        val enumResult = enumTest.invoke(instance) as String
+        assertEquals(true, enumResult.contains("Redirected-EnumDescription"), "枚举方法调用应该被重定向")
+
         val testC0 = clazz.getMethod("testC0", String::class.java)
         val testC0Result = testC0.invoke(instance, "TestRedirect") as String
-        println("testC0 返回值: $testC0Result")
-        println("(检查上面的输出是否包含 [REDIRECTED] 前缀)")
-        println()
-        
-        assertNotNull(testC0Result, "testC0 应该返回结果")
+        assertEquals("TestRedirecttestC0", testC0Result, "println 重定向不应改变 testC0 返回值")
     }
 
     // ========== This Access 测试 ==========
@@ -719,3 +682,5 @@ class TestMixin {
         return loader.loadClass(className)
     }
 }
+
+
