@@ -841,26 +841,7 @@ class TargetClassContext(
     ): Boolean {
         val targetMethod = findTargetMethod(annotation.method)
         if (targetMethod == null) {
-            // 如果找不到目标方法，记录警告但继续处理其他 asm
-            val availableMethods = classNode.methods.joinToString(", ") { "${it.name}${it.desc}" }
-            val parentMethods = collectParentMethods()
-            val errorMsg =
-                buildString {
-                    append(
-                        "Warning: Cannot find target method ${annotation.method} in class $className for asm ${asmInfo.asmClass.name}.\n",
-                    )
-                    append("  Available methods in $className: [$availableMethods]\n")
-                    if (parentMethods.isNotEmpty()) {
-                        append("  Parent class methods:\n")
-                        parentMethods.forEach { (parentName, methods) ->
-                            append("    $parentName: [${methods.joinToString(", ")}]\n")
-                        }
-                    } else if (classNode.superName != null && classNode.superName != "java/lang/Object") {
-                        append("  Note: Parent class is ${classNode.superName}, but methods could not be loaded.\n")
-                    }
-                }
-            System.err.println(errorMsg)
-            return false
+            throw IllegalStateException(buildMissingTargetMethodMessage(annotation.method))
         }
 
         // 覆写方法：清空原方法体并替换为 asm 方法的内容
@@ -1047,7 +1028,8 @@ class TargetClassContext(
                 annotation.method
             }
 
-        val targetMethod = findTargetMethod(methodSignature) ?: return false
+        val targetMethod = findTargetMethod(methodSignature)
+            ?: throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
 
         // 从类中移除方法
         classNode.methods.remove(targetMethod)
@@ -1069,7 +1051,8 @@ class TargetClassContext(
                 annotation.method
             }
 
-        val targetMethod = findTargetMethod(methodSignature) ?: return false
+        val targetMethod = findTargetMethod(methodSignature)
+            ?: throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
 
         removeSynchronizedSemantics(targetMethod)
 
@@ -1090,6 +1073,23 @@ class TargetClassContext(
         }
 
         methodNode.access = methodNode.access and Opcodes.ACC_SYNCHRONIZED.inv()
+    }
+
+    private fun buildMissingTargetMethodMessage(methodSignature: String): String {
+        val availableMethods = classNode.methods.joinToString(", ") { "${it.name}${it.desc}" }
+        val parentMethods = collectParentMethods()
+        return buildString {
+            append("Cannot find target method $methodSignature in class $className for asm ${asmInfo.asmClass.name}.\n")
+            append("  Available methods in $className: [$availableMethods]\n")
+            if (parentMethods.isNotEmpty()) {
+                append("  Parent class methods:\n")
+                parentMethods.forEach { (parentName, methods) ->
+                    append("    $parentName: [${methods.joinToString(", ")}]\n")
+                }
+            } else if (classNode.superName != null && classNode.superName != "java/lang/Object") {
+                append("  Note: Parent class is ${classNode.superName}, but methods could not be loaded.\n")
+            }
+        }
     }
     /**
      * 构建方法签名

@@ -205,6 +205,33 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun overwriteWithMissingTargetMethodFailsDuringTransform() {
+        AsmRegistry.register(MissingOverwriteTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun removeMethodWithMissingTargetFailsDuringTransform() {
+        AsmRegistry.register(MissingRemoveMethodTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun removeSynchronizedWithMissingTargetFailsDuringTransform() {
+        AsmRegistry.register(MissingRemoveSynchronizedTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun registryAllowsConcurrentReadsAndWrites() {
         val executor = Executors.newFixedThreadPool(8)
         val start = CountDownLatch(1)
@@ -362,6 +389,30 @@ class FrameworkReliabilityTest {
     class MissingShadowMethodMixin {
         @Shadow
         private fun missing(): String = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingOverwriteTargetMixin {
+        @Overwrite("missing()V")
+        @JvmStatic
+        fun missing() {
+        }
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingRemoveMethodTargetMixin {
+        @RemoveMethod("missing()V")
+        @JvmStatic
+        fun missing() {
+        }
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingRemoveSynchronizedTargetMixin {
+        @RemoveSynchronized("missing()V")
+        @JvmStatic
+        fun missing() {
+        }
     }
 
     @AsmMixin("SyncTarget")
