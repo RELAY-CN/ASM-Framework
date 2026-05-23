@@ -14,20 +14,29 @@ import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
 
 /**
- * 参数映射工具
- * 用于将目标方法的参数映射到 ASM 方法的参数
+ * 参数映射工具。
+ *
+ * 用于在生成 ASM 方法调用指令时，把目标方法的局部变量槽位映射到 ASM 方法参数。
+ * 当前映射按声明顺序匹配参数，并支持在 ASM 方法首参中跳过 [CallbackInfo]、为实例方法传入目标 `this`。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object ParameterMapper {
     /**
-     * 生成加载参数的指令
+     * 生成加载参数的指令。
+     *
+     * 该方法会向 [il] 追加 `load` 指令；若 ASM 方法参数无法映射到目标方法参数，会抛出异常而不是静默跳过。
      *
      * @param il 指令列表
      * @param targetMethod 目标方法
      * @param asmMethod ASM 方法
      * @param skipCallbackInfo 是否跳过 CallbackInfo 参数
      * @param targetClassName 目标类名（用于传递 this 参数）
+     * @throws IllegalStateException ASM 方法参数无法映射到目标方法参数时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun loadParameters(
         il: InsnList,
@@ -90,7 +99,14 @@ object ParameterMapper {
     }
 
     /**
-     * 加载单个参数
+     * 加载单个参数。
+     *
+     * @param il 指令列表
+     * @param paramType 参数类型
+     * @param varIndex 局部变量槽位索引
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun loadParameter(
         il: InsnList,
@@ -101,7 +117,16 @@ object ParameterMapper {
     }
 
     /**
-     * 检查是否可以赋值
+     * 检查 ASM 方法参数类型是否可以接收目标方法参数类型。
+     *
+     * 基本类型必须完全匹配；对象类型优先尝试类加载后的继承判断，加载失败时退回到名称匹配。
+     *
+     * @param from ASM 方法参数类型
+     * @param toType 目标方法参数类型
+     * @return 可以赋值时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun canAssign(
         from: Class<*>,
