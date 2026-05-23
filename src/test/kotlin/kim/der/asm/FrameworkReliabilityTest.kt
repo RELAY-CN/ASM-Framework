@@ -389,6 +389,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantMatchesExplicitNullConstant() {
+        AsmRegistry.register(NullModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NullConstantTarget", nullConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NullConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed", result)
+    }
+
+    @Test
     fun shadowWithMissingFieldFailsDuringTransform() {
         AsmRegistry.register(MissingShadowFieldMixin::class.java)
 
@@ -1043,6 +1055,13 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "changed"
     }
 
+    @AsmMixin("NullConstantTarget")
+    object NullModifyConstantMixin {
+        @ModifyConstant(method = "value()Ljava/lang/Object;", constant = "null")
+        @JvmStatic
+        fun modify(original: Any?): Any = "changed"
+    }
+
     @AsmMixin("StrictTarget")
     class MissingShadowFieldMixin {
         @Shadow
@@ -1568,6 +1587,22 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun nullConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NullConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/Object;", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun inlineTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InlineTarget", null, "java/lang/Object", null)
