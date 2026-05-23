@@ -17,15 +17,28 @@ import org.objectweb.asm.tree.analysis.SourceInterpreter
 import java.lang.reflect.Method
 
 /**
- * Overwrite 注入器
- * 完全覆盖目标方法的实现
+ * Overwrite 注入器。
+ *
+ * 从 ASM 类字节码中提取当前 ASM 方法体，清空目标方法后复制方法体、异常处理和局部变量信息。
+ * 复制完成后会适配参数/返回值差异，并重写 Shadow/Copy 引用到目标类。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class OverwriteInjector(
     method: Method,
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 用 ASM 方法体覆盖目标方法。
+     *
+     * @param target 目标方法
+     * @return 覆盖成功时返回 `true`
+     * @throws IllegalStateException 无法提取 ASM 方法体，或返回/参数适配不受支持时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         // 获取 ASM 方法的字节码
         val asmClassBytes = getAsmClassBytes()

@@ -15,15 +15,28 @@ import org.objectweb.asm.tree.*
 import java.lang.reflect.Method
 
 /**
- * HEAD 注入器
- * 在方法开头注入代码
+ * HEAD 注入器。
+ *
+ * 在目标方法第一条指令前插入 ASM 方法调用；当 ASM 方法需要 [kim.der.asm.api.annotation.CallbackInfo] 时，
+ * 会创建回调对象并在取消分支生成提前返回逻辑。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class HeadInjector(
     method: Method,
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在目标方法开头注入 ASM 调用。
+     *
+     * @param target 目标方法
+     * @return 成功插入指令后返回 `true`
+     * @throws RuntimeException 参数映射、返回值生成或字节码结构不合法时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         val il = InsnList()

@@ -17,16 +17,30 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * Redirect 注入器
- * 重定向方法调用
+ * Redirect 注入器。
+ *
+ * 查找目标方法中的匹配调用指令，并用 ASM 方法调用替换原调用点。
+ * 目标签名可包含 owner，也可只包含方法名与描述符；缺少方法描述符时会被视为非法签名。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class RedirectInjector(
     method: Method,
     asmInfo: AsmInfo,
     private val targetMethodSignature: String,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 替换目标方法中的匹配调用点。
+     *
+     * @param target 目标方法
+     * @return 至少替换一个调用点时返回 `true`
+     * @throws IllegalArgumentException 目标调用签名无法解析时抛出
+     * @throws RuntimeException 替换调用或返回值适配失败时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(targetMethodSignature)
 

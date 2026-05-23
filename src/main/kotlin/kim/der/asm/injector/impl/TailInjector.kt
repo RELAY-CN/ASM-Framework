@@ -15,15 +15,28 @@ import org.objectweb.asm.tree.*
 import java.lang.reflect.Method
 
 /**
- * TAIL 注入器
- * 在方法结尾（所有 RETURN 之前）注入代码
+ * TAIL 注入器。
+ *
+ * 在目标方法的返回指令之前插入 ASM 方法调用。当前实现会对每个 RETURN 位置插入调用副本；
+ * 若方法没有 RETURN 指令，则退回到方法末尾插入。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class TailInjector(
     method: Method,
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在目标方法尾部注入 ASM 调用。
+     *
+     * @param target 目标方法
+     * @return 成功插入指令后返回 `true`
+     * @throws RuntimeException 参数映射或字节码结构不合法时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         val il = InsnList()

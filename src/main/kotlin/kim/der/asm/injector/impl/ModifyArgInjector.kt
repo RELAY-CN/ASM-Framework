@@ -14,16 +14,31 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * ModifyArg 注入器
- * 修改方法参数
+ * ModifyArg 注入器。
+ *
+ * 在目标方法开头读取指定参数槽位，调用 ASM 方法得到新值后写回原槽位。
+ * 当前实现按参数索引直接修改方法入口处的参数值。
+ *
+ * @param argIndex 要修改的目标参数索引，从 0 开始
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class ModifyArgInjector(
     method: Method,
     asmInfo: AsmInfo,
     private val argIndex: Int,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在目标方法入口修改指定参数。
+     *
+     * @param target 目标方法
+     * @return 参数索引合法且成功插入修改逻辑时返回 `true`
+     * @throws IllegalArgumentException 参数索引非法、ASM 方法参数或返回类型不匹配时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val targetParamTypes = Type.getArgumentTypes(target.desc)
 
