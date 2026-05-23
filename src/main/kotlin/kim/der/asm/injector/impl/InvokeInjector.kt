@@ -18,15 +18,30 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * Invoke 注入器
- * 在方法调用前后注入代码
+ * INVOKE 注入器。
+ *
+ * 根据 [kim.der.asm.api.annotation.AsmInject.at] 定位目标方法调用，
+ * 并按 shift 语义在调用前、调用后或替换调用点插入 ASM 方法调用。
+ * 当注解缺少目标调用签名时返回未修改。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class InvokeInjector(
     method: Method,
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在匹配的调用点附近注入 ASM 调用。
+     *
+     * @param target 目标方法
+     * @return 至少命中一个调用点并插入指令时返回 `true`
+     * @throws IllegalArgumentException 调用点签名无法解析时抛出
+     * @throws RuntimeException 参数映射或字节码结构不合法时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         // 从 @AsmInject 注解中获取 @At 信息
         val injectAnnotation =

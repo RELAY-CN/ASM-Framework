@@ -14,15 +14,28 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * ModifyReturnValue 注入器
- * 修改返回值
+ * ModifyReturnValue 注入器。
+ *
+ * 在非 void 方法的返回指令前保存原始返回值，并调用 ASM 方法生成替换返回值。
+ * void 方法没有可修改的返回值，因此会直接返回未修改。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class ModifyReturnValueInjector(
     method: Method,
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在目标方法返回前修改返回值。
+     *
+     * @param target 目标方法
+     * @return 至少命中一个非 void 返回点并插入修改逻辑时返回 `true`
+     * @throws IllegalArgumentException ASM 方法参数或返回类型与目标方法不匹配时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val returnType = Type.getReturnType(target.desc)
 

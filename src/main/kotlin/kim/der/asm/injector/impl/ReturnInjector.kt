@@ -15,15 +15,28 @@ import org.objectweb.asm.tree.*
 import java.lang.reflect.Method
 
 /**
- * RETURN 注入器
- * 在每个 RETURN 之前注入代码
+ * RETURN 注入器。
+ *
+ * 在目标方法的每个返回指令前插入 ASM 方法调用。返回值方法会先把原始返回值保存到局部变量，
+ * 以便 CallbackInfo 或 ASM 方法能够读取并替换返回结果。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class ReturnInjector(
     method: Method,
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在所有返回点前注入 ASM 调用。
+     *
+     * @param target 目标方法
+     * @return 至少命中一个返回点并插入指令时返回 `true`
+     * @throws RuntimeException 参数映射、返回值处理或字节码结构不合法时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val instructions = target.instructions
         var transformed = false

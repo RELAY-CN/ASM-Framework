@@ -14,16 +14,31 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * ModifyConstant 注入器
- * 修改方法中的常量值
+ * ModifyConstant 注入器。
+ *
+ * 遍历目标方法中的常量加载指令，并用 ASM 方法返回值替换匹配常量。
+ * 当 [constantValue] 为 `null` 时仅按常量类型匹配；指定值时会同时校验常量文本。
+ *
+ * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 class ModifyConstantInjector(
     method: Method,
     asmInfo: AsmInfo,
     private val constantValue: String? = null,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 替换目标方法中匹配的常量。
+     *
+     * @param target 目标方法
+     * @return 至少替换一个常量时返回 `true`
+     * @throws IllegalArgumentException ASM 方法参数或返回类型与常量类型不匹配时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun inject(target: MethodNode): Boolean {
         val instructions = target.instructions
         var transformed = false
