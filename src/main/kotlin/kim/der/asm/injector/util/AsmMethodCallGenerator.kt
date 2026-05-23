@@ -12,20 +12,31 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
- * ASM 方法调用生成器
- * 生成调用 ASM 方法的字节码指令
+ * ASM 方法调用生成器。
+ *
+ * 负责生成从目标方法跳转到 ASM 方法的调用指令，包括加载 Kotlin `object` 单例、普通类实例缓存、
+ * CallbackInfo 局部变量和目标方法参数。该工具只追加指令，不负责把指令插入到目标方法的具体位置。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object AsmMethodCallGenerator {
     /**
-     * 生成调用 ASM 方法的指令
+     * 生成调用 ASM 方法的指令。
+     *
+     * 非静态 ASM 方法会先加载实例；静态或 `@JvmStatic` 方法会直接使用 `INVOKESTATIC`。
+     * 当 [callbackVarIndex] 不为 `null` 时，会先加载对应的 [kim.der.asm.api.annotation.CallbackInfo] 局部变量。
      *
      * @param il 指令列表
      * @param asmMethod ASM 方法
      * @param asmInfo ASM 信息
      * @param targetMethod 目标方法
      * @param callbackVarIndex CallbackInfo 局部变量索引（如果存在）
+     * @param targetClassName 目标类 internal name；为空时从 [AsmInfo.targets] 推断
+     * @throws IllegalStateException 参数映射失败时由 [ParameterMapper] 抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun generateMethodCall(
         il: InsnList,
@@ -138,16 +149,25 @@ object AsmMethodCallGenerator {
     }
 
     /**
-     * 检查方法是否需要 CallbackInfo 参数
+     * 检查方法是否需要 CallbackInfo 参数。
+     *
+     * @param asmMethod ASM 方法
+     * @return 首个参数是 [kim.der.asm.api.annotation.CallbackInfo] 时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun needsCallbackInfo(asmMethod: Method): Boolean =
         asmMethod.parameterTypes.isNotEmpty() &&
             asmMethod.parameterTypes[0] == kim.der.asm.api.annotation.CallbackInfo::class.java
 
     /**
-     * 生成创建 CallbackInfo 实例的指令
+     * 生成创建 CallbackInfo 实例的指令。
      *
      * @param il 指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun generateCallbackInfoCreation(il: InsnList) {
         il.add(TypeInsnNode(Opcodes.NEW, Type.getInternalName(kim.der.asm.api.annotation.CallbackInfo::class.java)))
@@ -164,8 +184,16 @@ object AsmMethodCallGenerator {
     }
 
     /**
-     * 检查是否需要弹出 ASM 方法的返回值
-     * 当 ASM 方法有返回值但目标方法是 void 时，需要弹出返回值
+     * 检查是否需要弹出 ASM 方法的返回值。
+     *
+     * 当 ASM 方法有返回值但目标方法是 void 时，调用后需要用 POP/POP2 丢弃返回值以保持栈平衡。
+     *
+     * @param asmMethod ASM 方法
+     * @param targetMethod 目标方法
+     * @return 需要丢弃返回值时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun needsPopReturnValue(
         asmMethod: Method,
@@ -176,6 +204,12 @@ object AsmMethodCallGenerator {
 
     /**
      * 弹出 ASM 方法未使用的返回值。
+     *
+     * @param il 指令列表
+     * @param asmMethod ASM 方法
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun generatePopReturnValue(
         il: InsnList,
@@ -188,7 +222,13 @@ object AsmMethodCallGenerator {
     }
 
     /**
-     * 检查是否是 Kotlin object（有 INSTANCE 字段）
+     * 检查 ASM 类是否是 Kotlin `object`。
+     *
+     * @param asmInfo ASM 注册信息
+     * @return 能读取到非空 `INSTANCE` 字段时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun isKotlinObject(asmInfo: AsmInfo): Boolean =
         try {
