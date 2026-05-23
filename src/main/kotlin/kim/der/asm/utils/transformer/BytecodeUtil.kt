@@ -40,7 +40,7 @@ object BytecodeUtil {
      */
     private val CONSTANTS_VALUES =
         arrayOf<Any?>(
-            Type.VOID_TYPE, // ACONST_NULL
+            null, // ACONST_NULL
             -1,
             0,
             1,
