@@ -16,6 +16,14 @@ import java.security.ProtectionDomain
  * @date 2025-11-24
  */
 open class AsmCore {
+    /**
+     * 设置当前 JVM 进程内的 agent 实例。
+     *
+     * 该入口由 [AsmBootstrap] 初始化时调用，用于让静态 [transform] 方法复用同一个 transformer 实例。
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     protected val setAgent = { agent: AsmBootstrap -> Companion.agent = agent }
 
     companion object {
@@ -30,6 +38,9 @@ open class AsmCore {
          * @param className 目标类 internal name，例如 `"java/util/List"`
          * @param classfileBuffer 原始 classfile 字节码
          * @return 转换后的字节码；若未启用 agent 或无需改写则返回原始字节码
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         @JvmStatic
         fun transform(
@@ -47,6 +58,9 @@ open class AsmCore {
          * @param protectionDomain 保护域信息；可能为 `null`
          * @param classfileBuffer 原始 classfile 字节码
          * @return 转换后的字节码；若未启用 agent 或无需改写则返回原始字节码
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         @JvmStatic
         fun transform(

@@ -36,6 +36,7 @@ class AsmBootstrap :
      *
      * 当 [AsmProcessor.shouldTransform] 返回 `true` 时读取 `classfileBuffer` 为 ASM Tree 的 [org.objectweb.asm.tree.ClassNode]，
      * 并应用所有匹配的改写；若没有任何改写生效，则返回原始字节码以避免不必要的重写。
+     * 当前实现只使用 [loader]、[className] 与 [classfileBuffer]，重定义类与保护域参数仅保留 Java agent 契约。
      *
      * @param loader 定义该类的 [ClassLoader]；当使用 bootstrap loader 时可能为 `null`
      * @param className 目标类 internal name，例如 `"java/util/List"`
@@ -44,6 +45,9 @@ class AsmBootstrap :
      * @param classfileBuffer 原始 classfile 字节码；不得修改入参数组内容
      * @return 转换后的字节码；若不需要转换则返回原始字节码
      * @throws IllegalClassFormatException 当输入不是合法 classfile 时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     @Throws(IllegalClassFormatException::class)
     override fun transform(
@@ -71,6 +75,11 @@ class AsmBootstrap :
          * JVM agent main 入口。
          *
          * 通过 [Instrumentation.addTransformer] 注册 [AsmBootstrap] 实例。
+         *
+         * @param instrumentation JVM 注入的 instrumentation 实例
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         @JvmStatic
         fun agentmain(instrumentation: Instrumentation) {
