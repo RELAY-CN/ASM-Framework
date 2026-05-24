@@ -239,12 +239,14 @@ annotation class ModifyArgs(
  * - 返回类型必须兼容原 receiver 类型
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 为 [InjectionPoint.INVOKE] 时，通过 [At.target] 指定要匹配的实例方法调用
+ * - [InjectionPoint.INVOKE] 模式可使用 [slice] 把候选调用限制在一段 INVOKE 边界之间，边界指令本身不参与匹配
  * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
  *
  * @param method 目标方法签名
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
- * @param slice 预留参数，当前实现未使用
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE] receiver 改写支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
