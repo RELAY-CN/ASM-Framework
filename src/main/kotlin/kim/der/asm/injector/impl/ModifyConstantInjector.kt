@@ -50,9 +50,11 @@ class ModifyConstantInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    override fun injectCount(target: MethodNode): Int {
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val insns = instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
         var matchedOrdinal = 0
@@ -99,11 +101,11 @@ class ModifyConstantInjector(
 
             // 注入常量修改
             if (injectConstantModifier(instructions, insn, target, constantType)) {
-                transformed = true
+                injectionCount++
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal

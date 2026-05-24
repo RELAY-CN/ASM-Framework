@@ -532,12 +532,20 @@ class TargetClassContext(
                 annotation.ordinal,
                 annotation.slice,
             )
-        val transformed = injector.inject(targetMethod)
+        val injectionCount = injector.injectCount(targetMethod)
+        if (annotation.require > 0 || annotation.allow >= 0 || annotation.expect != 1) {
+            return requireModifyConstantCount(
+                injectionCount,
+                annotation,
+                method,
+                annotation.method,
+            )
+        }
         if (annotation.constant.isEmpty()) {
-            return transformed
+            return injectionCount > 0
         }
         return requireInjectorMatched(
-            transformed,
+            injectionCount > 0,
             "@ModifyConstant",
             method,
             annotation.method,
@@ -1389,6 +1397,37 @@ class TargetClassContext(
         if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
             System.err.println(
                 "Warning: @AsmInject handler ${method.name} expected ${annotation.expect} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        return injectionCount > 0
+    }
+
+    private fun requireModifyConstantCount(
+        injectionCount: Int,
+        annotation: ModifyConstant,
+        method: Method,
+        targetMethodSignature: String,
+    ): Boolean {
+        val requiredCount = if (annotation.require > 0) annotation.require else 1
+        if (injectionCount < requiredCount) {
+            throw IllegalStateException(
+                "@ModifyConstant handler ${method.name} requires at least $requiredCount injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
+            throw IllegalStateException(
+                "@ModifyConstant handler ${method.name} allows at most ${annotation.allow} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
+            System.err.println(
+                "Warning: @ModifyConstant handler ${method.name} expected ${annotation.expect} injection(s), " +
                     "actual $injectionCount in target method $targetMethodSignature of class $className",
             )
         }
