@@ -579,6 +579,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgSliceLimitsInvokeCallArgumentMatchesBetweenFromAndTo() {
+        AsmRegistry.register(InvokeModifyArgSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceInvokeModifyArgTarget", sliceInvokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceInvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre-original:inside-modified:outside-original", result)
+    }
+
+    @Test
     fun modifyArgAtConstructorInvokeRewritesSelectedArgument() {
         AsmRegistry.register(ConstructorModifyArgMixin::class.java)
 
@@ -3878,6 +3890,24 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "modified"
     }
 
+    @AsmMixin("SliceInvokeModifyArgTarget")
+    object InvokeModifyArgSliceMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified"
+    }
+
     @AsmMixin("ConstructorModifyArgTarget")
     object ConstructorModifyArgMixin {
         @ModifyArg(
@@ -7031,6 +7061,47 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceInvokeModifyArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceInvokeModifyArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 4)
             visitEnd()
         }
         cw.visitEnd()
