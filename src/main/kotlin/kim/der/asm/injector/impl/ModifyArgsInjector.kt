@@ -54,7 +54,18 @@ class ModifyArgsInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 在匹配调用点前插入参数组修改逻辑并返回实际修改数量。
+     *
+     * @param target 目标方法
+     * @return 实际写入参数组修改逻辑的调用点数量
+     * @throws IllegalArgumentException 调用点、handler 签名或目标方法参数不合法时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         if (at.value != InjectionPoint.INVOKE) {
             throw IllegalArgumentException("@ModifyArgs currently supports only INVOKE injection point")
         }
@@ -65,7 +76,7 @@ class ModifyArgsInjector(
         }
 
         val targetParamCount = validateHandlerSignature(target)
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
@@ -85,10 +96,10 @@ class ModifyArgsInjector(
 
             val il = buildArgsModification(target, insn, Type.getArgumentTypes(insn.desc), targetParamCount)
             target.instructions.insertBefore(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun buildArgsModification(
