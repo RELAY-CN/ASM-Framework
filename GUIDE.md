@@ -99,16 +99,26 @@ val transformedBytes = processor.transform(
 ### 支持的注解
 
 - **@AsmMixin** - 标记 Mixin 类
+- **@AddInterface** - 为目标类追加接口声明
+- **@RemoveInterface** - 从目标类移除接口声明
 - **@AsmInject** - 在指定位置注入代码
 - **@Overwrite** - 完全覆盖方法
 - **@ModifyArg** - 修改方法参数
+- **@ModifyArgs** - 修改方法调用参数组
+- **@ModifyReceiver** - 修改实例方法调用 receiver
+- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、字段读取或字段写入
+- **@WrapWithCondition** - 按条件跳过 `void` 调用、字段写入或数组元素写入
+- **@ModifyExpressionValue** - 修改表达式值
+- **@ModifyVariable** - 修改方法参数或局部变量
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
-- **@Redirect** - 重定向方法调用
+- **@Redirect** - 重定向方法调用、字段访问或简单数组元素访问
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
 - **@Copy** - 复制方法到目标类
+- **@AddField** - 添加字段
+- **@RemoveField** - 移除字段
 - **@RemoveMethod** - 移除方法
 - **@RemoveSynchronized** - 移除 synchronized
 - **@ReplaceAllMethods** - 替换所有方法
@@ -126,30 +136,268 @@ object LoggingMixin {
     fun logProcess(callback: CallbackInfo, param: String) {
         println("Processing: $param")
     }
+
+    @AsmInject(
+        method = "process(Ljava/lang/String;)V",
+        target = InjectionPoint.INVOKE,
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/io/PrintStream.println(Ljava/lang/String;)V",
+            shift = Shift.BEFORE,
+        ),
+    )
+    fun beforePrintln(message: String, param: String) {
+        println("About to print $message for $param")
+    }
 }
 ```
 
-### 场景 2: 修改方法参数
+普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`THROW`
+等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
+注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
+`param` 来自 `process` 目标方法。
+
+### 场景 2: 修改参数与局部变量
 
 ```kotlin
 @AsmMixin("com/example/Validator")
 object ValidationMixin {
-    @ModifyArg(method = "validate(Ljava/lang/String;)Z", index = 0)
-    fun sanitizeInput(input: String): String = input.trim().toLowerCase()
+    @ModifyArg(method = "validate(Ljava/lang/String;Ljava/lang/String;)Z", index = 1)
+    fun sanitizeInput(candidate: String, userId: String): String = "$userId:${candidate.trim().lowercase()}"
+
+    @ModifyArg(
+        method = "buildMessage(Ljava/lang/String;I)Ljava/lang/String;",
+        index = 0,
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+        ),
+        ordinal = 0,
+    )
+    fun rewriteConcatArgument(input: String, prefix: String, count: Int): String = "$prefix:${input.trim()}#$count"
+
+    @ModifyArgs(
+        method = "join(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/Text.combine(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+        ),
+        ordinal = 0,
+    )
+    fun rewriteJoinArguments(args: Args, prefix: String, count: Int) {
+        args.set(0, "$prefix:${args.get<String>(0).trim()}")
+        args.set(1, "normalized")
+        args.set(2, count)
+    }
+
+    @ModifyReceiver(
+        method = "format(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+        ),
+    )
+    fun rewriteConcatReceiver(receiver: String, prefix: String, count: Int): String = "$prefix$count"
+
+    @WrapOperation(
+        method = "decorate(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+        ),
+    )
+    fun wrapConcat(
+        receiver: String,
+        value: String,
+        operation: Operation<String>,
+        prefix: String,
+        count: Int,
+    ): String = operation.call("$prefix$count", value)
+
+    @WrapOperation(
+        method = "displayName(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/Player.name:Ljava/lang/String;",
+        ),
+    )
+    fun wrapNameRead(
+        player: Any,
+        operation: Operation<String>,
+        fallback: String,
+    ): String = operation.call(player).ifBlank { fallback }
+
+    @WrapOperation(
+        method = "rename(Ljava/lang/String;Ljava/lang/String;)V",
+        at = At(
+            value = InjectionPoint.FIELD_ASSIGN,
+            target = "com/example/Player.name:Ljava/lang/String;",
+        ),
+    )
+    fun wrapNameWrite(
+        player: Any,
+        value: String,
+        operation: Operation<Unit>,
+        name: String,
+        source: String,
+    ) {
+        operation.call(player, "$source:$value")
+        operation.call(player, name)
+    }
+
+    @WrapWithCondition(
+        method = "notify(Ljava/lang/String;I)V",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/Audit.emit(Ljava/lang/String;)V",
+        ),
+    )
+    fun shouldEmitAudit(message: String, prefix: String, count: Int): Boolean =
+        count > 0 && message.startsWith(prefix)
+
+    @WrapWithCondition(
+        method = "setEndpoint(Ljava/lang/String;Ljava/lang/String;)V",
+        at = At(
+            value = InjectionPoint.FIELD_ASSIGN,
+            target = "com/example/Client.endpoint:Ljava/lang/String;",
+        ),
+    )
+    fun shouldWriteEndpoint(client: Any, value: String, endpoint: String, profile: String): Boolean {
+        client.hashCode()
+        return value == endpoint && profile != "readonly"
+    }
+
+    @WrapWithCondition(
+        method = "setRoute(ILjava/lang/String;Z)V",
+        at = At(
+            value = InjectionPoint.FIELD_ASSIGN,
+            target = "com/example/Player.routes:[Ljava/lang/String;",
+            args = ["array=set"],
+        ),
+    )
+    fun shouldWriteRoute(
+        routes: Array<String>,
+        index: Int,
+        value: String,
+        routeIndex: Int,
+        route: String,
+        writable: Boolean,
+    ): Boolean = index == routeIndex && value == route && writable
+
+    @ModifyExpressionValue(
+        method = "format(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.trim()Ljava/lang/String;",
+        ),
+    )
+    fun rewriteTrimResult(value: String, prefix: String, count: Int): String = "$prefix:${value.lowercase()}#$count"
+
+    @ModifyExpressionValue(
+        method = "displayName(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/Player.name:Ljava/lang/String;",
+        ),
+    )
+    fun rewriteFieldValue(value: String, fallback: String): String = value.ifBlank { fallback }
+
+    @ModifyExpressionValue(
+        method = "routeName(I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/Player.routes:[Ljava/lang/String;",
+            args = ["array=get"],
+        ),
+    )
+    fun rewriteRouteValue(value: String, index: Int): String = "$index:$value"
+
+    @ModifyExpressionValue(
+        method = "newBuffer(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        at = At(
+            value = InjectionPoint.NEW,
+            target = "java/lang/StringBuilder",
+        ),
+    )
+    fun rewriteConstructedBuffer(value: StringBuilder, prefix: String): StringBuilder =
+        StringBuilder("$prefix:${value.length}")
+
+    @ModifyVariable(
+        method = "validate(Ljava/lang/String;)Z",
+        at = At(value = InjectionPoint.HEAD),
+        index = 1,
+    )
+    fun rewriteInputAtHead(input: String): String = input.trim()
+
+    @ModifyVariable(
+        method = "merge(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+        at = At(value = InjectionPoint.HEAD),
+        ordinal = 1,
+    )
+    fun rewriteSecondString(input: String): String = input.trim()
+
+    @ModifyVariable(
+        method = "normalize(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(value = InjectionPoint.STORE),
+        ordinal = 0,
+    )
+    fun rewriteStoredLocal(value: String, rawInput: String): String = "$rawInput:${value.trim()}"
+
+    @ModifyVariable(
+        method = "readNormalized()Ljava/lang/String;",
+        at = At(value = InjectionPoint.LOAD),
+        index = 1,
+    )
+    fun rewriteBeforeLoad(value: String): String = value.trim()
 }
 ```
+
+`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀。`@ModifyReceiver` 用于只替换实例方法调用 receiver 的场景，handler 第一个参数接收原 receiver 并返回兼容的新 receiver，原调用参数会按原顺序继续传给目标调用，后续参数可接收目标方法参数前缀。
+
+`@WrapOperation` 用于把匹配方法调用、字段读取或字段写入替换为 handler，并通过 `Operation` 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；`GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；`PUTFIELD` handler 先接收字段 owner 和待写入值，`PUTSTATIC` handler 先接收待写入值；下一参数必须是 `Operation<R>` 或 `Operation<Unit>`，后续可接收目标方法参数前缀。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作；当前支持 `INVOKE` 方法调用、`FIELD` 字段读取和 `FIELD_ASSIGN` 字段写入，不支持构造器调用或数组操作。
+
+`@WrapWithCondition` 用于保留原 `void` 调用、字段写入或数组元素写入但按条件跳过副作用的场景。
+handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用
+receiver（仅实例调用）和调用参数，字段写入模式下 handler 先接收字段 owner（仅实例字段）和待写入值。
+数组写入模式通过 `args = ["array=set"]` 指定，并让 handler 接收数组引用、`Int` 索引与待写入元素值，
+后续都可接收目标方法参数前缀。`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取或对象构造但
+改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值或已初始化对象并
+返回同类型新值，后续参数可接收目标方法参数前缀；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
+数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，数组读取模式通过 `args = ["array=get"]`
+指定，调用点可用 `ordinal` 精确选择。
+
+`@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值，后续参数可继续接收目标方法参数前缀。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 `ordinal` 选择第 N 个同类型匹配项。
 
 ### 场景 3: 修改返回值
 
 ```kotlin
 @AsmMixin("com/example/Cache")
 object CacheMixin {
-    @ModifyReturnValue(method = "get(Ljava/lang/String;)Ljava/lang/Object;")
+    @ModifyReturnValue(method = "get(Ljava/lang/String;)Ljava/lang/Object;", ordinal = 0)
     fun wrapResult(original: Any?): Any? = original ?: createDefault()
 }
 ```
 
-### 场景 4: 完全替换方法
+`@ModifyReturnValue` 默认会修改目标方法的全部非 void 返回点；`ordinal` 可限定只修改第 N 个返回点。
+
+### 场景 4: 修改常量
+
+```kotlin
+@AsmMixin("com/example/Rules")
+object RulesMixin {
+    @ModifyConstant(method = "maxPlayers()I", constant = "20", ordinal = 0)
+    @JvmStatic
+    fun expandLimit(original: Int): Int = original * 2
+
+    @ModifyConstant(method = "message(Ljava/lang/String;)Ljava/lang/String;", constant = "prefix-")
+    @JvmStatic
+    fun rewritePrefix(original: String, name: String): String = "$original$name"
+}
+```
+
+`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类常量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。
+
+### 场景 5: 完全替换方法
 
 ```kotlin
 @AsmMixin("com/example/LegacyClass")
@@ -160,7 +408,7 @@ object ModernizeMixin {
 }
 ```
 
-### 场景 5: 访问私有字段
+### 场景 6: 访问私有字段
 
 ```kotlin
 @AsmMixin("com/example/PrivateClass")
@@ -193,17 +441,59 @@ object InvokerMixin {
 }
 ```
 
-### 场景 7: 重定向方法调用
+### 场景 7: 重定向方法调用与字段访问
 
 ```kotlin
 @AsmMixin("com/example/NetworkClient")
 object RedirectMixin {
-    @Redirect(method = "connect()V", target = "java/net/Socket.connect(Ljava/net/SocketAddress;I)V")
-    fun redirectConnect(socket: Socket, address: SocketAddress, timeout: Int) {
+    @Redirect(
+        method = "connect(Ljava/lang/String;)V",
+        target = "java/net/Socket.connect(Ljava/net/SocketAddress;I)V",
+        ordinal = 0,
+    )
+    fun redirectConnect(socket: Socket, address: SocketAddress, timeout: Int, profile: String) {
         println("Custom connection logic")
+    }
+
+    @Redirect(
+        method = "getEndpoint(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(value = InjectionPoint.FIELD, target = "endpoint"),
+    )
+    fun redirectEndpoint(client: Any, profile: String): String = "local-$profile"
+
+    @Redirect(
+        method = "setEndpoint(Ljava/lang/String;Ljava/lang/String;)V",
+        at = At(value = InjectionPoint.FIELD_ASSIGN, target = "endpoint"),
+    )
+    fun redirectEndpointWrite(client: Any, value: String, endpoint: String, profile: String) {
+        println("blocked endpoint update: $value")
+    }
+
+    @Redirect(
+        method = "getRoute(I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/NetworkClient.routes:[Ljava/lang/String;",
+            args = ["array=get"],
+        ),
+    )
+    fun redirectRouteRead(routes: Array<String>, index: Int, profile: String): String = "$profile-${routes[index]}"
+
+    @Redirect(
+        method = "setRoute(ILjava/lang/String;)V",
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/NetworkClient.routes:[Ljava/lang/String;",
+            args = ["array=set"],
+        ),
+    )
+    fun redirectRouteWrite(routes: Array<String>, index: Int, value: String) {
+        routes[index] = value.trim()
     }
 }
 ```
+
+方法调用、字段读取、字段写入与简单数组元素访问重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、字段访问或数组元素访问需要的栈参数，后续可按顺序接收目标方法参数前缀。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`。
 
 ### 场景 8: 条件取消执行
 
@@ -218,6 +508,11 @@ object ConditionalMixin {
     }
 }
 ```
+
+`@WrapWithCondition` 可用于按条件跳过 `void` 调用、字段写入或数组元素写入。字段写入模式需要使用
+`At(value = InjectionPoint.FIELD_ASSIGN, target = "...")`，`PUTFIELD` handler 参数为字段 owner 与待写入值，
+`PUTSTATIC` handler 参数只包含待写入值，后续仍可追加目标方法参数前缀。数组元素写入使用
+`args = ["array=set"]`，handler 参数为数组引用、`Int` 索引与待写入元素值，返回 `false` 时跳过原 `xASTORE`。
 
 ### 场景 9: 修改返回值
 
@@ -244,6 +539,41 @@ object MultiInjectMixin {
     fun injectTail(callback: CallbackInfo) = println("After process")
 }
 ```
+
+### 场景 11: 指令点注入
+
+`FIELD`、`FIELD_ASSIGN`、`THROW` 可以把 handler 插入到具体字节码指令前后，`NEW` 可以插入到对象创建指令之前，适合观察字段访问、字段写入、对象创建或异常抛出位置。
+
+```kotlin
+@AsmMixin("com/example/Player")
+object FieldPointMixin {
+    @AsmInject(
+        method = "getName()Ljava/lang/String;",
+        target = InjectionPoint.FIELD,
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/Player.name:Ljava/lang/String;",
+            shift = Shift.BEFORE,
+        ),
+    )
+    @JvmStatic
+    fun beforeNameRead() {
+        println("name field will be read")
+    }
+
+    @AsmInject(
+        method = "createBuffer()Ljava/lang/StringBuilder;",
+        target = InjectionPoint.NEW,
+        at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+    )
+    @JvmStatic
+    fun beforeNewStringBuilder() {
+        println("StringBuilder will be created")
+    }
+}
+```
+
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、new 出来的对象或异常对象传给 handler。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
@@ -402,7 +732,7 @@ fun staticMethod() { }
 ### 多个 Mixin 冲突
 
 - 检查 Mixin 注册顺序
-- 使用 `ordinal` 参数控制注入顺序
+- 使用 `ordinal` 参数选择第 N 个匹配点，避免同一个注入处理器命中过多返回点、调用点或指令点
 - 考虑合并冲突的 Mixin
 
 ## 示例代码
@@ -412,6 +742,7 @@ fun staticMethod() { }
 - `InjectMixin.kt` - 注入示例
 - `OverwriteMixin.kt` - 覆盖示例
 - `ModifyArgMixin.kt` - 修改参数示例
+- `FrameworkReliabilityTest.kt` - `@ModifyVariable` 等可靠性测试
 - `ModifyReturnValueMixin.kt` - 修改返回值示例
 - `RedirectMixin.kt` - 重定向示例
 - `AccessorMixin.kt` - 访问器示例
