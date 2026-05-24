@@ -1135,6 +1135,7 @@ class TargetClassContext(
                 redirectTarget,
                 annotation.at.value,
                 annotation.ordinal,
+                annotation.slice,
                 annotation.at.args,
             )
         return requireInjectorMatched(
@@ -1879,6 +1880,7 @@ class TargetClassContext(
                         redirectTarget,
                         redirectAnnotation.at.value,
                         redirectAnnotation.ordinal,
+                        redirectAnnotation.slice,
                         redirectAnnotation.at.args,
                     )
                 if (injector.inject(methodNode)) {
