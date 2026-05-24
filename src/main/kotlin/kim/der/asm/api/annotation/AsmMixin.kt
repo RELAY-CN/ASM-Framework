@@ -215,12 +215,17 @@ annotation class ModifyArg(
  * - handler 必须返回 `void`
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 必须为 [InjectionPoint.INVOKE]，并通过 [At.target] 指定要匹配的方法调用
+ * - [require] / [allow] 可约束实际参数组修改数量，目标字节码漂移时会在转换阶段失败
+ * - [expect] 用于调试期望参数组修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
  * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param require 最小命中数；大于 0 时实际参数组修改数必须不少于该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
+ * @param allow 最大命中数；大于等于 0 时实际参数组修改数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -232,6 +237,9 @@ annotation class ModifyArgs(
     val at: At = At(value = InjectionPoint.INVOKE),
     val ordinal: Int = -1,
     val slice: Slice = Slice(),
+    val require: Int = 0,
+    val expect: Int = 1,
+    val allow: Int = -1,
     val remap: Boolean = false,
 )
 
