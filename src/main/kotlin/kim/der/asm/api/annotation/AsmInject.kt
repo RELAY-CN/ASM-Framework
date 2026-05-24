@@ -122,7 +122,7 @@ enum class InjectionPoint {
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式。
  *
  * @param value 预留字段，当前实现未使用
- * @param target 目标方法调用、字段、NEW 类型或 CHECKCAST 类型签名
+ * @param target 目标方法调用、构造器调用、字段、NEW 类型或 CHECKCAST 类型签名
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
  * @param args 附加定位参数；当前 [Redirect] 与 [WrapOperation] 支持 `array=get` 与 `array=set`，

@@ -360,19 +360,20 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 
 ### @Redirect
 
-重定向目标方法中的方法调用、字段读取、字段写入或简单数组元素访问。
+重定向目标方法中的方法调用、构造器调用、字段读取、字段写入或简单数组元素访问。
 
-方法调用重定向会替换匹配的调用指令。字段读取重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD`，
+方法调用重定向会替换匹配的调用指令。构造器重定向会替换常见 `NEW/DUP/args/INVOKESPECIAL <init>` 构造表达式。字段读取重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD`，
 会替换匹配的 `GETFIELD` / `GETSTATIC` 指令。字段写入重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD_ASSIGN`，
 会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
 并通过 `at.args = ["array=get"]` 或 `at.args = ["array=set"]` 区分数组读取与写入。
 
-方法调用、字段读取、字段写入与数组元素访问重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
+方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
 
 方法调用重定向的 handler 参数形态：
 
 - 实例方法调用：原调用 receiver、原调用参数，并可继续追加目标方法参数前缀
 - 静态方法调用：原调用参数，并可继续追加目标方法参数前缀
+- 构造器调用：原构造器参数，并可继续追加目标方法参数前缀；handler 必须返回构造器 owner 类型兼容对象
 
 字段访问重定向的 handler 参数形态：
 
@@ -386,13 +387,13 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 **参数：**
 
 - `method: String = ""` - 目标方法签名
-- `target: String = ""` - 要重定向的方法调用或字段访问签名
+- `target: String = ""` - 要重定向的方法调用、构造器调用或字段访问签名
 - `at: At = At()` - 注入位置；`at.value = InjectionPoint.FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` 可匹配数组元素访问，`FIELD_ASSIGN` 时按字段写入语义匹配
-- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、字段读取、字段写入与数组元素访问重定向中生效
+- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向中生效
 - `slice: Slice = Slice()` - 切片范围
 - `remap: Boolean = false` - 是否重映射
 
-方法调用、字段读取、字段写入与数组元素访问重定向都可用 `ordinal` 只替换第 N 个匹配点。
+方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向都可用 `ordinal` 只替换第 N 个匹配点。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
