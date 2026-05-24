@@ -641,10 +641,21 @@ object RulesMixin {
     @ModifyConstant(method = "message(Ljava/lang/String;)Ljava/lang/String;", constant = "prefix-")
     @JvmStatic
     fun rewritePrefix(original: String, name: String): String = "$original$name"
+
+    @ModifyConstant(
+        method = "messageInTrace(Ljava/lang/String;)Ljava/lang/String;",
+        constant = "prefix-",
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+    )
+    @JvmStatic
+    fun rewritePrefixInTrace(original: String): String = "trace-$original"
 }
 ```
 
-`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类常量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。
+`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类常量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。当目标方法中有多个相同常量时，可用 `Slice` 限制常量匹配范围；`from` 边界之后、`to` 边界之前的常量才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。
 
 ### 场景 5: 完全替换方法
 
