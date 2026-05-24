@@ -118,15 +118,15 @@ enum class InjectionPoint {
  * - [Redirect] 与 [WrapOperation] 可通过 [args] 中的 `array=get` 或 `array=set`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取或写入。
  * - [WrapWithCondition] 可通过 [args] 中的 `array=set`，把 [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素写入。
- * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get`，把 [InjectionPoint.FIELD]
- *   目标解释为数组元素读取表达式。
+ * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get` 或 `array=length`，
+ *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式。
  *
  * @param value 预留字段，当前实现未使用
  * @param target 目标方法调用、字段、NEW 类型或 CHECKCAST 类型签名
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
  * @param args 附加定位参数；当前 [Redirect] 与 [WrapOperation] 支持 `array=get` 与 `array=set`，
- * [WrapWithCondition] 支持 `array=set`，[ModifyExpressionValue] 支持 `array=get`
+ * [WrapWithCondition] 支持 `array=set`，[ModifyExpressionValue] 支持 `array=get` 与 `array=length`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */

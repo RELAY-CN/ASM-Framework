@@ -290,7 +290,7 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 
 ### @ModifyExpressionValue
 
-修改目标方法内匹配表达式产生的值。当前实现支持修改方法调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、数组元素读取值、`NEW` 对象构造完成后的实例，以及 `CHECKCAST` 类型转换完成后的对象值，适合保留原操作逻辑、只调整表达式结果的场景。
+修改目标方法内匹配表达式产生的值。当前实现支持修改方法调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、数组元素读取值、数组长度值、`NEW` 对象构造完成后的实例，以及 `CHECKCAST` 类型转换完成后的对象值，适合保留原操作逻辑、只调整表达式结果的场景。
 
 **参数：**
 
@@ -300,7 +300,7 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 - `slice: Slice = Slice()` - 切片范围，当前未使用
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值，并返回同类型的新值。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。该注解不会替换原调用、字段读取、数组读取、构造器调用或类型转换指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`At.target` 为类型 internal name 或 binary name。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
+`@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值，并返回同类型的新值。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。该注解不会替换原调用、字段读取、数组读取、构造器调用或类型转换指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组长度使用 `at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`At.target` 为类型 internal name 或 binary name。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -690,7 +690,7 @@ val callback = CallbackInfo.returnable("value")
 其中 `INVOKE_ASSIGN` 当前复用 `INVOKE` 注入器；是否在调用前后插入由 `At.shift` 决定。
 `@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”，把
 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
-完成后的元素值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
+完成后的元素值”，当 `args = ["array=length"]` 时解释为“匹配数组长度值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
 `CHECKCAST` 完成后的对象表达式值”。`@ModifyReceiver` 会把 `INVOKE`
 解释为“匹配实例调用前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
 handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
@@ -712,7 +712,8 @@ handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 偏移量
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 和 `@WrapOperation` 当前支持 `array=get`
-  与 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
+  与 `array=set`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
+  与 `array=length`
 
 **`target` 格式：**
 
@@ -726,7 +727,7 @@ handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字
 `@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]` 或 `args = ["array=set"]`，
 把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取或写入。`@WrapOperation`
 可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入。
-`@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值。
+`@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；也可使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。
 
 **示例：**
 
