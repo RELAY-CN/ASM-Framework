@@ -1018,6 +1018,45 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtArrayLengthRewritesArrayLengthValue() {
+        AsmRegistry.register(ModifyExpressionValueArrayLengthMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount").invoke(instance)
+
+        assertEquals(4, result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayLengthCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueArrayLengthWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount", Int::class.javaPrimitiveType).invoke(instance, 3)
+
+        assertEquals(4, result)
+    }
+
+    @Test
+    fun modifyExpressionValueArrayLengthWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyExpressionValueArrayLengthMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
     fun modifyExpressionValueArrayReadWithMismatchedHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(MismatchedModifyExpressionValueArrayReadMixin::class.java)
 
@@ -4005,6 +4044,51 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayLengthMixin {
+        @ModifyExpressionValue(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 3
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayLengthWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "nameCount(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            original: Int,
+            bonus: Int,
+        ): Int = original + bonus
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object MismatchedModifyExpressionValueArrayLengthMixin {
+        @ModifyExpressionValue(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ArrayAccessTarget")
     object MismatchedModifyExpressionValueArrayReadMixin {
         @ModifyExpressionValue(
             method = "readName(I)Ljava/lang/String;",
@@ -6365,6 +6449,24 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "nameCount", "()I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "nameCount", "(I)I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()
