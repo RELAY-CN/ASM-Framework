@@ -178,7 +178,8 @@ annotation class Copy(
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
  * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标调用
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，当前仅在 INVOKE 模式下生效
- * @param slice 预留参数，当前实现未使用
+ * @param slice 切片范围；当前 INVOKE 调用点参数修改支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
