@@ -481,6 +481,7 @@ annotation class ModifyReturnValue(
  * @param method 目标方法签名
  * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）
  * @param ordinal 匹配常量序号；`-1` 表示修改全部匹配常量，`0` 及以上表示只修改第 N 个匹配常量
+ * @param slice 切片范围；预留给常量匹配范围过滤
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -491,6 +492,7 @@ annotation class ModifyConstant(
     val method: String = "",
     val constant: String = "",
     val ordinal: Int = -1,
+    val slice: Slice = Slice(),
     val remap: Boolean = false,
 )
 
