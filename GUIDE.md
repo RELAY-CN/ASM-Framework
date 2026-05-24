@@ -112,7 +112,7 @@ val transformedBytes = processor.transform(
 - **@ModifyVariable** - 修改方法参数或局部变量
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
-- **@Redirect** - 重定向方法调用、字段访问或简单数组元素访问
+- **@Redirect** - 重定向方法调用、构造器调用、字段访问或简单数组元素访问
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
@@ -532,6 +532,16 @@ object RedirectMixin {
     }
 
     @Redirect(
+        method = "openBuilder(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+        ),
+    )
+    fun redirectBuilder(value: String, profile: String): StringBuilder =
+        StringBuilder("$profile:$value")
+
+    @Redirect(
         method = "getEndpoint(Ljava/lang/String;)Ljava/lang/String;",
         at = At(value = InjectionPoint.FIELD, target = "endpoint"),
     )
@@ -569,7 +579,7 @@ object RedirectMixin {
 }
 ```
 
-方法调用、字段读取、字段写入与简单数组元素访问重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、字段访问或数组元素访问需要的栈参数，后续可按顺序接收目标方法参数前缀。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`。
+方法调用、构造器调用、字段读取、字段写入与简单数组元素访问重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、构造器、字段访问或数组元素访问需要的栈参数，后续可按顺序接收目标方法参数前缀。构造器重定向使用 `INVOKE + <init>` 目标，handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`。
 
 ### 场景 8: 条件取消执行
 
