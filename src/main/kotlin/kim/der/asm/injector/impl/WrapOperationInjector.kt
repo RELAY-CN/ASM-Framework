@@ -27,12 +27,14 @@ import java.lang.reflect.Modifier
 /**
  * WrapOperation 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、字段读取或字段写入，并用 handler 替换原操作。handler 会收到
- * 原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数或字段写入值、[Operation] 句柄和
- * 可选目标方法参数；handler 可通过 [Operation.call] 执行原始操作，也可以跳过或改变调用参数。
+ * 该注入器会匹配目标方法内的指定方法调用、字段读取、字段写入或数组元素读写，并用 handler 替换原操作。
+ * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、字段写入值或
+ * 数组访问参数、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call] 执行原始操作，
+ * 也可以跳过或改变调用参数。
  *
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
- * [InjectionPoint.FIELD_ASSIGN] 字段写入，不支持构造器调用或数组操作。
+ * [InjectionPoint.FIELD_ASSIGN] 字段写入。[InjectionPoint.FIELD] 可通过 `array=get` 包裹数组元素读取，
+ * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；构造器调用尚未实现。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点

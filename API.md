@@ -234,7 +234,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 ### @WrapOperation
 
-包裹目标方法内匹配的方法调用、字段读取或字段写入，并把原操作替换为 handler 调用。适合需要保留“可调用原操作”能力，同时按条件跳过、改写参数、改写返回值或多次调用原操作的场景。
+包裹目标方法内匹配的方法调用、字段读取、字段写入或数组元素读写，并把原操作替换为 handler 调用。适合需要保留“可调用原操作”能力，同时按条件跳过、改写参数、改写返回值或多次调用原操作的场景。
 
 **参数：**
 
@@ -250,7 +250,17 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 `FIELD_ASSIGN` 模式匹配 `PUTFIELD` / `PUTSTATIC` 字段写入。`PUTFIELD` handler 先接收字段 owner，再接收待写入值与 `Operation<Unit>`；`PUTSTATIC` handler 接收待写入值与 `Operation<Unit>`。handler 必须返回 `Unit` / `void`，后续参数可按目标方法声明顺序接收目标方法参数前缀。
 
-`Operation.call` 的参数形态与原操作栈参数一致：实例调用传入 receiver 与原方法参数，静态调用只传入原方法参数；`GETFIELD` 读取传入字段 owner，`GETSTATIC` 读取不传参数；`PUTFIELD` 写入传入字段 owner 与新字段值，`PUTSTATIC` 写入只传入新字段值。当前实现支持 `INVOKE` 方法调用、`FIELD` 字段读取与 `FIELD_ASSIGN` 字段写入，不支持构造器调用或数组操作。
+数组元素读取使用 `FIELD + at.args = ["array=get"]`，`At.target` 指向产生数组引用的数组字段。
+handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必须兼容数组元素类型。
+数组元素写入使用 `FIELD_ASSIGN + at.args = ["array=set"]`，handler 先接收数组引用、`Int` 索引、
+待写入元素值与 `Operation<Unit>`，并必须返回 `Unit` / `void`。数组访问当前匹配简单数组字段访问形态，
+即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
+
+`Operation.call` 的参数形态与原操作栈参数一致：实例调用传入 receiver 与原方法参数，静态调用只传入原方法参数；
+`GETFIELD` 读取传入字段 owner，`GETSTATIC` 读取不传参数；`PUTFIELD` 写入传入字段 owner 与新字段值，
+`PUTSTATIC` 写入只传入新字段值；数组读取传入数组引用与 `Int` 索引，数组写入传入数组引用、`Int`
+索引与新元素值。当前实现支持 `INVOKE` 方法调用、`FIELD` 字段读取、`FIELD_ASSIGN` 字段写入和简单数组元素读写，
+不支持构造器调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -676,7 +686,18 @@ val callback = CallbackInfo.returnable("value")
 - `NEW` - NEW 操作前
 - `THROW` - 抛出异常前
 
-其中 `INVOKE_ASSIGN` 当前复用 `INVOKE` 注入器；是否在调用前后插入由 `At.shift` 决定。`@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”，把 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取完成后的元素值”，把 `NEW` 解释为“匹配对象构造完成后的实例”。`@ModifyReceiver` 会把 `INVOKE` 解释为“匹配实例调用前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的 handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字段值的 handler 替换匹配字段读取”，把 `FIELD_ASSIGN` 解释为“用可执行原字段写入的 handler 替换匹配字段写入”。`@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN` 解释为“匹配字段写入前的条件判断”。`FIELD_ASSIGN`、`THROW` 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`。`LOAD` 与 `STORE` 不支持普通 `@AsmInject`，当前仅用于 `@ModifyVariable` 的局部变量读取点或写入点改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
+其中 `INVOKE_ASSIGN` 当前复用 `INVOKE` 注入器；是否在调用前后插入由 `At.shift` 决定。
+`@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”，把
+`FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
+完成后的元素值”，把 `NEW` 解释为“匹配对象构造完成后的实例”。`@ModifyReceiver` 会把 `INVOKE`
+解释为“匹配实例调用前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
+handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
+把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
+`@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
+解释为“匹配字段写入或数组元素写入前的条件判断”。`FIELD_ASSIGN`、`THROW` 使用指令点注入器，
+支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持 `Shift.BEFORE` 与
+`Shift.REPLACE`。`LOAD` 与 `STORE` 不支持普通 `@AsmInject`，当前仅用于 `@ModifyVariable`
+的局部变量读取点或写入点改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
 
 ### At
 
@@ -688,7 +709,8 @@ val callback = CallbackInfo.returnable("value")
 - `target: String = ""` - 目标方法/字段签名
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 偏移量
-- `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get` 与 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
+- `args: Array<String> = []` - 附加定位参数；`@Redirect` 和 `@WrapOperation` 当前支持 `array=get`
+  与 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
 
 **`target` 格式：**
 
@@ -698,7 +720,10 @@ val callback = CallbackInfo.returnable("value")
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
 - `THROW`: 不需要 `target`，匹配 `ATHROW`
 
-`@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]` 或 `args = ["array=set"]`，把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取或写入。`@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值。
+`@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]` 或 `args = ["array=set"]`，
+把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取或写入。`@WrapOperation`
+可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入。
+`@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值。
 
 **示例：**
 
