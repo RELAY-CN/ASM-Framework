@@ -126,6 +126,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param at 调用点定位；当前仅支持 INVOKE
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
+     * @param slice 切片范围；当前 INVOKE 操作包裹支持 INVOKE 边界切片
      * @return WrapOperation 注入器
      *
      * @author Dr (dr@der.kim)
@@ -136,7 +137,8 @@ object AsmInjectorFactory {
         asmInfo: AsmInfo,
         at: At,
         ordinal: Int = -1,
-    ): AsmInjector = WrapOperationInjector(method, asmInfo, at, ordinal)
+        slice: Slice = Slice(),
+    ): AsmInjector = WrapOperationInjector(method, asmInfo, at, ordinal, slice)
 
     /**
      * 创建 WrapWithCondition 注入器。
