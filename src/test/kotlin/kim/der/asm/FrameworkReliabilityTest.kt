@@ -672,6 +672,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsExposesCountContractParameters() {
+        val methods = ModifyArgs::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun modifyArgsAtInvokeRewritesMultipleCallArguments() {
         AsmRegistry.register(ModifyArgsReplaceMixin::class.java)
 
