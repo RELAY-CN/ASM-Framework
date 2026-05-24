@@ -171,10 +171,10 @@ enum class Shift {
  * 注入点切片范围。
  *
  * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
- * [InjectionPoint.INVOKE] 注入、[Redirect] 的普通方法调用重定向，以及 [ModifyArg] 的
+ * [InjectionPoint.INVOKE] 注入、[Redirect] 的普通方法调用重定向，以及 [ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 调用点参数修改支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；
  * 起始边界之后、结束边界之前的调用点才会参与匹配，边界指令本身不会作为候选注入点。
- * [AsmInject.ordinal] / [Redirect.ordinal] / [ModifyArg.ordinal] 会在切片内重新计数。
+ * [AsmInject.ordinal] / [Redirect.ordinal] / [ModifyArg.ordinal] / [ModifyArgs.ordinal] 会在切片内重新计数。
  * 指定的边界未命中时，切片按空范围处理。
  *
  * @param from 起始定位条件
