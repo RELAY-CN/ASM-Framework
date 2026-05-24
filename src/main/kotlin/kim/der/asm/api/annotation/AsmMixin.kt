@@ -350,7 +350,7 @@ annotation class WrapWithCondition(
  * 用于修改目标方法内某个表达式产生的值（语义参考 Mixin Extras 的 `@ModifyExpressionValue`）。
  * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
  * [InjectionPoint.NEW] 与 [InjectionPoint.CAST]，可修改匹配方法调用完成后的非 `void` 返回值、字段读取值、
- * 数组元素读取值、对象构造完成后的实例或 `CHECKCAST` 完成后的类型转换结果。
+ * 数组元素读取值、数组长度值、对象构造完成后的实例或 `CHECKCAST` 完成后的类型转换结果。
  * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用或类型转换指令，只在表达式产生值后
  * 把原值交给 handler 改写。
  *
@@ -361,6 +361,7 @@ annotation class WrapWithCondition(
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 方法调用目标的 [At.target] 必须指定调用签名，字段读取目标必须指定字段签名
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
+ * - 数组长度目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象
  * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象
  *
