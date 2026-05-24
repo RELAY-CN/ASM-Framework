@@ -201,9 +201,16 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `at: At = At()` - 注入位置；默认 `HEAD` 改写入口参数，`at.value = InjectionPoint.INVOKE` 时用 `at.target` 匹配目标调用
 - `ordinal: Int = -1` - 调用点匹配序号；`-1` 表示修改全部匹配调用点，当前仅在 `INVOKE` 模式下生效
 - `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 模式支持用 `INVOKE` 边界缩小查找范围
+- `require: Int = 0` - 最小命中数；大于 0 时实际参数修改数必须不少于该值
+- `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
+- `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
 `@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中的调用参数后按原顺序恢复并继续执行原调用；handler 不会自动接收目标调用的其他参数，可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+
+`@ModifyArg` 会统计实际写入参数修改逻辑的数量。入口参数模式最多命中 1 次；`INVOKE` 模式按匹配调用点数量计数。
+显式设置 `require` / `allow` / 非默认 `expect` 时按实际参数修改数量校验契约，违反 `require` 或 `allow`
+会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
