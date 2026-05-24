@@ -645,6 +645,8 @@ object RulesMixin {
     @ModifyConstant(
         method = "messageInTrace(Ljava/lang/String;)Ljava/lang/String;",
         constant = "prefix-",
+        require = 1,
+        allow = 1,
         slice = Slice(
             from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
             to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
@@ -655,7 +657,7 @@ object RulesMixin {
 }
 ```
 
-`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类常量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。当目标方法中有多个相同常量时，可用 `Slice` 限制常量匹配范围；`from` 边界之后、`to` 边界之前的常量才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。
+`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类常量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。当目标方法中有多个相同常量时，可用 `Slice` 限制常量匹配范围；`from` 边界之后、`to` 边界之前的常量才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。关键常量补丁可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
 
 ### 场景 5: 完全替换方法
 
@@ -912,6 +914,13 @@ AsmScanner.scanPackage("com.example.mixins")
 )
 fun onEveryReturn() {
 }
+```
+
+同样的契约也适用于关键常量修改：
+
+```kotlin
+@ModifyConstant(method = "maxPlayers()I", constant = "20", require = 1, allow = 1)
+fun expandLimit(original: Int): Int = original * 2
 ```
 
 `require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。
