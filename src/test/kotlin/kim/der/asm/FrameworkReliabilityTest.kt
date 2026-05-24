@@ -1333,6 +1333,46 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtConstructorCanCallOriginalConstructorWithChangedArguments() {
+        AsmRegistry.register(WrapOperationConstructorMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("wrapped-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtConstructorCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapOperationConstructorWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NewParamTarget", newParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NewParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("create", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "prefix", 7)
+
+        assertEquals("prefix-7", result.toString())
+    }
+
+    @Test
+    fun wrapOperationAtConstructorWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedWrapOperationConstructorMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("Operation") == true,
+        )
+    }
+
+    @Test
     fun wrapOperationAtFieldCanCallOriginalGetField() {
         AsmRegistry.register(WrapOperationFieldReadMixin::class.java)
 
@@ -4406,6 +4446,52 @@ class FrameworkReliabilityTest {
             target: String,
             value: String,
         ): String = target + value
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object WrapOperationConstructorMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<StringBuilder>,
+        ): StringBuilder = operation.call("wrapped-$value")
+    }
+
+    @AsmMixin("NewParamTarget")
+    object WrapOperationConstructorWithTargetParamsMixin {
+        @WrapOperation(
+            method = "create(Ljava/lang/String;I)Ljava/lang/StringBuilder;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>()V",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            operation: Operation<StringBuilder>,
+            prefix: String,
+            count: Int,
+        ): StringBuilder = operation.call().append(prefix).append("-").append(count)
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object MismatchedWrapOperationConstructorMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun wrap(value: String): StringBuilder = StringBuilder(value)
     }
 
     @AsmMixin("FieldPointTarget")
