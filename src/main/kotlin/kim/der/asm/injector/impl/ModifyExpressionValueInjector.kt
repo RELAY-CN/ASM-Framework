@@ -1,0 +1,511 @@
+/*
+ * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
+ */
+
+package kim.der.asm.injector.impl
+
+import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.data.AsmInfo
+import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.utils.transformer.InstructionUtil
+import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
+import org.objectweb.asm.tree.AbstractInsnNode
+import org.objectweb.asm.tree.FieldInsnNode
+import org.objectweb.asm.tree.InsnList
+import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.MethodInsnNode
+import org.objectweb.asm.tree.MethodNode
+import org.objectweb.asm.tree.TypeInsnNode
+import org.objectweb.asm.tree.VarInsnNode
+import java.lang.reflect.Method
+import java.lang.reflect.Modifier
+
+/**
+ * ModifyExpressionValue 注入器。
+ *
+ * 该注入器会匹配目标方法内的指定方法调用、字段读取、数组元素读取或对象构造，并在表达式产生值后把原值传给 handler。
+ * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
+ *
+ * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
+ * [InjectionPoint.FIELD] 与 [InjectionPoint.NEW]；[InjectionPoint.FIELD] 可通过 `array=get` 匹配数组元素读取值
+ * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
+ * @author Dr (dr@der.kim)
+ * @date 2025-11-24
+ */
+class ModifyExpressionValueInjector(
+    method: Method,
+    asmInfo: AsmInfo,
+    private val at: At,
+    private val ordinal: Int = -1,
+) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 在匹配表达式产生值后改写该值。
+     *
+     * @param target 目标方法
+     * @return 至少匹配并改写一个表达式值时返回 `true`
+     * @throws IllegalArgumentException 定位点、目标表达式或 handler 签名不合法时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun inject(target: MethodNode): Boolean {
+        return when (at.value) {
+            InjectionPoint.INVOKE, InjectionPoint.INVOKE_ASSIGN -> injectMethodCallReturn(target)
+            InjectionPoint.FIELD -> {
+                if (isArrayReadMode()) {
+                    injectArrayRead(target)
+                } else {
+                    injectFieldRead(target)
+                }
+            }
+            InjectionPoint.NEW -> injectNewObject(target)
+            else -> throw IllegalArgumentException(
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD and NEW",
+            )
+        }
+    }
+
+    private fun isArrayReadMode(): Boolean {
+        val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return false
+        return when (arrayArg.substringAfter('=').trim().lowercase()) {
+            "get" -> true
+            "set" -> throw IllegalArgumentException("@ModifyExpressionValue array access supports only array=get")
+            else -> throw IllegalArgumentException("Unsupported @ModifyExpressionValue array access mode: $arrayArg")
+        }
+    }
+
+    private fun injectMethodCallReturn(target: MethodNode): Boolean {
+        val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
+        if (targetName == null || targetDesc == null) {
+            throw IllegalArgumentException("@ModifyExpressionValue requires at.target method signature")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val callReturnType = Type.getReturnType(insn.desc)
+            if (callReturnType == Type.VOID_TYPE) {
+                throw IllegalArgumentException(
+                    "@ModifyExpressionValue cannot modify void call ${insn.name}${insn.desc}",
+                )
+            }
+
+            val targetParamCount = validateHandlerSignature(target, callReturnType)
+            val il = buildExpressionValueModification(target, callReturnType, targetParamCount)
+            target.instructions.insert(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectFieldRead(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyExpressionValue requires at.target field signature")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val fieldType = Type.getType(insn.desc)
+            val targetParamCount = validateHandlerSignature(target, fieldType)
+            val il = buildExpressionValueModification(target, fieldType, targetParamCount)
+            target.instructions.insert(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectArrayRead(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyExpressionValue requires at.target array field signature")
+        }
+        if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
+            throw IllegalArgumentException("@ModifyExpressionValue array target must be an array field: ${at.target}")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn.opcode !in ARRAY_READ_OPS) {
+                continue
+            }
+
+            val fieldInsn = findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val expressionType = Type.getType(fieldInsn.desc).elementType
+            val targetParamCount = validateHandlerSignature(target, expressionType)
+            val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insert(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectNewObject(target: MethodNode): Boolean {
+        val normalizedTarget = at.target.replace('.', '/')
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.NEW) {
+                continue
+            }
+            if (normalizedTarget.isNotEmpty() && insn.desc != normalizedTarget) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val constructorInsn = findConstructorInvocation(insn)
+            val expressionType = Type.getObjectType(insn.desc)
+            val targetParamCount = validateHandlerSignature(target, expressionType)
+            val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insert(constructorInsn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun buildExpressionValueModification(
+        target: MethodNode,
+        expressionType: Type,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val valueIndex = nextLocalIndex(target)
+
+        storeStackValue(il, expressionType, valueIndex)
+        addHandlerOwner(il)
+        loadFromVariable(il, expressionType, valueIndex)
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        return il
+    }
+
+    private fun validateHandlerSignature(
+        target: MethodNode,
+        expressionType: Type,
+    ): Int {
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        if (asmParamTypes.isEmpty() || asmParamTypes[0] != expressionType) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue handler ${asmMethod.name} first parameter must be $expressionType, " +
+                    "actual ${asmParamTypes.toList()}",
+            )
+        }
+
+        val asmReturnType = Type.getReturnType(asmMethod)
+        if (asmReturnType != expressionType) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue handler ${asmMethod.name} return type $asmReturnType " +
+                    "must match expression type $expressionType",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = asmParamTypes.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue handler ${asmMethod.name} " +
+                    "requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = asmParamTypes[index + 1]
+            if (actual != expected) {
+                throw IllegalArgumentException(
+                    "@ModifyExpressionValue handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
+        var nestedSameOwnerNewCount = 0
+        var current = newInsn.next
+        while (current != null) {
+            if (current is TypeInsnNode && current.opcode == Opcodes.NEW && current.desc == newInsn.desc) {
+                nestedSameOwnerNewCount++
+            } else if (
+                current is MethodInsnNode &&
+                current.opcode == Opcodes.INVOKESPECIAL &&
+                current.owner == newInsn.desc &&
+                current.name == "<init>"
+            ) {
+                if (nestedSameOwnerNewCount == 0) {
+                    return current
+                }
+                nestedSameOwnerNewCount--
+            }
+            current = current.next
+        }
+
+        throw IllegalArgumentException("@ModifyExpressionValue cannot find constructor call for NEW ${newInsn.desc}")
+    }
+
+    private fun loadTargetMethodParameters(
+        il: InsnList,
+        target: MethodNode,
+        requestedTargetParamCount: Int,
+    ) {
+        if (requestedTargetParamCount <= 0) {
+            return
+        }
+
+        var paramVarIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        for (index in 0 until requestedTargetParamCount) {
+            val paramType = targetParamTypes[index]
+            loadFromVariable(il, paramType, paramVarIndex)
+            paramVarIndex += paramType.size
+        }
+    }
+
+    private fun loadFromVariable(
+        il: InsnList,
+        paramType: Type,
+        varIndex: Int,
+    ) {
+        InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
+    }
+
+    private fun storeStackValue(
+        il: InsnList,
+        paramType: Type,
+        varIndex: Int,
+    ) {
+        when (paramType.sort) {
+            Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR -> il.add(VarInsnNode(Opcodes.ISTORE, varIndex))
+            Type.LONG -> il.add(VarInsnNode(Opcodes.LSTORE, varIndex))
+            Type.FLOAT -> il.add(VarInsnNode(Opcodes.FSTORE, varIndex))
+            Type.DOUBLE -> il.add(VarInsnNode(Opcodes.DSTORE, varIndex))
+            else -> il.add(VarInsnNode(Opcodes.ASTORE, varIndex))
+        }
+    }
+
+    private fun addHandlerOwner(il: InsnList) {
+        if (isHandlerStatic()) {
+            return
+        }
+
+        val ownerType = Type.getType(asmInfo.asmClass)
+        if (isKotlinObject()) {
+            il.add(
+                FieldInsnNode(
+                    Opcodes.GETSTATIC,
+                    ownerType.internalName,
+                    "INSTANCE",
+                    "L${ownerType.internalName};",
+                ),
+            )
+            return
+        }
+
+        il.add(TypeInsnNode(Opcodes.NEW, ownerType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, ownerType.internalName, "<init>", "()V", false))
+    }
+
+    private fun handlerOpcode(): Int =
+        if (isHandlerStatic()) {
+            Opcodes.INVOKESTATIC
+        } else {
+            Opcodes.INVOKEVIRTUAL
+        }
+
+    private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
+
+    private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun parseFieldTarget(signature: String): FieldTarget {
+        if (signature.isEmpty()) {
+            return FieldTarget(null, null, null)
+        }
+
+        val colonIndex = signature.indexOf(':')
+        val ownerAndName = if (colonIndex >= 0) signature.substring(0, colonIndex) else signature
+        val desc = if (colonIndex >= 0) signature.substring(colonIndex + 1) else null
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            FieldTarget(
+                owner = ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                name = ownerAndName.substring(separatorIndex + 1),
+                desc = desc,
+            )
+        } else {
+            FieldTarget(owner = null, name = ownerAndName, desc = desc)
+        }
+    }
+
+    private fun matchesTargetField(
+        insn: FieldInsnNode,
+        target: FieldTarget,
+    ): Boolean {
+        if (target.owner != null && insn.owner != target.owner) {
+            return false
+        }
+        if (target.name != null && insn.name != target.name) {
+            return false
+        }
+        return target.desc == null || insn.desc == target.desc
+    }
+
+    private fun matchesTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun findArrayFieldProducer(
+        arrayInsn: AbstractInsnNode,
+        target: FieldTarget,
+    ): FieldInsnNode? {
+        var cursor = arrayInsn.previous
+        while (cursor != null) {
+            if (cursor is FieldInsnNode) {
+                if (cursor.opcode in FIELD_READ_OPS && matchesTargetField(cursor, target)) {
+                    val fieldType = Type.getType(cursor.desc)
+                    if (fieldType.sort != Type.ARRAY) {
+                        throw IllegalArgumentException(
+                            "@ModifyExpressionValue array target must be an array field: ${cursor.owner}.${cursor.name}:${cursor.desc}",
+                        )
+                    }
+                    return cursor
+                }
+                return null
+            }
+            if (cursor is MethodInsnNode || cursor.opcode in ARRAY_READ_OPS) {
+                return null
+            }
+            cursor = cursor.previous
+        }
+        return null
+    }
+
+    private fun nextLocalIndex(target: MethodNode): Int {
+        var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        for (paramType in Type.getArgumentTypes(target.desc)) {
+            maxIndex += paramType.size
+        }
+        for (localVar in target.localVariables) {
+            maxIndex = maxOf(maxIndex, localVar.index + Type.getType(localVar.desc).size)
+        }
+        for (insn in target.instructions.toArray()) {
+            if (insn is VarInsnNode) {
+                val size =
+                    when (insn.opcode) {
+                        Opcodes.LLOAD, Opcodes.LSTORE, Opcodes.DLOAD, Opcodes.DSTORE -> 2
+                        else -> 1
+                    }
+                maxIndex = maxOf(maxIndex, insn.`var` + size)
+            }
+        }
+        return maxIndex
+    }
+
+    private data class FieldTarget(
+        val owner: String?,
+        val name: String?,
+        val desc: String?,
+    )
+
+    private companion object {
+        private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+        private val ARRAY_READ_OPS =
+            setOf(
+                Opcodes.IALOAD,
+                Opcodes.LALOAD,
+                Opcodes.FALOAD,
+                Opcodes.DALOAD,
+                Opcodes.AALOAD,
+                Opcodes.BALOAD,
+                Opcodes.CALOAD,
+                Opcodes.SALOAD,
+            )
+    }
+}

@@ -53,6 +53,22 @@ class TargetClassContext(
         // 检查是否需要为 class 类型的 Mixin 创建静态字段
         ensureSingletonField()
 
+        // 检查是否有 @AddInterface 注解
+        val addInterfaceAnnotation = asmInfo.asmClass.getAnnotation(AddInterface::class.java)
+        if (addInterfaceAnnotation != null) {
+            if (applyAddInterface(addInterfaceAnnotation)) {
+                transformed = true
+            }
+        }
+
+        // 检查是否有 @RemoveInterface 注解
+        val removeInterfaceAnnotation = asmInfo.asmClass.getAnnotation(RemoveInterface::class.java)
+        if (removeInterfaceAnnotation != null) {
+            if (applyRemoveInterface(removeInterfaceAnnotation)) {
+                transformed = true
+            }
+        }
+
         // 检查是否有 @ReplaceAllMethods 注解
         val replaceAllAnnotation = asmInfo.asmClass.getAnnotation(ReplaceAllMethods::class.java)
         if (replaceAllAnnotation != null) {
@@ -70,7 +86,9 @@ class TargetClassContext(
         }
 
         // 处理 ASM 类中的所有字段
-        applyFields()
+        if (applyFields()) {
+            transformed = true
+        }
 
         // 收集所有需要处理的方法，按注入点类型分组
         // 注意：必须按照特定的顺序处理注入，以确保行为一致
@@ -104,11 +122,18 @@ class TargetClassContext(
         for (method in methodsToProcess) {
             val injectAnnotation = method.getAnnotation(AsmInject::class.java)
             val modifyArgAnnotation = method.getAnnotation(ModifyArg::class.java)
+            val modifyArgsAnnotation = method.getAnnotation(ModifyArgs::class.java)
+            val modifyReceiverAnnotation = method.getAnnotation(ModifyReceiver::class.java)
+            val wrapOperationAnnotation = method.getAnnotation(WrapOperation::class.java)
+            val wrapWithConditionAnnotation = method.getAnnotation(WrapWithCondition::class.java)
+            val modifyExpressionValueAnnotation = method.getAnnotation(ModifyExpressionValue::class.java)
+            val modifyVariableAnnotation = method.getAnnotation(ModifyVariable::class.java)
             val redirectAnnotation = method.getAnnotation(Redirect::class.java)
             val overwriteAnnotation = method.getAnnotation(Overwrite::class.java)
             val copyAnnotation = method.getAnnotation(Copy::class.java)
             val modifyReturnValueAnnotation = method.getAnnotation(ModifyReturnValue::class.java)
             val modifyConstantAnnotation = method.getAnnotation(ModifyConstant::class.java)
+            val removeFieldAnnotation = method.getAnnotation(RemoveField::class.java)
             val removeMethodAnnotation = method.getAnnotation(RemoveMethod::class.java)
             val removeSynchronizedAnnotation = method.getAnnotation(RemoveSynchronized::class.java)
             val accessorAnnotation = method.getAnnotation(Accessor::class.java)
@@ -130,6 +155,36 @@ class TargetClassContext(
                 }
                 modifyArgAnnotation != null -> {
                     if (applyModifyArg(method, modifyArgAnnotation)) {
+                        transformed = true
+                    }
+                }
+                modifyArgsAnnotation != null -> {
+                    if (applyModifyArgs(method, modifyArgsAnnotation)) {
+                        transformed = true
+                    }
+                }
+                modifyReceiverAnnotation != null -> {
+                    if (applyModifyReceiver(method, modifyReceiverAnnotation)) {
+                        transformed = true
+                    }
+                }
+                wrapOperationAnnotation != null -> {
+                    if (applyWrapOperation(method, wrapOperationAnnotation)) {
+                        transformed = true
+                    }
+                }
+                wrapWithConditionAnnotation != null -> {
+                    if (applyWrapWithCondition(method, wrapWithConditionAnnotation)) {
+                        transformed = true
+                    }
+                }
+                modifyExpressionValueAnnotation != null -> {
+                    if (applyModifyExpressionValue(method, modifyExpressionValueAnnotation)) {
+                        transformed = true
+                    }
+                }
+                modifyVariableAnnotation != null -> {
+                    if (applyModifyVariable(method, modifyVariableAnnotation)) {
                         transformed = true
                     }
                 }
@@ -155,6 +210,11 @@ class TargetClassContext(
                 }
                 modifyConstantAnnotation != null -> {
                     if (applyModifyConstant(method, modifyConstantAnnotation)) {
+                        transformed = true
+                    }
+                }
+                removeFieldAnnotation != null -> {
+                    if (applyRemoveField(method, removeFieldAnnotation)) {
                         transformed = true
                     }
                 }
@@ -232,8 +292,14 @@ class TargetClassContext(
             asmInfo.asmClass.declaredMethods.any { method ->
                 val isStatic = (method.modifiers and java.lang.reflect.Modifier.STATIC) != 0
                 val hasAnnotation =
-                    method.getAnnotation(AsmInject::class.java) != null ||
+                        method.getAnnotation(AsmInject::class.java) != null ||
                         method.getAnnotation(ModifyArg::class.java) != null ||
+                        method.getAnnotation(ModifyArgs::class.java) != null ||
+                        method.getAnnotation(ModifyReceiver::class.java) != null ||
+                        method.getAnnotation(WrapOperation::class.java) != null ||
+                        method.getAnnotation(WrapWithCondition::class.java) != null ||
+                        method.getAnnotation(ModifyExpressionValue::class.java) != null ||
+                        method.getAnnotation(ModifyVariable::class.java) != null ||
                         method.getAnnotation(Redirect::class.java) != null ||
                         method.getAnnotation(ModifyReturnValue::class.java) != null ||
                         method.getAnnotation(ModifyConstant::class.java) != null
@@ -271,20 +337,89 @@ class TargetClassContext(
     /**
      * 应用字段处理（Shadow, Mutable, Final）
      */
-    private fun applyFields() {
+    private fun applyFields(): Boolean {
+        var transformed = false
+
         for (field in asmInfo.asmClass.declaredFields) {
             val shadowAnnotation = field.getAnnotation(Shadow::class.java)
             val mutableAnnotation = field.getAnnotation(Mutable::class.java)
             val finalAnnotation = field.getAnnotation(Final::class.java)
+            val addFieldAnnotation = field.getAnnotation(AddField::class.java)
+            val removeFieldAnnotation = field.getAnnotation(RemoveField::class.java)
+
+            if (addFieldAnnotation != null) {
+                if (applyAddField(field, addFieldAnnotation)) {
+                    transformed = true
+                }
+                continue
+            }
+
+            if (removeFieldAnnotation != null) {
+                if (applyRemoveField(field, removeFieldAnnotation)) {
+                    transformed = true
+                }
+                continue
+            }
 
             if (shadowAnnotation != null) {
-                applyShadowField(field, shadowAnnotation)
+                if (applyShadowField(field, shadowAnnotation)) {
+                    transformed = true
+                }
             }
 
             if (mutableAnnotation != null || finalAnnotation != null) {
-                applyFieldModifiers(field, mutableAnnotation != null, finalAnnotation != null)
+                if (applyFieldModifiers(field, mutableAnnotation != null, finalAnnotation != null)) {
+                    transformed = true
+                }
             }
         }
+
+        return transformed
+    }
+
+    /**
+     * 应用 @AddField 添加字段。
+     */
+    private fun applyAddField(
+        field: java.lang.reflect.Field,
+        annotation: AddField,
+    ): Boolean {
+        val targetFieldName = annotation.field.ifEmpty { field.name }
+        if (classNode.fields.any { it.name == targetFieldName }) {
+            return false
+        }
+
+        classNode.fields.add(
+            FieldNode(
+                toFieldAccess(field),
+                targetFieldName,
+                Type.getDescriptor(field.type),
+                null,
+                null,
+            ),
+        )
+        return true
+    }
+
+    private fun toFieldAccess(field: java.lang.reflect.Field): Int {
+        var access = field.modifiers and (
+            Modifier.PUBLIC or
+                Modifier.PRIVATE or
+                Modifier.PROTECTED or
+                Modifier.STATIC or
+                Modifier.FINAL or
+                Modifier.VOLATILE or
+                Modifier.TRANSIENT
+        )
+
+        if (field.isSynthetic) {
+            access = access or Opcodes.ACC_SYNTHETIC
+        }
+        if (field.isEnumConstant) {
+            access = access or Opcodes.ACC_ENUM
+        }
+
+        return access
     }
 
     /**
@@ -293,7 +428,7 @@ class TargetClassContext(
     private fun applyShadowField(
         field: java.lang.reflect.Field,
         annotation: Shadow,
-    ) {
+    ): Boolean {
         val fieldName = field.name
         val method = annotation.method
 
@@ -319,8 +454,12 @@ class TargetClassContext(
 
         // 如果字段存在，应用 Mutable 修饰符
         if (field.isAnnotationPresent(Mutable::class.java)) {
+            val originalAccess = targetField.access
             targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
+            return targetField.access != originalAccess
         }
+
+        return false
     }
 
     /**
@@ -355,18 +494,26 @@ class TargetClassContext(
         field: java.lang.reflect.Field,
         mutable: Boolean,
         final: Boolean,
-    ) {
+    ): Boolean {
         val targetField = classNode.fields.find { it.name == field.name }
+        var transformed = false
+
         if (targetField != null) {
             if (mutable) {
                 // 移除 FINAL 标志
+                val originalAccess = targetField.access
                 targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
+                transformed = transformed || targetField.access != originalAccess
             }
             if (final) {
                 // 添加 FINAL 标志
+                val originalAccess = targetField.access
                 targetField.access = targetField.access or Opcodes.ACC_FINAL
+                transformed = transformed || targetField.access != originalAccess
             }
         }
+
+        return transformed
     }
 
     /**
@@ -382,6 +529,7 @@ class TargetClassContext(
                 method,
                 asmInfo,
                 if (annotation.constant.isEmpty()) null else annotation.constant,
+                annotation.ordinal,
             )
         val transformed = injector.inject(targetMethod)
         if (annotation.constant.isEmpty()) {
@@ -811,10 +959,150 @@ class TargetClassContext(
         annotation: ModifyArg,
     ): Boolean {
         val targetMethod = requireTargetMethod(annotation.method)
-        val injector = AsmInjectorFactory.createModifyArgInjector(method, asmInfo, annotation.index)
+        val injector = AsmInjectorFactory.createModifyArgInjector(
+            method,
+            asmInfo,
+            annotation.index,
+            annotation.at,
+            annotation.ordinal,
+        )
         return requireInjectorMatched(
             injector.inject(targetMethod),
             "@ModifyArg",
+            method,
+            annotation.method,
+        )
+    }
+
+    /**
+     * 应用 @ModifyArgs 修改调用参数组。
+     */
+    private fun applyModifyArgs(
+        method: Method,
+        annotation: ModifyArgs,
+    ): Boolean {
+        val targetMethod = requireTargetMethod(annotation.method)
+        val injector = AsmInjectorFactory.createModifyArgsInjector(
+            method,
+            asmInfo,
+            annotation.at,
+            annotation.ordinal,
+        )
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@ModifyArgs",
+            method,
+            annotation.method,
+        )
+    }
+
+    /**
+     * 应用 @ModifyReceiver 修改调用 receiver。
+     */
+    private fun applyModifyReceiver(
+        method: Method,
+        annotation: ModifyReceiver,
+    ): Boolean {
+        val targetMethod = requireTargetMethod(annotation.method)
+        val injector = AsmInjectorFactory.createModifyReceiverInjector(
+            method,
+            asmInfo,
+            annotation.at,
+            annotation.ordinal,
+        )
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@ModifyReceiver",
+            method,
+            annotation.method,
+        )
+    }
+
+    /**
+     * 应用 @WrapOperation 包裹原始操作。
+     */
+    private fun applyWrapOperation(
+        method: Method,
+        annotation: WrapOperation,
+    ): Boolean {
+        val targetMethod = requireTargetMethod(annotation.method)
+        val injector = AsmInjectorFactory.createWrapOperationInjector(
+            method,
+            asmInfo,
+            annotation.at,
+            annotation.ordinal,
+        )
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@WrapOperation",
+            method,
+            annotation.method,
+        )
+    }
+
+    /**
+     * 应用 @WrapWithCondition 条件包裹调用。
+     */
+    private fun applyWrapWithCondition(
+        method: Method,
+        annotation: WrapWithCondition,
+    ): Boolean {
+        val targetMethod = requireTargetMethod(annotation.method)
+        val injector = AsmInjectorFactory.createWrapWithConditionInjector(
+            method,
+            asmInfo,
+            annotation.at,
+            annotation.ordinal,
+        )
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@WrapWithCondition",
+            method,
+            annotation.method,
+        )
+    }
+
+    /**
+     * 应用 @ModifyExpressionValue 修改表达式值。
+     */
+    private fun applyModifyExpressionValue(
+        method: Method,
+        annotation: ModifyExpressionValue,
+    ): Boolean {
+        val targetMethod = requireTargetMethod(annotation.method)
+        val injector = AsmInjectorFactory.createModifyExpressionValueInjector(
+            method,
+            asmInfo,
+            annotation.at,
+            annotation.ordinal,
+        )
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@ModifyExpressionValue",
+            method,
+            annotation.method,
+        )
+    }
+
+    /**
+     * 应用 @ModifyVariable 修改局部变量。
+     */
+    private fun applyModifyVariable(
+        method: Method,
+        annotation: ModifyVariable,
+    ): Boolean {
+        val targetMethod = requireTargetMethod(annotation.method)
+        val injector =
+            AsmInjectorFactory.createModifyVariableInjector(
+                method,
+                asmInfo,
+                annotation.at.value,
+                annotation.index,
+                annotation.ordinal,
+            )
+        return requireInjectorMatched(
+            injector.inject(targetMethod),
+            "@ModifyVariable",
             method,
             annotation.method,
         )
@@ -832,7 +1120,15 @@ class TargetClassContext(
         // 组合 target 和 at.target 来构建完整的方法签名
         val redirectTarget = buildRedirectTarget(annotation.target, annotation.at.target)
 
-        val injector = AsmInjectorFactory.createRedirectInjector(method, asmInfo, redirectTarget)
+        val injector =
+            AsmInjectorFactory.createRedirectInjector(
+                method,
+                asmInfo,
+                redirectTarget,
+                annotation.at.value,
+                annotation.ordinal,
+                annotation.at.args,
+            )
         return requireInjectorMatched(
             injector.inject(targetMethod),
             "@Redirect",
@@ -1009,7 +1305,7 @@ class TargetClassContext(
         annotation: ModifyReturnValue,
     ): Boolean {
         val targetMethod = requireTargetMethod(annotation.method)
-        val injector = AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo)
+        val injector = AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo, annotation.ordinal)
         return requireInjectorMatched(
             injector.inject(targetMethod),
             "@ModifyReturnValue",
@@ -1048,6 +1344,10 @@ class TargetClassContext(
         findTargetMethod(methodSignature)
             ?: throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
 
+    private fun requireTargetField(fieldName: String): FieldNode =
+        classNode.fields.find { it.name == fieldName }
+            ?: throw IllegalStateException(buildMissingTargetFieldMessage(fieldName))
+
     private fun requireInjectorMatched(
         transformed: Boolean,
         annotationName: String,
@@ -1062,6 +1362,51 @@ class TargetClassContext(
         }
         return true
     }
+
+    /**
+     * 应用 @AddInterface 追加接口。
+     *
+     * 只改写目标类的接口声明列表；接口方法实现由其他 ASM 操作或目标类已有方法负责。
+     */
+    private fun applyAddInterface(annotation: AddInterface): Boolean {
+        val interfaceNames = normalizeInterfaceNames(annotation.value, annotation.interfaces)
+
+        var transformed = false
+        for (interfaceName in interfaceNames) {
+            if (!classNode.interfaces.contains(interfaceName)) {
+                classNode.interfaces.add(interfaceName)
+                transformed = true
+            }
+        }
+
+        return transformed
+    }
+
+    /**
+     * 应用 @RemoveInterface 移除接口。
+     *
+     * 只改写目标类的接口声明列表；不会删除目标类中已有的方法实现。
+     */
+    private fun applyRemoveInterface(annotation: RemoveInterface): Boolean {
+        val interfaceNames = normalizeInterfaceNames(annotation.value, annotation.interfaces).toSet()
+        val originalSize = classNode.interfaces.size
+
+        classNode.interfaces.removeAll(interfaceNames)
+
+        return classNode.interfaces.size != originalSize
+    }
+
+    private fun normalizeInterfaceNames(
+        value: String,
+        interfaces: Array<String>,
+    ): List<String> =
+        buildList {
+            if (value.isNotEmpty()) {
+                add(value)
+            }
+            addAll(interfaces.filter { it.isNotEmpty() })
+        }.map { it.replace('.', '/') }
+            .distinct()
 
     /**
      * 解析方法签名
@@ -1080,6 +1425,40 @@ class TargetClassContext(
         } else {
             Pair(signature, "")
         }
+    }
+
+    /**
+     * 应用 @RemoveField 移除字段。
+     */
+    private fun applyRemoveField(
+        field: java.lang.reflect.Field,
+        annotation: RemoveField,
+    ): Boolean {
+        val targetFieldName =
+            annotation.field.ifEmpty {
+                field.name
+            }
+        val targetField = requireTargetField(targetFieldName)
+
+        classNode.fields.remove(targetField)
+        return true
+    }
+
+    /**
+     * 应用 @RemoveField 移除字段。
+     */
+    private fun applyRemoveField(
+        method: Method,
+        annotation: RemoveField,
+    ): Boolean {
+        val targetFieldName =
+            annotation.field.ifEmpty {
+                inferFieldNameFromRemoveFieldMethod(method.name)
+            }
+        val targetField = requireTargetField(targetFieldName)
+
+        classNode.fields.remove(targetField)
+        return true
     }
 
     /**
@@ -1160,6 +1539,30 @@ class TargetClassContext(
             }
         }
     }
+
+    private fun buildMissingTargetFieldMessage(fieldName: String): String {
+        val availableFields = classNode.fields.joinToString(", ") { "${it.name}:${it.desc}" }
+        return "Cannot find target field $fieldName in class $className for asm ${asmInfo.asmClass.name}.\n" +
+            "  Available fields in $className: [$availableFields]\n"
+    }
+
+    private fun inferFieldNameFromRemoveFieldMethod(methodName: String): String =
+        when {
+            methodName.startsWith("remove") && methodName.length > 6 -> {
+                methodName.substring(6).replaceFirstChar { it.lowercaseChar() }
+            }
+            methodName.startsWith("get") && methodName.length > 3 -> {
+                methodName.substring(3).replaceFirstChar { it.lowercaseChar() }
+            }
+            methodName.startsWith("set") && methodName.length > 3 -> {
+                methodName.substring(3).replaceFirstChar { it.lowercaseChar() }
+            }
+            methodName.startsWith("is") && methodName.length > 2 -> {
+                methodName.substring(2).replaceFirstChar { it.lowercaseChar() }
+            }
+            else -> methodName
+        }
+
     /**
      * 构建方法签名
      * 从 Java Method 对象构建 ASM 方法签名
@@ -1430,7 +1833,15 @@ class TargetClassContext(
             // 为每个目标方法应用此重定向
             for (methodNode in targetMethods) {
                 // 直接使用注入器应用重定向
-                val injector = AsmInjectorFactory.createRedirectInjector(redirectMethod, asmInfo, redirectTarget)
+                val injector =
+                    AsmInjectorFactory.createRedirectInjector(
+                        redirectMethod,
+                        asmInfo,
+                        redirectTarget,
+                        redirectAnnotation.at.value,
+                        redirectAnnotation.ordinal,
+                        redirectAnnotation.at.args,
+                    )
                 if (injector.inject(methodNode)) {
                     transformed = true
                 }

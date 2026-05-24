@@ -15,12 +15,19 @@ package kim.der.asm.api.annotation
  * - 当注入方法的第一个参数为 [CallbackInfo] 时，可在注入方法内通过 [CallbackInfo.cancel] 标记取消。
  * - 是否以及如何提前返回/替换返回值由注入器实现决定（例如 HEAD 注入可能在取消分支提前返回）。
  *
+ * ## Handler 参数
+ *
+ * - HEAD、TAIL、RETURN 与普通指令点注入可在 [CallbackInfo] 后按顺序接收目标方法参数前缀。
+ * - INVOKE 的 BEFORE/AFTER 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；实例调用的 receiver
+ *   会被框架保存和恢复，但不会作为普通 handler 参数传入。
+ * - INVOKE 的 REPLACE 注入按替换原调用处理，handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
+ *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
- * @param target 注入点类型；当前实现主要支持 HEAD/TAIL/RETURN/INVOKE
+ * @param target 注入点类型；当前实现支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/THROW
  * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
  * @param require 预留参数，当前实现未强制校验
- * @param at 当 [target] 为 [InjectionPoint.INVOKE] 时用于描述调用点；核心字段为 [At.target] 与 [At.shift]
- * @param ordinal 预留参数，当前实现未实现“第 N 个匹配点”选择
+ * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
+ * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 预留参数，当前实现未实现按切片范围缩小查找
  * @param allow 预留参数，当前实现未限制最大注入次数
  * @param expect 预留参数，当前实现未实现期望次数告警
@@ -47,8 +54,10 @@ annotation class AsmInject(
 /**
  * 注入点枚举。
  *
- * 用于描述代码注入的位置。当前注入器工厂仅显式支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]；
- * 其余值在当前实现中会回退为 HEAD 注入。
+ * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[FIELD]、
+ * [FIELD_ASSIGN]、[NEW] 与 [THROW]；[LOAD] 与 [STORE] 当前用于 [kim.der.asm.api.annotation.ModifyVariable]。
+ * 其中指令点注入会在匹配指令前后插入 handler，
+ * 不会替换原始指令或自动传递栈顶操作数。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -75,6 +84,12 @@ enum class InjectionPoint {
     /** 字段赋值前 */
     FIELD_ASSIGN,
 
+    /** 局部变量读取前 */
+    LOAD,
+
+    /** 局部变量写入后 */
+    STORE,
+
     /** NEW 操作前 */
     NEW,
 
@@ -85,16 +100,25 @@ enum class InjectionPoint {
 /**
  * 调用点定位信息。
  *
- * 当前主要用于 [InjectionPoint.INVOKE]：通过 [target] 指定要匹配的方法调用签名，
- * 并通过 [shift] 指定在调用前/后/替换该调用点。
+ * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
+ * 与 [InjectionPoint.NEW] 的匹配目标，并通过 [shift] 指定在匹配指令前/后插入 handler。
  *
- * 注意：当前实现要求 [target] 必须包含方法描述符；owner 可省略，省略时只按方法名与描述符匹配。
+ * 注意：
+ *
+ * - INVOKE 目标要求包含方法描述符；owner 可省略，省略时只按方法名与描述符匹配。
+ * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
+ * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
+ * - NEW 只支持 BEFORE 或 REPLACE；AFTER 会在未初始化对象仍位于栈顶时插入调用，当前实现会拒绝该配置。
+ * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
+ * - [Redirect] 可通过 [args] 中的 `array=get` 或 `array=set`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取或写入。
+ * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get`，把 [InjectionPoint.FIELD]
+ *   目标解释为数组元素读取表达式。
  *
  * @param value 预留字段，当前实现未使用
- * @param target 目标方法调用签名，例如 `"java/lang/System.gc()V"` 或 `"java.lang.System.gc()V"`
+ * @param target 目标方法调用、字段或 NEW 类型签名
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
- * @param args 预留参数，当前实现未解析
+ * @param args 附加定位参数；当前 [Redirect] 支持 `array=get` 与 `array=set`，[ModifyExpressionValue] 支持 `array=get`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
