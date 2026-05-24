@@ -34,8 +34,8 @@ import java.lang.reflect.Modifier
  *
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
  * [InjectionPoint.FIELD_ASSIGN] 字段写入。[InjectionPoint.FIELD] 可通过 `array=get` 包裹数组元素读取，
- * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；[InjectionPoint.INVOKE] 可通过
- * `<init>` 目标包裹常见 `NEW/DUP/args/INVOKESPECIAL` 构造器调用。
+ * 通过 `array=length` 包裹数组长度读取；[InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；
+ * [InjectionPoint.INVOKE] 可通过 `<init>` 目标包裹常见 `NEW/DUP/args/INVOKESPECIAL` 构造器调用。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
@@ -63,6 +63,7 @@ class WrapOperationInjector(
             InjectionPoint.FIELD -> {
                 when (arrayAccessMode()) {
                     ArrayAccessMode.GET -> injectArrayAccess(target, ArrayAccessMode.GET)
+                    ArrayAccessMode.LENGTH -> injectArrayAccess(target, ArrayAccessMode.LENGTH)
                     ArrayAccessMode.SET -> throw IllegalArgumentException(
                         "@WrapOperation array=set requires FIELD_ASSIGN injection point",
                     )
@@ -73,6 +74,9 @@ class WrapOperationInjector(
                 when (arrayAccessMode()) {
                     ArrayAccessMode.GET -> throw IllegalArgumentException(
                         "@WrapOperation array=get requires FIELD injection point",
+                    )
+                    ArrayAccessMode.LENGTH -> throw IllegalArgumentException(
+                        "@WrapOperation array=length requires FIELD injection point",
                     )
                     ArrayAccessMode.SET -> injectArrayAccess(target, ArrayAccessMode.SET)
                     null -> injectFieldAssign(target)
@@ -88,6 +92,7 @@ class WrapOperationInjector(
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
             "get" -> ArrayAccessMode.GET
             "set" -> ArrayAccessMode.SET
+            "length" -> ArrayAccessMode.LENGTH
             else -> throw IllegalArgumentException("Unsupported @WrapOperation array access mode: $arrayArg")
         }
     }
@@ -205,6 +210,7 @@ class WrapOperationInjector(
             when (mode) {
                 ArrayAccessMode.GET -> ARRAY_READ_OPS
                 ArrayAccessMode.SET -> ARRAY_WRITE_OPS
+                ArrayAccessMode.LENGTH -> setOf(Opcodes.ARRAYLENGTH)
             }
 
         for (insn in target.instructions.toArray()) {
@@ -439,7 +445,12 @@ class WrapOperationInjector(
         val elementType = arrayType.elementType
         var nextTempIndex = nextLocalIndex(target)
         val arrayIndex = nextTempIndex.also { nextTempIndex += 1 }
-        val indexIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val indexIndex =
+            if (mode == ArrayAccessMode.LENGTH) {
+                null
+            } else {
+                nextTempIndex.also { nextTempIndex += 1 }
+            }
         val valueIndex =
             if (mode == ArrayAccessMode.SET) {
                 nextTempIndex.also { nextTempIndex += elementType.size }
@@ -451,7 +462,9 @@ class WrapOperationInjector(
         if (valueIndex != null) {
             storeStackValue(il, elementType, valueIndex)
         }
-        storeStackValue(il, Type.INT_TYPE, indexIndex)
+        if (indexIndex != null) {
+            storeStackValue(il, Type.INT_TYPE, indexIndex)
+        }
         storeStackValue(il, arrayType, arrayIndex)
 
         createArrayOperation(il, arrayType, mode)
@@ -459,7 +472,9 @@ class WrapOperationInjector(
 
         addHandlerOwner(il)
         loadFromVariable(il, arrayType, arrayIndex)
-        loadFromVariable(il, Type.INT_TYPE, indexIndex)
+        if (indexIndex != null) {
+            loadFromVariable(il, Type.INT_TYPE, indexIndex)
+        }
         if (valueIndex != null) {
             loadFromVariable(il, elementType, valueIndex)
         }
@@ -599,6 +614,18 @@ class WrapOperationInjector(
         il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
         il.add(InsnNode(Opcodes.DUP))
         il.add(LdcInsnNode(arrayType))
+        if (mode == ArrayAccessMode.LENGTH) {
+            il.add(
+                MethodInsnNode(
+                    Opcodes.INVOKESPECIAL,
+                    operationType.internalName,
+                    "<init>",
+                    "(Ljava/lang/Class;)V",
+                    false,
+                ),
+            )
+            return
+        }
         il.add(InsnNode(if (mode == ArrayAccessMode.SET) Opcodes.ICONST_1 else Opcodes.ICONST_0))
         il.add(
             MethodInsnNode(
@@ -786,19 +813,32 @@ class WrapOperationInjector(
 
         val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
         val handlerReturnType = Type.getReturnType(asmMethod)
-        if (mode == ArrayAccessMode.GET) {
-            val elementType = Type.getType(fieldInsn.desc).elementType
-            if (!isReturnCompatible(elementType, handlerReturnType)) {
-                throw IllegalArgumentException(
-                    "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
-                        "original $elementType, handler $handlerReturnType",
-                )
+        when (mode) {
+            ArrayAccessMode.GET -> {
+                val elementType = Type.getType(fieldInsn.desc).elementType
+                if (!isReturnCompatible(elementType, handlerReturnType)) {
+                    throw IllegalArgumentException(
+                        "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                            "original $elementType, handler $handlerReturnType",
+                    )
+                }
             }
-        } else if (!isReturnCompatible(Type.VOID_TYPE, handlerReturnType)) {
-            throw IllegalArgumentException(
-                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
-                    "original ${Type.VOID_TYPE}, handler $handlerReturnType",
-            )
+            ArrayAccessMode.SET -> {
+                if (!isReturnCompatible(Type.VOID_TYPE, handlerReturnType)) {
+                    throw IllegalArgumentException(
+                        "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                            "original ${Type.VOID_TYPE}, handler $handlerReturnType",
+                    )
+                }
+            }
+            ArrayAccessMode.LENGTH -> {
+                if (!isReturnCompatible(Type.INT_TYPE, handlerReturnType)) {
+                    throw IllegalArgumentException(
+                        "@WrapOperation array length handler ${asmMethod.name} return type mismatch: " +
+                            "original ${Type.INT_TYPE}, handler $handlerReturnType",
+                    )
+                }
+            }
         }
         return targetParamCount
     }
@@ -833,10 +873,10 @@ class WrapOperationInjector(
         mode: ArrayAccessMode,
     ): Array<Type> {
         val arrayType = Type.getType(fieldInsn.desc)
-        return if (mode == ArrayAccessMode.GET) {
-            arrayOf(arrayType, Type.INT_TYPE)
-        } else {
-            arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
+        return when (mode) {
+            ArrayAccessMode.GET -> arrayOf(arrayType, Type.INT_TYPE)
+            ArrayAccessMode.SET -> arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
+            ArrayAccessMode.LENGTH -> arrayOf(arrayType)
         }
     }
 
@@ -1138,6 +1178,7 @@ class WrapOperationInjector(
     private enum class ArrayAccessMode {
         GET,
         SET,
+        LENGTH,
     }
 
     private companion object {
