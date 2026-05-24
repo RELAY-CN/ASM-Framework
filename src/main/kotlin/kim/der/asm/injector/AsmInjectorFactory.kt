@@ -6,6 +6,7 @@ package kim.der.asm.injector
 
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.impl.*
 import java.lang.reflect.Method
@@ -200,6 +201,7 @@ object AsmInjectorFactory {
      * @param target 目标调用签名
      * @param injectionPoint Redirect 的定位点类型
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
+     * @param slice 切片范围；当前普通方法调用重定向支持 INVOKE 边界切片
      * @param args 调用点附加参数
      * @return Redirect 注入器
      *
@@ -212,8 +214,9 @@ object AsmInjectorFactory {
         target: String,
         injectionPoint: InjectionPoint = InjectionPoint.INVOKE,
         ordinal: Int = -1,
+        slice: Slice = Slice(),
         args: Array<String> = emptyArray(),
-    ): AsmInjector = RedirectInjector(method, asmInfo, target, injectionPoint, ordinal, args)
+    ): AsmInjector = RedirectInjector(method, asmInfo, target, injectionPoint, ordinal, slice, args)
 
     /**
      * 创建 Overwrite 注入器。

@@ -4,7 +4,9 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -37,6 +39,7 @@ import java.lang.reflect.Modifier
  * @param injectionPoint Redirect 的定位点类型；[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * 会强制按字段访问语义解析目标
  * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、字段读取、字段写入、数组元素访问与数组长度重定向
+ * @param slice 切片范围；当前仅普通方法调用重定向使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
  * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配数组长度
  *
  * @author Dr (dr@der.kim)
@@ -48,6 +51,7 @@ class RedirectInjector(
     private val redirectTarget: String,
     private val injectionPoint: InjectionPoint = InjectionPoint.INVOKE,
     private val ordinal: Int = -1,
+    private val slice: Slice = Slice(),
     private val args: Array<String> = emptyArray(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
@@ -85,9 +89,14 @@ class RedirectInjector(
         val instructions = target.instructions
         var transformed = false
         val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
         var matchedOrdinal = 0
 
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+
             if (insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
                 val currentOrdinal = matchedOrdinal++
                 if (!matchesOrdinal(currentOrdinal)) {
@@ -106,6 +115,55 @@ class RedirectInjector(
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
+        val startIndex =
+            if (hasSliceBoundary(slice.from)) {
+                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (hasSliceBoundary(slice.to)) {
+                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
+            } else {
+                insns.size
+            }
+
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+
+    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
+
+    private fun findSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @Redirect(INVOKE): ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid Redirect slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+        }
+
+        return null
+    }
 
     private fun isFieldReadRedirect(): Boolean =
         injectionPoint == InjectionPoint.FIELD ||
