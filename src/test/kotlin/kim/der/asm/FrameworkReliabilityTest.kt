@@ -1448,6 +1448,94 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtArrayReadCanCallOriginalObjectArrayLoad() {
+        AsmRegistry.register(WrapOperationArrayReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("wrapped-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtArrayReadCanCallOriginalPrimitiveArrayLoad() {
+        AsmRegistry.register(WrapOperationPrimitiveArrayReadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "PrimitiveArrayAccessTarget",
+                primitiveArrayAccessTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun wrapOperationAtArrayWriteCanCallOriginalObjectArrayStoreWithChangedValue() {
+        AsmRegistry.register(WrapOperationArrayWriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "value")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("wrapped-value", result)
+    }
+
+    @Test
+    fun wrapOperationAtArrayWriteCanSkipOriginalObjectArrayStore() {
+        AsmRegistry.register(WrapOperationArrayWriteSkipMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "blocked")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtArrayWriteCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapOperationArrayWriteWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayParamTarget", arrayParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java, String::class.java)
+            .invoke(instance, 0, "field", "suffix")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType, String::class.java)
+            .invoke(instance, 0, "unused")
+
+        assertEquals("field-suffix", result)
+    }
+
+    @Test
+    fun wrapOperationAtArrayAccessWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedWrapOperationArrayReadMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("Operation") == true,
+        )
+    }
+
+    @Test
     fun modifyConstantWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleModifyConstantMixin::class.java)
 
@@ -4337,6 +4425,130 @@ class FrameworkReliabilityTest {
             target.hashCode()
             value.length
         }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayReadMixin {
+        @WrapOperation(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            operation: Operation<String>,
+        ): String = "wrapped-${operation.call(array, index)}"
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object WrapOperationPrimitiveArrayReadMixin {
+        @WrapOperation(
+            method = "readScore(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: IntArray,
+            index: Int,
+            operation: Operation<Int>,
+        ): Int = operation.call(array, index) + 2
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayWriteMixin {
+        @WrapOperation(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(array, index, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayWriteSkipMixin {
+        @WrapOperation(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            array[index].length
+            value.length
+            operation.hashCode()
+        }
+    }
+
+    @AsmMixin("ArrayParamTarget")
+    object WrapOperationArrayWriteWithTargetParamsMixin {
+        @WrapOperation(
+            method = "writeName(ILjava/lang/String;Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayParamTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            value: String,
+            operation: Operation<Unit>,
+            targetIndex: Int,
+            targetValue: String,
+            suffix: String,
+        ) {
+            assertEquals(index, targetIndex)
+            assertEquals(value, targetValue)
+            operation.call(array, index, "$value-$suffix")
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object MismatchedWrapOperationArrayReadMixin {
+        @WrapOperation(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: String,
+            operation: Operation<String>,
+        ): String = operation.call(array, index.length)
     }
 
     @AsmMixin("ReturnTarget")
