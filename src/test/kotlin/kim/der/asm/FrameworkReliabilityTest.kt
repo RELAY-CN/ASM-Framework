@@ -1168,6 +1168,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyExpressionValueMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiExpressionValueTarget", multiExpressionValueTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyExpressionValueAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyExpressionValueMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiExpressionValueTarget", multiExpressionValueTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyExpressionValueExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyExpressionValueMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("MultiExpressionValueTarget", multiExpressionValueTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun modifyExpressionValueSliceLimitsInvokeReturnValueMatchesBetweenFromAndTo() {
         AsmRegistry.register(ModifyExpressionValueSliceMixin::class.java)
 
@@ -4993,6 +5044,48 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("MultiExpressionValueTarget")
+    object RequireThreeModifyExpressionValueMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            require = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("MultiExpressionValueTarget")
+    object AllowOneModifyExpressionValueMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("MultiExpressionValueTarget")
+    object ExpectThreeModifyExpressionValueMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            expect = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
     }
 
     @AsmMixin("SliceExpressionValueTarget")
