@@ -157,6 +157,30 @@ object LoggingMixin {
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
 
+当目标方法内有多个相同调用时，可以用 `Slice` 把普通 `INVOKE` 注入限制在一段调用边界内：
+
+```kotlin
+@AsmInject(
+    method = "process(Ljava/lang/String;)V",
+    target = InjectionPoint.INVOKE,
+    at = At(
+        value = InjectionPoint.INVOKE,
+        target = "java/lang/String.trim()Ljava/lang/String;",
+    ),
+    slice = Slice(
+        from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+        to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+    ),
+    require = 1,
+    allow = 1,
+)
+fun beforeTrim(value: String) {
+    println(value)
+}
+```
+
+`from` 边界之后、`to` 边界之前的调用点才会参与匹配，边界调用本身不会被注入；`ordinal` 会在切片内重新计数。
+
 ### 场景 2: 修改参数与局部变量
 
 ```kotlin
