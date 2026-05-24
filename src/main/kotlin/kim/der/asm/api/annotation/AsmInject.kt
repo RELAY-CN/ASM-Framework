@@ -22,15 +22,22 @@ package kim.der.asm.api.annotation
  *   会被框架保存和恢复，但不会作为普通 handler 参数传入。
  * - INVOKE 的 REPLACE 注入按替换原调用处理，handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
  *
+ * ## 命中数契约
+ *
+ * - 默认要求至少命中 1 个注入点，以便目标方法或指令点漂移时快速失败。
+ * - [require] 大于 0 时作为最小命中数；实际命中数不足会在转换阶段失败。
+ * - [allow] 大于等于 0 时作为最大命中数；实际命中数超出会在转换阶段失败。
+ * - [expect] 设置为非默认值时作为期望命中数；不一致时输出警告，但不阻断转换。
+ *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
  * @param target 注入点类型；当前实现支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST/THROW
  * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
- * @param require 预留参数，当前实现未强制校验
+ * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 预留参数，当前实现未实现按切片范围缩小查找
- * @param allow 预留参数，当前实现未限制最大注入次数
- * @param expect 预留参数，当前实现未实现期望次数告警
+ * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用
  *
  * @author Dr (dr@der.kim)

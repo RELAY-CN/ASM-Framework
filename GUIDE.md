@@ -735,7 +735,24 @@ com.example.mixins/
 AsmScanner.scanPackage("com.example.mixins")
 ```
 
-### 3. 错误处理
+### 3. 约束注入命中数
+
+对关键补丁显式声明命中数，能在目标字节码变动时更早失败：
+
+```kotlin
+@AsmInject(
+    method = "value(Z)Ljava/lang/String;",
+    target = InjectionPoint.RETURN,
+    require = 2,
+    allow = 2,
+)
+fun onEveryReturn() {
+}
+```
+
+`require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。
+
+### 4. 错误处理
 
 ```kotlin
 try {
@@ -745,7 +762,7 @@ try {
 }
 ```
 
-### 4. 方法签名格式
+### 5. 方法签名格式
 
 使用 JVM 内部名称格式：
 
@@ -753,7 +770,7 @@ try {
 - `"method(Ljava/lang/String;)V"` - String 参数，返回 void
 - `"method(Ljava/lang/String;I)Ljava/lang/String;"` - String 和 int 参数，返回 String
 
-### 5. 静态方法处理
+### 6. 静态方法处理
 
 覆盖或注入静态方法时必须使用 `@JvmStatic`：
 
@@ -763,7 +780,7 @@ try {
 fun staticMethod() { }
 ```
 
-### 6. Shadow 字段使用
+### 7. Shadow 字段使用
 
 Shadow 字段必须在 `class` 中声明，不能在 `object` 中：
 
@@ -775,13 +792,13 @@ class MyMixin {  // ✅ 使用 class
 }
 ```
 
-### 7. 性能考虑
+### 8. 性能考虑
 
 - 避免在注入方法中执行耗时操作
 - 使用 `inline = true` 减少方法调用开销
-- 合理使用 `require` 参数
+- 合理使用 `require` / `allow` 约束关键注入点数量
 
-### 8. 测试 Mixin
+### 9. 测试 Mixin
 
 ```kotlin
 @Test
