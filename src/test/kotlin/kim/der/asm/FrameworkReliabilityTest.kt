@@ -3309,6 +3309,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeRedirectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("RedirectOrdinalTarget", redirectOrdinalTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun redirectAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneRedirectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("RedirectOrdinalTarget", redirectOrdinalTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun redirectExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeRedirectMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("RedirectOrdinalTarget", redirectOrdinalTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun redirectSliceLimitsMethodCallMatchesBetweenFromAndTo() {
         AsmRegistry.register(RedirectSliceTrimMixin::class.java)
 
@@ -6667,6 +6718,39 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): String = "redirected"
+    }
+
+    @AsmMixin("RedirectOrdinalTarget")
+    object RequireThreeRedirectMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            require = 3,
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value.trim()
+    }
+
+    @AsmMixin("RedirectOrdinalTarget")
+    object AllowOneRedirectMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value.trim()
+    }
+
+    @AsmMixin("RedirectOrdinalTarget")
+    object ExpectThreeRedirectMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            expect = 3,
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value.trim()
     }
 
     @AsmMixin("RedirectSliceTarget")
