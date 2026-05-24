@@ -590,6 +590,19 @@ object RedirectMixin {
     }
 
     @Redirect(
+        method = "normalize(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.trim()Ljava/lang/String;",
+        ),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+    )
+    fun redirectTrimInTrace(value: String): String = value.lowercase()
+
+    @Redirect(
         method = "openBuilder(Ljava/lang/String;)Ljava/lang/StringBuilder;",
         at = At(
             value = InjectionPoint.INVOKE,
@@ -649,6 +662,7 @@ object RedirectMixin {
 ```
 
 方法调用、构造器调用、字段读取、字段写入、简单数组元素访问与数组长度重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、构造器、字段访问、数组元素访问或数组长度需要的栈参数，后续可按顺序接收目标方法参数前缀。构造器重定向使用 `INVOKE + <init>` 目标，handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`。
+普通方法调用重定向可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。构造器、字段、数组元素与数组长度重定向当前不使用 `slice`。
 
 ### 场景 8: 条件取消执行
 
