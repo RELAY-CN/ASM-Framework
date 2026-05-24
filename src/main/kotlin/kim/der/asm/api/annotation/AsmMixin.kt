@@ -432,6 +432,8 @@ annotation class ModifyExpressionValue(
  * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
  *   边界指令本身不参与匹配
  * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项
+ * - [require] / [allow] 可约束实际变量修改数量，目标字节码漂移时会在转换阶段失败
+ * - [expect] 用于调试期望变量修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
@@ -439,6 +441,9 @@ annotation class ModifyExpressionValue(
  * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号
  * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写与 [InjectionPoint.STORE] 局部变量写入改写
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param require 最小命中数；大于 0 时实际变量修改数必须不少于该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
+ * @param allow 最大命中数；大于等于 0 时实际变量修改数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -451,6 +456,9 @@ annotation class ModifyVariable(
     val index: Int = -1,
     val ordinal: Int = -1,
     val slice: Slice = Slice(),
+    val require: Int = 0,
+    val expect: Int = 1,
+    val allow: Int = -1,
     val remap: Boolean = false,
 )
 
