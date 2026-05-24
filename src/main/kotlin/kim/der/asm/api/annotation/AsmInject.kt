@@ -117,8 +117,8 @@ enum class InjectionPoint {
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
  * - [Redirect] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取。
- * - [WrapOperation] 可通过 [args] 中的 `array=get` 或 `array=set`，
- *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取或写入。
+ * - [WrapOperation] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
+ *   把 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素读取、写入或数组长度读取。
  * - [WrapWithCondition] 可通过 [args] 中的 `array=set`，把 [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素写入。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式。
@@ -128,7 +128,7 @@ enum class InjectionPoint {
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set` 与 `array=length`，
- * [WrapOperation] 支持 `array=get` 与 `array=set`，[WrapWithCondition] 支持 `array=set`，
+ * [WrapOperation] 支持 `array=get`、`array=set` 与 `array=length`，[WrapWithCondition] 支持 `array=set`，
  * [ModifyExpressionValue] 支持 `array=get` 与 `array=length`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24

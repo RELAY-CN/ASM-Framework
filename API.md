@@ -234,7 +234,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 ### @WrapOperation
 
-包裹目标方法内匹配的方法调用、构造器调用、字段读取、字段写入或数组元素读写，并把原操作替换为 handler 调用。适合需要保留“可调用原操作”能力，同时按条件跳过、改写参数、改写返回值或多次调用原操作的场景。
+包裹目标方法内匹配的方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取，并把原操作替换为 handler 调用。适合需要保留“可调用原操作”能力，同时按条件跳过、改写参数、改写返回值或多次调用原操作的场景。
 
 **参数：**
 
@@ -255,14 +255,15 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 数组元素读取使用 `FIELD + at.args = ["array=get"]`，`At.target` 指向产生数组引用的数组字段。
 handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必须兼容数组元素类型。
 数组元素写入使用 `FIELD_ASSIGN + at.args = ["array=set"]`，handler 先接收数组引用、`Int` 索引、
-待写入元素值与 `Operation<Unit>`，并必须返回 `Unit` / `void`。数组访问当前匹配简单数组字段访问形态，
+待写入元素值与 `Operation<Unit>`，并必须返回 `Unit` / `void`。数组长度读取使用 `FIELD + at.args = ["array=length"]`，
+handler 先接收数组引用与 `Operation<Int>`，返回类型必须为 `Int`。数组访问当前匹配简单数组字段访问形态，
 即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
 
 `Operation.call` 的参数形态与原操作栈参数一致：实例调用传入 receiver 与原方法参数，静态调用只传入原方法参数；
 构造器调用只传入构造器参数；
 `GETFIELD` 读取传入字段 owner，`GETSTATIC` 读取不传参数；`PUTFIELD` 写入传入字段 owner 与新字段值，
 `PUTSTATIC` 写入只传入新字段值；数组读取传入数组引用与 `Int` 索引，数组写入传入数组引用、`Int`
-索引与新元素值。当前实现支持 `INVOKE` 方法调用和构造器调用、`FIELD` 字段读取、`FIELD_ASSIGN` 字段写入和简单数组元素读写。
+索引与新元素值，数组长度读取只传入数组引用。当前实现支持 `INVOKE` 方法调用和构造器调用、`FIELD` 字段读取、`FIELD_ASSIGN` 字段写入和简单数组元素读写与长度读取。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -717,7 +718,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 偏移量
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`
-  与 `array=length`，`@WrapOperation` 当前支持 `array=get` 与 `array=set`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
+  与 `array=length`，`@WrapOperation` 当前支持 `array=get`、`array=set` 与 `array=length`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
   与 `array=length`
 
 **`target` 格式：**
@@ -731,7 +732,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 
 `@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]`、`args = ["array=set"]` 或 `args = ["array=length"]`，
 把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取、数组元素写入或 `ARRAYLENGTH`。`@WrapOperation`
-可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入。
+可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入，使用 `FIELD + array=length` 包裹数组长度读取。
 `@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；也可使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。
 
 **示例：**
