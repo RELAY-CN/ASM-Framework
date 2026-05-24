@@ -722,6 +722,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionSliceLimitsInvokeCallMatchesBetweenFromAndTo() {
+        AsmRegistry.register(WrapConditionSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceWrapConditionTarget", sliceWrapConditionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceWrapConditionTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertEquals("preoutside", result)
+    }
+
+    @Test
     fun wrapWithConditionRejectsNonVoidInvokeCall() {
         AsmRegistry.register(WrapConditionNonVoidCallMixin::class.java)
 
@@ -4118,6 +4129,26 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceWrapConditionTarget")
+    object WrapConditionSliceMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "SliceWrapConditionTarget.record(Ljava/lang/String;)V",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
     @AsmMixin("ExpressionValueTarget")
     object WrapConditionNonVoidCallMixin {
         @WrapWithCondition(
@@ -7489,6 +7520,46 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.PUTSTATIC, "MultiWrapConditionTarget", "last", "Ljava/lang/String;")
             visitInsn(Opcodes.RETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceWrapConditionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceWrapConditionTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "run", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("")
+            visitFieldInsn(Opcodes.PUTSTATIC, "SliceWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitLdcInsn("pre")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "SliceWrapConditionTarget", "record", "(Ljava/lang/String;)V", false)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "SliceWrapConditionTarget", "record", "(Ljava/lang/String;)V", false)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "SliceWrapConditionTarget", "record", "(Ljava/lang/String;)V", false)
+            visitFieldInsn(Opcodes.GETSTATIC, "SliceWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "record", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitFieldInsn(Opcodes.GETSTATIC, "SliceWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitFieldInsn(Opcodes.PUTSTATIC, "SliceWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 1)
             visitEnd()
         }
         cw.visitEnd()
