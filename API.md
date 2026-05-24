@@ -234,7 +234,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 ### @WrapOperation
 
-包裹目标方法内匹配的方法调用、字段读取、字段写入或数组元素读写，并把原操作替换为 handler 调用。适合需要保留“可调用原操作”能力，同时按条件跳过、改写参数、改写返回值或多次调用原操作的场景。
+包裹目标方法内匹配的方法调用、构造器调用、字段读取、字段写入或数组元素读写，并把原操作替换为 handler 调用。适合需要保留“可调用原操作”能力，同时按条件跳过、改写参数、改写返回值或多次调用原操作的场景。
 
 **参数：**
 
@@ -245,6 +245,8 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `remap: Boolean = false` - 是否重映射
 
 `INVOKE` 模式的 handler 会先接收原调用栈参数：实例调用先接收 receiver，再接收原调用参数；静态调用只接收原调用参数。下一参数必须是 `Operation<R>`，其中 `R` 为原调用返回类型；handler 可通过 `operation.call(...)` 执行原始调用，也可以跳过或多次调用。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀，返回类型必须兼容原调用返回类型；原调用为 `void` 时 handler 必须返回 `Unit` / `void`。
+
+当 `INVOKE` 的 `At.target` 指向 `<init>` 构造器时，`@WrapOperation` 会替换常见 `NEW/DUP/args/INVOKESPECIAL` 构造表达式。handler 先接收构造器参数，不接收未初始化 receiver；下一参数必须是 `Operation<T>`，其中 `T` 为构造器 owner 类型；handler 返回类型必须兼容 owner 类型。`operation.call(...)` 只传构造器参数，并通过原构造器创建对象。
 
 `FIELD` 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取。`GETFIELD` handler 先接收字段 owner，再接收 `Operation<R>`；`GETSTATIC` handler 直接接收 `Operation<R>`。后续参数可按目标方法声明顺序接收目标方法参数前缀，handler 返回类型必须兼容字段类型。
 
@@ -257,10 +259,10 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
 
 `Operation.call` 的参数形态与原操作栈参数一致：实例调用传入 receiver 与原方法参数，静态调用只传入原方法参数；
+构造器调用只传入构造器参数；
 `GETFIELD` 读取传入字段 owner，`GETSTATIC` 读取不传参数；`PUTFIELD` 写入传入字段 owner 与新字段值，
 `PUTSTATIC` 写入只传入新字段值；数组读取传入数组引用与 `Int` 索引，数组写入传入数组引用、`Int`
-索引与新元素值。当前实现支持 `INVOKE` 方法调用、`FIELD` 字段读取、`FIELD_ASSIGN` 字段写入和简单数组元素读写，
-不支持构造器调用。
+索引与新元素值。当前实现支持 `INVOKE` 方法调用和构造器调用、`FIELD` 字段读取、`FIELD_ASSIGN` 字段写入和简单数组元素读写。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -693,7 +695,7 @@ val callback = CallbackInfo.returnable("value")
 完成后的元素值”，当 `args = ["array=length"]` 时解释为“匹配数组长度值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
 `CHECKCAST` 完成后的对象表达式值”。`@ModifyReceiver` 会把 `INVOKE`
 解释为“匹配实例调用前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
-handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
+handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
 解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/CAST/THROW)`

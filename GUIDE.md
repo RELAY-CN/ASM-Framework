@@ -106,7 +106,7 @@ val transformedBytes = processor.transform(
 - **@ModifyArg** - 修改方法参数
 - **@ModifyArgs** - 修改方法调用参数组
 - **@ModifyReceiver** - 修改实例方法调用 receiver
-- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、字段读取、字段写入或数组元素读写
+- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、构造器调用、字段读取、字段写入或数组元素读写
 - **@WrapWithCondition** - 按条件跳过 `void` 调用、字段写入或数组元素写入
 - **@ModifyExpressionValue** - 修改表达式值
 - **@ModifyVariable** - 修改方法参数或局部变量
@@ -281,6 +281,19 @@ object ValidationMixin {
         }
     }
 
+    @WrapOperation(
+        method = "createRoute(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+        ),
+    )
+    fun wrapRouteBuilder(
+        value: String,
+        operation: Operation<StringBuilder>,
+        prefix: String,
+    ): StringBuilder = operation.call("$prefix:$value")
+
     @WrapWithCondition(
         method = "notify(Ljava/lang/String;I)V",
         at = At(
@@ -409,14 +422,15 @@ object ValidationMixin {
 
 `@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀。`@ModifyReceiver` 用于只替换实例方法调用 receiver 的场景，handler 第一个参数接收原 receiver 并返回兼容的新 receiver，原调用参数会按原顺序继续传给目标调用，后续参数可接收目标方法参数前缀。
 
-`@WrapOperation` 用于把匹配方法调用、字段读取、字段写入或数组元素读写替换为 handler，并通过 `Operation`
+`@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入或数组元素读写替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；
+构造器模式通过 `INVOKE + <init>` 目标指定，handler 先接收构造器参数，不接收未初始化 receiver；
 `GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；`PUTFIELD` handler
 先接收字段 owner 和待写入值，`PUTSTATIC` handler 先接收待写入值；数组读取模式通过
 `FIELD + args = ["array=get"]` 指定，handler 接收数组引用、`Int` 索引与 `Operation<R>`；数组写入模式
 通过 `FIELD_ASSIGN + args = ["array=set"]` 指定，handler 接收数组引用、`Int` 索引、待写入元素值与
 `Operation<Unit>`。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
-参数前缀；构造器调用尚未支持。
+参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。
 
 `@WrapWithCondition` 用于保留原 `void` 调用、字段写入或数组元素写入但按条件跳过副作用的场景。
 handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用

@@ -109,7 +109,7 @@ enum class InjectionPoint {
  *
  * 注意：
  *
- * - INVOKE 目标要求包含方法描述符；owner 可省略，省略时只按方法名与描述符匹配。
+ * - INVOKE 目标要求包含方法或构造器描述符；owner 可省略，省略时只按方法名与描述符匹配。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 只支持 BEFORE 或 REPLACE；AFTER 会在未初始化对象仍位于栈顶时插入调用，当前实现会拒绝该配置。
