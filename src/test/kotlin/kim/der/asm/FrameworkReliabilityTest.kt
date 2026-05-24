@@ -6451,24 +6451,6 @@ class FrameworkReliabilityTest {
             visitMaxs(3, 3)
             visitEnd()
         }
-        cw.visitMethod(Opcodes.ACC_PUBLIC, "nameCount", "()I", null, null).apply {
-            visitCode()
-            visitVarInsn(Opcodes.ALOAD, 0)
-            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
-            visitInsn(Opcodes.ARRAYLENGTH)
-            visitInsn(Opcodes.IRETURN)
-            visitMaxs(1, 1)
-            visitEnd()
-        }
-        cw.visitMethod(Opcodes.ACC_PUBLIC, "nameCount", "(I)I", null, null).apply {
-            visitCode()
-            visitVarInsn(Opcodes.ALOAD, 0)
-            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
-            visitInsn(Opcodes.ARRAYLENGTH)
-            visitInsn(Opcodes.IRETURN)
-            visitMaxs(1, 2)
-            visitEnd()
-        }
         cw.visitEnd()
         return cw.toByteArray()
     }
@@ -6958,6 +6940,24 @@ class FrameworkReliabilityTest {
             visitInsn(Opcodes.AASTORE)
             visitInsn(Opcodes.RETURN)
             visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "nameCount", "()I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "nameCount", "(I)I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()
