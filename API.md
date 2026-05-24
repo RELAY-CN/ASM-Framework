@@ -218,17 +218,17 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 ### @ModifyReceiver
 
-修改目标方法内匹配实例方法调用的 receiver。适合保留原调用参数和调用逻辑，只把调用对象替换为另一个兼容对象的场景。
+修改目标方法内匹配实例方法调用、实例字段读取或实例字段写入的 receiver。适合保留原参数、字段值和原操作逻辑，只把操作对象替换为另一个兼容对象的场景。
 
 **参数：**
 
 - `method: String = ""` - 目标方法签名
-- `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前仅支持 `INVOKE`
-- `ordinal: Int = -1` - 调用点匹配序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
+- `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前支持 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN`
+- `ordinal: Int = -1` - 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
 - `slice: Slice = Slice()` - 切片范围，当前未使用
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyReceiver` handler 的第一个参数必须接收原 receiver，并返回兼容的新 receiver；后续参数可按目标方法声明顺序接收目标方法参数前缀。当前只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用。
+`@ModifyReceiver` handler 的第一个参数必须接收原 receiver，并返回兼容的新 receiver；后续参数可按目标方法声明顺序接收目标方法参数前缀。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -695,7 +695,8 @@ val callback = CallbackInfo.returnable("value")
 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
 完成后的元素值”，当 `args = ["array=length"]` 时解释为“匹配数组长度值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
 `CHECKCAST` 完成后的对象表达式值”。`@ModifyReceiver` 会把 `INVOKE`
-解释为“匹配实例调用前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
+解释为“匹配实例调用前的 receiver 改写”，把 `FIELD` 解释为“匹配实例字段读取前的 receiver 改写”，
+把 `FIELD_ASSIGN` 解释为“匹配实例字段写入前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
 handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`

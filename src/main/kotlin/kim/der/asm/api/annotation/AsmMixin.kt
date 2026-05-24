@@ -228,19 +228,20 @@ annotation class ModifyArgs(
 /**
  * 修改调用 receiver 注解。
  *
- * 用于修改目标方法内某次实例方法调用的 receiver（语义参考 Mixin Extras 的 `@ModifyReceiver`）。
- * handler 接收原 receiver 并返回新的 receiver，原调用参数会保持原顺序继续传给目标调用。
+ * 用于修改目标方法内某次实例方法调用、实例字段读取或实例字段写入的 receiver（语义参考 Mixin Extras 的 `@ModifyReceiver`）。
+ * handler 接收原 receiver 并返回新的 receiver；原调用参数或字段写入值会保持原顺序继续传给目标操作。
  *
  * ASM 方法要求：
  *
  * - 第一个参数必须接收原 receiver
  * - 返回类型必须兼容原 receiver 类型
  * - 后续参数可按顺序接收目标方法参数前缀
- * - [At.value] 必须为 [InjectionPoint.INVOKE]，并通过 [At.target] 指定要匹配的实例方法调用
+ * - [At.value] 为 [InjectionPoint.INVOKE] 时，通过 [At.target] 指定要匹配的实例方法调用
+ * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
  *
  * @param method 目标方法签名
- * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
- * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
+ * @param ordinal 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
  * @param slice 预留参数，当前实现未使用
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
