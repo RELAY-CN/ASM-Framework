@@ -24,14 +24,14 @@ import java.lang.reflect.Modifier
 /**
  * Redirect 注入器。
  *
- * 查找目标方法中的匹配方法调用、字段读取、字段写入或简单数组元素访问指令，并用 ASM 方法调用替换原指令。
+ * 查找目标方法中的匹配方法调用、构造器调用、字段读取、字段写入或简单数组元素访问指令，并用 ASM 方法调用替换原指令。
  *
  * 方法调用目标使用 `owner.name(desc)` 或 `name(desc)` 格式；字段读取目标使用
  * `owner.field:desc`、`field:desc` 或 `field` 格式。字段写入目标格式与字段读取相同，
  * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素访问使用 [InjectionPoint.FIELD]
  * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get` 或 `array=set` 区分读取与写入。
- * 方法调用、字段读取、字段写入与数组元素访问重定向支持静态处理器、`@JvmStatic` 处理器或 Kotlin `object` 实例处理器。
- * 处理器需先接收原调用或字段访问需要的栈参数，后续可按顺序接收目标方法的部分参数。
+ * 方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向支持静态处理器、`@JvmStatic` 处理器或
+ * Kotlin `object` 实例处理器。处理器需先接收原调用、构造器或字段访问需要的栈参数，后续可按顺序接收目标方法的部分参数。
  *
  * @param redirectTarget 要重定向的方法调用或字段访问签名
  * @param injectionPoint Redirect 的定位点类型；[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
@@ -51,10 +51,10 @@ class RedirectInjector(
     private val args: Array<String> = emptyArray(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 替换目标方法中的匹配调用点、字段读取点、字段写入点或数组元素访问点。
+     * 替换目标方法中的匹配调用点、构造器调用点、字段读取点、字段写入点或数组元素访问点。
      *
      * @param target 目标方法
-     * @return 至少替换一个调用点、字段读取点、字段写入点或数组元素访问点时返回 `true`
+     * @return 至少替换一个调用点、构造器调用点、字段读取点、字段写入点或数组元素访问点时返回 `true`
      * @throws IllegalArgumentException 目标方法调用或字段签名无法解析时抛出
      * @throws RuntimeException 替换调用、字段访问或返回值适配失败时抛出
      *
@@ -93,7 +93,11 @@ class RedirectInjector(
                 if (!matchesOrdinal(currentOrdinal)) {
                     continue
                 }
-                replaceMethodCall(target, instructions, insn)
+                if (insn.name == "<init>") {
+                    replaceConstructorCall(target, instructions, insn)
+                } else {
+                    replaceMethodCall(target, instructions, insn)
+                }
                 transformed = true
             }
         }
@@ -324,6 +328,34 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    private fun replaceConstructorCall(
+        target: MethodNode,
+        instructions: InsnList,
+        originalInsn: MethodInsnNode,
+    ) {
+        val allocation = findConstructorAllocation(originalInsn)
+        val targetParamCount = validateConstructorHandlerSignature(target, originalInsn)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectConstructorHandlerCall(target, originalInsn, il, targetParamCount)
+        }
+
+        val constructedType = Type.getObjectType(originalInsn.owner)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (constructedType != handlerReturnType && constructedType.sort >= Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, constructedType.internalName))
+        }
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(allocation.newInsn)
+        instructions.remove(allocation.dupInsn)
+        instructions.remove(originalInsn)
+    }
+
     private fun addStaticHandlerCall(il: InsnList) {
         val instanceType = Type.getType(asmInfo.asmClass)
         il.add(
@@ -369,6 +401,41 @@ class RedirectInjector(
         }
         for (index in callParamTypes.indices) {
             loadFromVariable(il, callParamTypes[index], argSlots[index])
+        }
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun addObjectConstructorHandlerCall(
+        target: MethodNode,
+        originalInsn: MethodInsnNode,
+        il: InsnList,
+        targetParamCount: Int,
+    ) {
+        val constructorParamTypes = Type.getArgumentTypes(originalInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val argSlots =
+            constructorParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+
+        for (index in constructorParamTypes.indices.reversed()) {
+            storeStackValue(il, constructorParamTypes[index], argSlots[index])
+        }
+
+        addHandlerOwner(il)
+        for (index in constructorParamTypes.indices) {
+            loadFromVariable(il, constructorParamTypes[index], argSlots[index])
         }
         loadTargetMethodParameters(il, target, targetParamCount)
 
@@ -616,6 +683,47 @@ class RedirectInjector(
         return requestedTargetParamCount
     }
 
+    private fun validateConstructorHandlerSignature(
+        target: MethodNode,
+        originalInsn: MethodInsnNode,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val expectedParams = Type.getArgumentTypes(originalInsn.desc)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedParams.size) {
+            throw IllegalStateException(
+                "Redirect constructor handler ${asmMethod.name} parameter count mismatch: " +
+                    "expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Redirect constructor handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected stack type $expected, actual $actual",
+                )
+            }
+        }
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+
+        val constructedType = Type.getObjectType(originalInsn.owner)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isConstructorReturnCompatible(constructedType, handlerReturnType)) {
+            throw IllegalStateException(
+                "Redirect constructor handler ${asmMethod.name} return type mismatch: " +
+                    "original $constructedType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
     private fun validateTargetMethodParameters(
         target: MethodNode,
         actualParams: Array<Type>,
@@ -825,6 +933,34 @@ class RedirectInjector(
         return null
     }
 
+    private fun findConstructorAllocation(constructorInsn: MethodInsnNode): ConstructorAllocation {
+        var cursor = constructorInsn.previous
+        while (cursor != null) {
+            if (cursor is TypeInsnNode && cursor.opcode == Opcodes.NEW && cursor.desc == constructorInsn.owner) {
+                val dupInsn = nextRealInstruction(cursor)
+                if (dupInsn?.opcode != Opcodes.DUP) {
+                    throw IllegalArgumentException(
+                        "Redirect constructor calls require NEW followed by DUP for ${constructorInsn.owner}",
+                    )
+                }
+                return ConstructorAllocation(cursor, dupInsn)
+            }
+            cursor = cursor.previous
+        }
+
+        throw IllegalArgumentException(
+            "Redirect cannot find NEW allocation for constructor ${constructorInsn.owner}${constructorInsn.desc}",
+        )
+    }
+
+    private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var cursor = insn.next
+        while (cursor != null && cursor.opcode < 0) {
+            cursor = cursor.next
+        }
+        return cursor
+    }
+
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -844,6 +980,16 @@ class RedirectInjector(
         if (handler == Type.VOID_TYPE) return false
         if (original == handler) return true
         return (original.sort == Type.OBJECT || original.sort == Type.ARRAY) && handler.sort >= Type.ARRAY
+    }
+
+    private fun isConstructorReturnCompatible(
+        constructedType: Type,
+        handler: Type,
+    ): Boolean {
+        if (handler == constructedType) {
+            return true
+        }
+        return handler.sort == Type.OBJECT && handler.internalName == "java/lang/Object"
     }
 
     private fun addHandlerOwner(il: InsnList) {
@@ -939,6 +1085,11 @@ class RedirectInjector(
         val owner: String?,
         val name: String?,
         val desc: String?,
+    )
+
+    private data class ConstructorAllocation(
+        val newInsn: TypeInsnNode,
+        val dupInsn: AbstractInsnNode,
     )
 
     private enum class ArrayAccessMode {
