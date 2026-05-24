@@ -1244,6 +1244,89 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverAtFieldReadReplacesGetFieldReceiver() {
+        AsmRegistry.register(ModifyReceiverFieldReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val original = clazz.getDeclaredConstructor().newInstance()
+        val replacement = clazz.getDeclaredConstructor().newInstance()
+
+        try {
+            clazz.getMethod("writeName", String::class.java).invoke(original, "original")
+            clazz.getMethod("writeName", String::class.java).invoke(replacement, "replacement")
+            ModifyReceiverFieldReadMixin.replacement = replacement
+
+            val result = clazz.getMethod("readName").invoke(original)
+
+            assertEquals("replacement", result)
+        } finally {
+            ModifyReceiverFieldReadMixin.replacement = null
+        }
+    }
+
+    @Test
+    fun modifyReceiverAtFieldReadCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyReceiverFieldReadWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val original = clazz.getDeclaredConstructor().newInstance()
+        val replacement = clazz.getDeclaredConstructor().newInstance()
+
+        try {
+            clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+                .invoke(replacement, "replacement", "unused", 0)
+            ModifyReceiverFieldReadWithTargetParamsMixin.replacement = replacement
+
+            val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType)
+                .invoke(original, "prefix", 7)
+
+            assertEquals("replacement", result)
+            assertEquals("prefix7", ModifyReceiverFieldReadWithTargetParamsMixin.lastTargetParams)
+        } finally {
+            ModifyReceiverFieldReadWithTargetParamsMixin.replacement = null
+            ModifyReceiverFieldReadWithTargetParamsMixin.lastTargetParams = null
+        }
+    }
+
+    @Test
+    fun modifyReceiverAtFieldAssignReplacesPutFieldReceiver() {
+        AsmRegistry.register(ModifyReceiverFieldAssignMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val original = clazz.getDeclaredConstructor().newInstance()
+        val replacement = clazz.getDeclaredConstructor().newInstance()
+
+        try {
+            ModifyReceiverFieldAssignMixin.replacement = replacement
+
+            clazz.getMethod("writeName", String::class.java).invoke(original, "redirected")
+
+            assertEquals(null, clazz.getMethod("readName").invoke(original))
+            assertEquals("redirected", clazz.getMethod("readName").invoke(replacement))
+        } finally {
+            ModifyReceiverFieldAssignMixin.replacement = null
+        }
+    }
+
+    @Test
+    fun modifyReceiverRejectsStaticFieldRead() {
+        AsmRegistry.register(ModifyReceiverStaticFieldReadMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("instance field reads") == true,
+        )
+    }
+
+    @Test
     fun wrapOperationAtInvokeCanCallOriginalInstanceMethod() {
         AsmRegistry.register(WrapOperationInstanceCallMixin::class.java)
 
@@ -4389,6 +4472,60 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyReceiverFieldReadMixin {
+        var replacement: Any? = null
+
+        @ModifyReceiver(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object ModifyReceiverFieldReadWithTargetParamsMixin {
+        var replacement: Any? = null
+        var lastTargetParams: String? = null
+
+        @ModifyReceiver(
+            method = "readName(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(
+            original: Any,
+            prefix: String,
+            count: Int,
+        ): Any {
+            lastTargetParams = "$prefix$count"
+            return replacement ?: original
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyReceiverFieldAssignMixin {
+        var replacement: Any? = null
+
+        @ModifyReceiver(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object ModifyReceiverStaticFieldReadMixin {
+        @ModifyReceiver(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
     }
 
     @AsmMixin("ModifyReceiverTarget")
