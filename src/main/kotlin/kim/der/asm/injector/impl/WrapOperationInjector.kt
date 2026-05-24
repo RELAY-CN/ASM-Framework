@@ -27,14 +27,15 @@ import java.lang.reflect.Modifier
 /**
  * WrapOperation 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、字段读取、字段写入或数组元素读写，并用 handler 替换原操作。
- * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、字段写入值或
+ * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入或数组元素读写，并用 handler 替换原操作。
+ * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、构造器参数、字段写入值或
  * 数组访问参数、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call] 执行原始操作，
  * 也可以跳过或改变调用参数。
  *
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
  * [InjectionPoint.FIELD_ASSIGN] 字段写入。[InjectionPoint.FIELD] 可通过 `array=get` 包裹数组元素读取，
- * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；构造器调用尚未实现。
+ * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；[InjectionPoint.INVOKE] 可通过
+ * `<init>` 目标包裹常见 `NEW/DUP/args/INVOKESPECIAL` 构造器调用。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
@@ -109,7 +110,15 @@ class WrapOperationInjector(
                 continue
             }
             if (insn.name == "<init>") {
-                throw IllegalArgumentException("@WrapOperation does not support constructor calls")
+                val allocation = findConstructorAllocation(insn)
+                val targetParamCount = validateConstructorHandlerSignature(target, insn)
+                val il = buildConstructorWrapper(target, insn, targetParamCount)
+                target.instructions.insertBefore(insn, il)
+                target.instructions.remove(allocation.newInsn)
+                target.instructions.remove(allocation.dupInsn)
+                target.instructions.remove(insn)
+                transformed = true
+                continue
             }
 
             val targetParamCount = validateHandlerSignature(target, insn)
@@ -276,6 +285,52 @@ class WrapOperationInjector(
             callReturnType.sort >= Type.ARRAY
         ) {
             il.add(TypeInsnNode(Opcodes.CHECKCAST, callReturnType.internalName))
+        }
+
+        return il
+    }
+
+    private fun buildConstructorWrapper(
+        target: MethodNode,
+        constructorInsn: MethodInsnNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val constructorParamTypes = Type.getArgumentTypes(constructorInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val argSlots =
+            constructorParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+        val operationIndex = nextTempIndex
+
+        for (index in constructorParamTypes.indices.reversed()) {
+            storeStackValue(il, constructorParamTypes[index], argSlots[index])
+        }
+
+        createConstructorOperation(il, constructorInsn, constructorParamTypes)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        for (index in constructorParamTypes.indices) {
+            loadFromVariable(il, constructorParamTypes[index], argSlots[index])
+        }
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        val constructedType = Type.getObjectType(constructorInsn.owner)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (constructedType != handlerReturnType && constructedType.sort >= Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, constructedType.internalName))
         }
 
         return il
@@ -461,6 +516,35 @@ class WrapOperationInjector(
         )
     }
 
+    private fun createConstructorOperation(
+        il: InsnList,
+        constructorInsn: MethodInsnNode,
+        constructorParamTypes: Array<Type>,
+    ) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(LdcInsnNode(Type.getObjectType(constructorInsn.owner)))
+        il.add(LdcInsnNode(constructorInsn.desc))
+        il.add(LdcInsnNode(constructorParamTypes.size))
+        il.add(TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Class"))
+        for (index in constructorParamTypes.indices) {
+            il.add(InsnNode(Opcodes.DUP))
+            il.add(LdcInsnNode(index))
+            il.add(InstructionUtil.loadType(constructorParamTypes[index]))
+            il.add(InsnNode(Opcodes.AASTORE))
+        }
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Class;)V",
+                false,
+            ),
+        )
+    }
+
     private fun createFieldReadOperation(
         il: InsnList,
         fieldInsn: FieldInsnNode,
@@ -559,6 +643,43 @@ class WrapOperationInjector(
             throw IllegalArgumentException(
                 "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
                     "original $callReturnType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateConstructorHandlerSignature(
+        target: MethodNode,
+        constructorInsn: MethodInsnNode,
+    ): Int {
+        val expectedStackParams = Type.getArgumentTypes(constructorInsn.desc)
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val constructedType = Type.getObjectType(constructorInsn.owner)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(constructedType, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original $constructedType, handler $handlerReturnType",
             )
         }
         return targetParamCount
@@ -744,6 +865,34 @@ class WrapOperationInjector(
             cursor = cursor.previous
         }
         return null
+    }
+
+    private fun findConstructorAllocation(constructorInsn: MethodInsnNode): ConstructorAllocation {
+        var cursor = constructorInsn.previous
+        while (cursor != null) {
+            if (cursor is TypeInsnNode && cursor.opcode == Opcodes.NEW && cursor.desc == constructorInsn.owner) {
+                val dupInsn = nextRealInstruction(cursor)
+                if (dupInsn?.opcode != Opcodes.DUP) {
+                    throw IllegalArgumentException(
+                        "@WrapOperation constructor calls require NEW followed by DUP for ${constructorInsn.owner}",
+                    )
+                }
+                return ConstructorAllocation(cursor, dupInsn)
+            }
+            cursor = cursor.previous
+        }
+
+        throw IllegalArgumentException(
+            "@WrapOperation cannot find NEW allocation for constructor ${constructorInsn.owner}${constructorInsn.desc}",
+        )
+    }
+
+    private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var cursor = insn.next
+        while (cursor != null && cursor.opcode < 0) {
+            cursor = cursor.next
+        }
+        return cursor
     }
 
     private fun validateTargetMethodParameters(
@@ -979,6 +1128,11 @@ class WrapOperationInjector(
         val owner: String?,
         val name: String?,
         val desc: String?,
+    )
+
+    private data class ConstructorAllocation(
+        val newInsn: TypeInsnNode,
+        val dupInsn: AbstractInsnNode,
     )
 
     private enum class ArrayAccessMode {
