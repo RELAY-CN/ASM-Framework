@@ -232,10 +232,10 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `method: String = ""` - 目标方法签名
 - `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前支持 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN`
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
-- `slice: Slice = Slice()` - 切片范围，当前未使用
+- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 模式支持用 `INVOKE` 边界缩小查找范围
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyReceiver` handler 的第一个参数必须接收原 receiver，并返回兼容的新 receiver；后续参数可按目标方法声明顺序接收目标方法参数前缀。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。
+`@ModifyReceiver` handler 的第一个参数必须接收原 receiver，并返回兼容的新 receiver；后续参数可按目标方法声明顺序接收目标方法参数前缀。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用，可用 `slice.from` / `slice.to` 把候选调用限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -770,8 +770,9 @@ At(
 
 用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通方法调用 `@Redirect`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
-`@WrapOperation(at.value = InjectionPoint.INVOKE)`、`@WrapWithCondition(at.value = InjectionPoint.INVOKE)`、
-`@ModifyExpressionValue(at.value = InjectionPoint.INVOKE)` 支持 `from` / `to` 为 `InjectionPoint.INVOKE`
+`@ModifyReceiver(at.value = InjectionPoint.INVOKE)`、`@WrapOperation(at.value = InjectionPoint.INVOKE)`、
+`@WrapWithCondition(at.value = InjectionPoint.INVOKE)`、`@ModifyExpressionValue(at.value = InjectionPoint.INVOKE)`
+支持 `from` / `to` 为 `InjectionPoint.INVOKE`
 的边界切片；其他注解中的 `slice` 仍为预留参数。
 
 **参数：**
