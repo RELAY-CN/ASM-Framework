@@ -412,16 +412,17 @@ annotation class ModifyExpressionValue(
  * - [index] 使用 JVM 局部变量槽位索引；实例方法中 `this` 占用槽位 0，第一个参数从槽位 1 开始
  * - [InjectionPoint.HEAD] 会在目标方法体执行前写回选中的参数槽位
  * - [InjectionPoint.LOAD] 会在匹配的 xLOAD 指令前加载当前槽位值、调用 handler，并写回同一槽位
- * - [InjectionPoint.LOAD] 可使用 [slice] 把候选读取点限制在一段 INVOKE 边界之间，边界指令本身不参与匹配
  * - [InjectionPoint.STORE] 会在匹配的 xSTORE 指令后加载新存入的值、调用 handler，并写回同一槽位
+ * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
+ *   边界指令本身不参与匹配
  * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项
  *
  * @param method 目标方法签名
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param index 要修改的局部变量槽位索引
  * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号
- * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写与 [InjectionPoint.STORE] 局部变量写入改写
+ * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
