@@ -4,6 +4,7 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
@@ -17,8 +18,9 @@ import java.lang.reflect.Method
 /**
  * RETURN 注入器。
  *
- * 在目标方法的每个返回指令前插入 ASM 方法调用。返回值方法会先把原始返回值保存到局部变量，
- * 以便 CallbackInfo 或 ASM 方法能够读取并替换返回结果。
+ * 在目标方法的返回指令前插入 ASM 方法调用。默认处理全部返回点；当 [AsmInject.ordinal] 为非负数时，
+ * 只处理对应序号的返回点。返回值方法会先把原始返回值保存到局部变量，以便 CallbackInfo 或 ASM 方法
+ * 能够读取并替换返回结果。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -28,7 +30,7 @@ class ReturnInjector(
     asmInfo: AsmInfo,
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 在所有返回点前注入 ASM 调用。
+     * 在匹配的返回点前注入 ASM 调用。
      *
      * @param target 目标方法
      * @return 至少命中一个返回点并插入指令时返回 `true`
@@ -38,6 +40,7 @@ class ReturnInjector(
      * @date 2025-11-24
      */
     override fun inject(target: MethodNode): Boolean {
+        val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return false
         val instructions = target.instructions
         var transformed = false
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
@@ -49,8 +52,14 @@ class ReturnInjector(
         val insns = instructions.toArray()
         val returnType = Type.getReturnType(target.desc)
 
+        var matchedOrdinal = 0
         for (insn in insns) {
             if (insn is InsnNode && insn.opcode in RETURN_OPS) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal, injectAnnotation.ordinal)) {
+                    continue
+                }
+
                 val il = InsnList()
 
                 // 在 RETURN 之前，返回值已经在栈顶（如果是非 void）
@@ -213,6 +222,11 @@ class ReturnInjector(
 
         return transformed
     }
+
+    private fun matchesOrdinal(
+        currentOrdinal: Int,
+        requestedOrdinal: Int,
+    ): Boolean = requestedOrdinal < 0 || currentOrdinal == requestedOrdinal
 
     /**
      * 分配局部变量索引

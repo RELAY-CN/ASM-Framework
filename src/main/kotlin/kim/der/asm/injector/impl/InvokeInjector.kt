@@ -22,7 +22,8 @@ import java.lang.reflect.Modifier
  *
  * 根据 [kim.der.asm.api.annotation.AsmInject.at] 定位目标方法调用，
  * 并按 shift 语义在调用前、调用后或替换调用点插入 ASM 方法调用。
- * 当注解缺少目标调用签名时返回未修改。
+ * 当注解缺少目标调用签名时返回未修改。BEFORE/AFTER handler 可先接收原调用参数前缀，
+ * 再继续接收目标方法参数前缀；REPLACE handler 保持替换原调用的参数与返回值语义。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -37,7 +38,7 @@ class InvokeInjector(
      * @param target 目标方法
      * @return 至少命中一个调用点并插入指令时返回 `true`
      * @throws IllegalArgumentException 调用点签名无法解析时抛出
-     * @throws RuntimeException 参数映射或字节码结构不合法时抛出
+     * @throws RuntimeException 调用点参数、目标方法参数映射或字节码结构不合法时抛出
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -70,9 +71,15 @@ class InvokeInjector(
         val insns = instructions.toArray()
 
         // 查找所有匹配的方法调用
+        var matchedOrdinal = 0
         for (insn in insns) {
             if (insn is MethodInsnNode) {
                 if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal, injectAnnotation.ordinal)) {
+                        continue
+                    }
+
                     when (at.shift) {
                         Shift.BEFORE -> {
                             injectBeforeCall(instructions, insn, target)
@@ -93,6 +100,11 @@ class InvokeInjector(
 
         return transformed
     }
+
+    private fun matchesOrdinal(
+        currentOrdinal: Int,
+        requestedOrdinal: Int,
+    ): Boolean = requestedOrdinal < 0 || currentOrdinal == requestedOrdinal
 
     /**
      * 解析目标方法签名
@@ -189,9 +201,10 @@ class InvokeInjector(
 
         val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
 
-        // 生成调用 ASM 方法的指令，参数来自已保存的调用点参数
+        // 生成调用 ASM 方法的指令，参数来自已保存的调用点参数和目标方法参数。
         generateCallSiteHandlerCall(
             il,
+            targetMethod,
             paramTypes,
             savedParams,
             callbackVarIndex,
@@ -276,9 +289,10 @@ class InvokeInjector(
                     savedInstanceIndex,
                 )
 
-            // 生成调用 ASM 方法的指令
+            // 生成调用 ASM 方法的指令。
             generateCallSiteHandlerCall(
                 il,
+                targetMethod,
                 paramTypes,
                 savedParams,
                 callbackVarIndex,
@@ -295,6 +309,7 @@ class InvokeInjector(
             val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
             generateCallSiteHandlerCall(
                 il,
+                targetMethod,
                 paramTypes,
                 savedParams,
                 callbackVarIndex,
@@ -376,6 +391,7 @@ class InvokeInjector(
 
     private fun generateCallSiteHandlerCall(
         il: InsnList,
+        targetMethod: MethodNode,
         callParamTypes: Array<Type>,
         savedParamIndexes: List<Int>,
         callbackVarIndex: Int?,
@@ -391,7 +407,7 @@ class InvokeInjector(
             il.add(VarInsnNode(Opcodes.ALOAD, callbackVarIndex))
         }
 
-        loadCallSiteHandlerArguments(il, callParamTypes, savedParamIndexes, callbackVarIndex != null)
+        loadCallSiteHandlerArguments(il, targetMethod, callParamTypes, savedParamIndexes, callbackVarIndex != null)
 
         il.add(
             MethodInsnNode(
@@ -444,32 +460,51 @@ class InvokeInjector(
 
     private fun loadCallSiteHandlerArguments(
         il: InsnList,
+        targetMethod: MethodNode,
         callParamTypes: Array<Type>,
         savedParamIndexes: List<Int>,
         skipCallbackInfo: Boolean,
     ) {
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
-        val callParamStart = if (skipCallbackInfo) 1 else 0
-        val requestedCallParamCount = asmParamTypes.size - callParamStart
+        val handlerParamStart = if (skipCallbackInfo) 1 else 0
+        val requestedHandlerParamCount = asmParamTypes.size - handlerParamStart
+        val requestedCallParamCount = minOf(requestedHandlerParamCount, callParamTypes.size)
 
-        if (requestedCallParamCount > callParamTypes.size) {
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        val requestedTargetParamCount = requestedHandlerParamCount - requestedCallParamCount
+        if (requestedTargetParamCount > targetParamTypes.size) {
             throw IllegalStateException(
-                "Invoke handler ${asmMethod.name} requests $requestedCallParamCount call argument(s), " +
-                    "but matched call has only ${callParamTypes.size}",
+                "Invoke handler ${asmMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${targetMethod.name}${targetMethod.desc} has only ${targetParamTypes.size}",
             )
         }
 
         for (index in 0 until requestedCallParamCount) {
             val expected = callParamTypes[index]
-            val actual = asmParamTypes[callParamStart + index]
+            val actual = asmParamTypes[handlerParamStart + index]
             if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalStateException(
-                    "Invoke handler ${asmMethod.name} parameter #${callParamStart + index} mismatch: " +
+                    "Invoke handler ${asmMethod.name} parameter #${handlerParamStart + index} mismatch: " +
                         "expected call argument $expected, actual $actual",
                 )
             }
 
             InstructionUtil.loadParam(expected, savedParamIndexes[index]).let { il.add(it) }
+        }
+
+        var targetVarIndex = if ((targetMethod.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = asmParamTypes[handlerParamStart + requestedCallParamCount + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Invoke handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+
+            InstructionUtil.loadParam(expected, targetVarIndex).let { il.add(it) }
+            targetVarIndex += expected.size
         }
     }
 

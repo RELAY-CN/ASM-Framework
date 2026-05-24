@@ -17,7 +17,10 @@ import java.lang.reflect.Modifier
  * ModifyReturnValue 注入器。
  *
  * 在非 void 方法的返回指令前保存原始返回值，并调用 ASM 方法生成替换返回值。
- * void 方法没有可修改的返回值，因此会直接返回未修改。
+ * void 方法没有可修改的返回值，因此会直接返回未修改。默认修改全部非 void 返回点；
+ * 当 [ordinal] 为非负数时，只修改对应序号的返回点。
+ *
+ * @param ordinal 返回点序号；负数表示修改全部非 void 返回点
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -25,6 +28,7 @@ import java.lang.reflect.Modifier
 class ModifyReturnValueInjector(
     method: Method,
     asmInfo: AsmInfo,
+    private val ordinal: Int = -1,
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 在目标方法返回前修改返回值。
@@ -49,8 +53,14 @@ class ModifyReturnValueInjector(
 
         // 查找所有 RETURN 指令（不包括 void return）
         val insns = instructions.toArray()
+        var matchedOrdinal = 0
         for (insn in insns) {
             if (insn is InsnNode && insn.opcode in RETURN_OPS && insn.opcode != Opcodes.RETURN) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+
                 val il = InsnList()
 
                 // 在 RETURN 之前，栈顶应该是返回值
@@ -169,6 +179,8 @@ class ModifyReturnValueInjector(
 
         return transformed
     }
+
+    private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
     private fun validateHandlerSignature(
         target: MethodNode,

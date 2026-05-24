@@ -4,6 +4,8 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -17,9 +19,13 @@ import java.lang.reflect.Modifier
  * ModifyArg 注入器。
  *
  * 在目标方法开头读取指定参数槽位，调用 ASM 方法得到新值后写回原槽位。
- * 当前实现按参数索引直接修改方法入口处的参数值。
+ * 默认按参数索引直接修改方法入口处的参数值；当 [at] 指向 [InjectionPoint.INVOKE] 时，
+ * 会改写匹配调用点的指定调用参数。
+ * handler 的第一个参数是被修改的原参数，后续可按顺序接收目标方法参数前缀。
  *
  * @param argIndex 要修改的目标参数索引，从 0 开始
+ * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标调用
+ * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -28,6 +34,8 @@ class ModifyArgInjector(
     method: Method,
     asmInfo: AsmInfo,
     private val argIndex: Int,
+    private val at: At = At(),
+    private val ordinal: Int = -1,
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 在目标方法入口修改指定参数。
@@ -40,6 +48,10 @@ class ModifyArgInjector(
      * @date 2025-11-24
      */
     override fun inject(target: MethodNode): Boolean {
+        if (at.value == InjectionPoint.INVOKE) {
+            return modifyCallArgument(target)
+        }
+
         val targetParamTypes = Type.getArgumentTypes(target.desc)
 
         // 验证参数索引
@@ -51,6 +63,94 @@ class ModifyArgInjector(
 
         // 直接在方法开头修改参数
         return modifyParameterAtMethodStart(target, paramType, argIndex)
+    }
+
+    private fun modifyCallArgument(target: MethodNode): Boolean {
+        val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
+        if (targetName == null) {
+            throw IllegalArgumentException("@ModifyArg INVOKE requires at.target method signature")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val callParamTypes = Type.getArgumentTypes(insn.desc)
+            if (argIndex < 0 || argIndex >= callParamTypes.size) {
+                throw IllegalArgumentException("Invalid argument index: $argIndex (call has ${callParamTypes.size} parameters)")
+            }
+
+            val paramType = callParamTypes[argIndex]
+            val targetParamCount = validateHandlerSignature(target, paramType)
+            val il = buildCallArgumentModification(target, insn, callParamTypes, paramType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun buildCallArgumentModification(
+        target: MethodNode,
+        callInsn: MethodInsnNode,
+        callParamTypes: Array<Type>,
+        selectedParamType: Type,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val isStaticCall = callInsn.opcode == Opcodes.INVOKESTATIC
+        val firstTempIndex = nextLocalIndex(target)
+        var nextTempIndex = firstTempIndex
+        val receiverIndex =
+            if (isStaticCall) {
+                null
+            } else {
+                nextTempIndex.also { nextTempIndex += 1 }
+            }
+        val argSlots =
+            callParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+
+        for (i in callParamTypes.indices.reversed()) {
+            storeStackValue(il, callParamTypes[i], argSlots[i])
+        }
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ASTORE, receiverIndex))
+        }
+
+        addHandlerOwner(il)
+        loadFromVariable(il, selectedParamType, argSlots[argIndex])
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        storeStackValue(il, selectedParamType, argSlots[argIndex])
+
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
+        }
+        for (i in callParamTypes.indices) {
+            loadFromVariable(il, callParamTypes[i], argSlots[i])
+        }
+
+        return il
     }
 
     /**
@@ -75,27 +175,14 @@ class ModifyArgInjector(
 
         // 调用 ASM 方法修改参数
         // ASM 方法应该接收原始参数值并返回修改后的值
-        val asmParamTypes = Type.getArgumentTypes(asmMethod)
-        if (asmParamTypes.size != 1 || asmParamTypes[0] != paramType) {
-            throw IllegalArgumentException(
-                "ASM method ${asmMethod.name} must take exactly one argument of type $paramType, actual ${asmParamTypes.toList()}",
-            )
-        }
-
-        val asmReturnType = Type.getReturnType(asmMethod)
-        if (asmReturnType != paramType) {
-            throw IllegalArgumentException("ASM method return type ($asmReturnType) must match parameter type ($paramType)")
-        }
+        val targetParamCount = validateHandlerSignature(target, paramType)
 
         // 获取 ASM 实例并生成调用
         val instanceType =
             Type
                 .getType(asmInfo.asmClass)
         val isKotlinObject = isKotlinObject()
-        val isMethodStatic = (asmMethod.modifiers and Modifier.STATIC) != 0
-
-        // 只有方法本身是静态的（例如 @JvmStatic 生成的方法）才能使用 INVOKESTATIC。
-        val useStaticCall = isMethodStatic
+        val useStaticCall = isHandlerStatic()
 
         if (!useStaticCall) {
             if (isKotlinObject) {
@@ -130,6 +217,7 @@ class ModifyArgInjector(
 
         // 实例调用必须先加载 receiver，再加载方法参数。
         loadFromVariable(il, paramType, varIndex)
+        loadTargetMethodParameters(il, target, targetParamCount)
 
         il.add(
             MethodInsnNode(
@@ -212,6 +300,181 @@ class ModifyArgInjector(
         varIndex: Int,
     ) {
         InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
+    }
+
+    private fun storeStackValue(
+        il: InsnList,
+        paramType: Type,
+        varIndex: Int,
+    ) {
+        when (paramType.sort) {
+            Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR -> {
+                il.add(VarInsnNode(Opcodes.ISTORE, varIndex))
+            }
+            Type.LONG -> {
+                il.add(VarInsnNode(Opcodes.LSTORE, varIndex))
+            }
+            Type.FLOAT -> {
+                il.add(VarInsnNode(Opcodes.FSTORE, varIndex))
+            }
+            Type.DOUBLE -> {
+                il.add(VarInsnNode(Opcodes.DSTORE, varIndex))
+            }
+            else -> {
+                il.add(VarInsnNode(Opcodes.ASTORE, varIndex))
+            }
+        }
+    }
+
+    private fun validateHandlerSignature(
+        target: MethodNode,
+        paramType: Type,
+    ): Int {
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        if (asmParamTypes.isEmpty() || asmParamTypes[0] != paramType) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} first parameter must be $paramType, actual ${asmParamTypes.toList()}",
+            )
+        }
+
+        val asmReturnType = Type.getReturnType(asmMethod)
+        if (asmReturnType != paramType) {
+            throw IllegalArgumentException("ASM method return type ($asmReturnType) must match parameter type ($paramType)")
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = asmParamTypes.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = asmParamTypes[index + 1]
+            if (actual != expected) {
+                throw IllegalArgumentException(
+                    "ASM method ${asmMethod.name} target parameter #$index mismatch: expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    private fun loadTargetMethodParameters(
+        il: InsnList,
+        target: MethodNode,
+        requestedTargetParamCount: Int,
+    ) {
+        if (requestedTargetParamCount <= 0) {
+            return
+        }
+
+        var paramVarIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        for (index in 0 until requestedTargetParamCount) {
+            val paramType = targetParamTypes[index]
+            loadFromVariable(il, paramType, paramVarIndex)
+            paramVarIndex += paramType.size
+        }
+    }
+
+    private fun addHandlerOwner(il: InsnList) {
+        if (isHandlerStatic()) {
+            return
+        }
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        if (isKotlinObject()) {
+            il.add(
+                FieldInsnNode(
+                    Opcodes.GETSTATIC,
+                    instanceType.internalName,
+                    "INSTANCE",
+                    "L${instanceType.internalName};",
+                ),
+            )
+            return
+        }
+
+        il.add(TypeInsnNode(Opcodes.NEW, instanceType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, instanceType.internalName, "<init>", "()V", false))
+    }
+
+    private fun handlerOpcode(): Int =
+        if (isHandlerStatic()) {
+            Opcodes.INVOKESTATIC
+        } else {
+            Opcodes.INVOKEVIRTUAL
+        }
+
+    private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
+
+    private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun matchesTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun nextLocalIndex(target: MethodNode): Int {
+        var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        for (paramType in Type.getArgumentTypes(target.desc)) {
+            maxIndex += paramType.size
+        }
+        for (localVar in target.localVariables) {
+            maxIndex = maxOf(maxIndex, localVar.index + Type.getType(localVar.desc).size)
+        }
+        for (insn in target.instructions.toArray()) {
+            if (insn is VarInsnNode) {
+                val size =
+                    when (insn.opcode) {
+                        Opcodes.LLOAD, Opcodes.LSTORE, Opcodes.DLOAD, Opcodes.DSTORE -> 2
+                        else -> 1
+                    }
+                maxIndex = maxOf(maxIndex, insn.`var` + size)
+            }
+        }
+        return maxIndex
     }
 
     /**

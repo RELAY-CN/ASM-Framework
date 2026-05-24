@@ -7,6 +7,7 @@ package kim.der.asm.injector.impl
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.BytecodeUtil
+import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -18,8 +19,12 @@ import java.lang.reflect.Modifier
  *
  * 遍历目标方法中的常量加载指令，并用 ASM 方法返回值替换匹配常量。
  * 当 [constantValue] 为 `null` 时仅按常量类型匹配；指定值时会同时校验常量文本。
+ * 支持 `LDC`、`ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
+ * `BIPUSH` 与 `SIPUSH` 形式的常量加载。
+ * ASM 方法的第一个参数接收原常量，后续参数可按顺序接收目标方法的部分参数。
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
+ * @param ordinal 匹配常量序号；负数表示处理全部匹配常量
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -28,6 +33,7 @@ class ModifyConstantInjector(
     method: Method,
     asmInfo: AsmInfo,
     private val constantValue: String? = null,
+    private val ordinal: Int = -1,
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 替换目标方法中匹配的常量。
@@ -43,6 +49,7 @@ class ModifyConstantInjector(
         val instructions = target.instructions
         var transformed = false
         val insns = instructions.toArray()
+        var matchedOrdinal = 0
 
         // 查找所有常量指令
         for (insn in insns) {
@@ -67,9 +74,18 @@ class ModifyConstantInjector(
                 if (constantValue == null) {
                     continue
                 }
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
                 throw IllegalArgumentException(
                     "ASM method ${asmMethod.name} return type ($asmReturnType) must match constant type ($constantType)",
                 )
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
             }
 
             // 注入常量修改
@@ -80,6 +96,8 @@ class ModifyConstantInjector(
 
         return transformed
     }
+
+    private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
     /**
      * 检查常量值是否匹配
@@ -115,7 +133,7 @@ class ModifyConstantInjector(
         val il = InsnList()
 
         // 调用 ASM 方法修改常量
-        generateConstantModifierCall(il, constNode, constantType)
+        generateConstantModifierCall(il, constNode, target, constantType)
 
         // 替换原始常量指令
         instructions.insertBefore(constNode, il)
@@ -127,9 +145,11 @@ class ModifyConstantInjector(
     private fun generateConstantModifierCall(
         il: InsnList,
         constNode: AbstractInsnNode,
+        target: MethodNode,
         constantType: Type,
     ) {
-        validateHandlerParameter(constantType)
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        validateHandlerParameters(target, constantType, asmParamTypes)
 
         val instanceType = Type.getType(asmInfo.asmClass)
         val useStaticCall = Modifier.isStatic(asmMethod.modifiers)
@@ -140,6 +160,7 @@ class ModifyConstantInjector(
 
         // 原始常量就是 @ModifyConstant handler 的第一个参数。
         loadConstant(il, constNode, constantType)
+        loadTargetMethodParameters(il, target, asmParamTypes.size - 1)
 
         il.add(
             MethodInsnNode(
@@ -152,12 +173,53 @@ class ModifyConstantInjector(
         )
     }
 
-    private fun validateHandlerParameter(constantType: Type) {
-        val asmParamTypes = Type.getArgumentTypes(asmMethod)
-        if (asmParamTypes.size != 1 || !isHandlerParameterCompatible(constantType, asmParamTypes[0])) {
+    private fun validateHandlerParameters(
+        target: MethodNode,
+        constantType: Type,
+        asmParamTypes: Array<Type>,
+    ) {
+        if (asmParamTypes.isEmpty() || !isHandlerParameterCompatible(constantType, asmParamTypes[0])) {
             throw IllegalArgumentException(
-                "ASM method ${asmMethod.name} must take exactly one argument of type $constantType, actual ${asmParamTypes.toList()}",
+                "ASM method ${asmMethod.name} first parameter must accept constant type $constantType, actual ${asmParamTypes.toList()}",
             )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = asmParamTypes.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = asmParamTypes[index + 1]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "ASM method ${asmMethod.name} parameter #${index + 1} ($actual) " +
+                        "must match target method ${target.name}${target.desc} parameter #$index ($expected)",
+                )
+            }
+        }
+    }
+
+    private fun loadTargetMethodParameters(
+        il: InsnList,
+        target: MethodNode,
+        requestedTargetParamCount: Int,
+    ) {
+        if (requestedTargetParamCount <= 0) {
+            return
+        }
+
+        var paramVarIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        for (index in 0 until requestedTargetParamCount) {
+            val paramType = targetParamTypes[index]
+            InstructionUtil.loadParam(paramType, paramVarIndex).let { il.add(it) }
+            paramVarIndex += paramType.size
         }
     }
 

@@ -134,6 +134,12 @@ object BytecodeUtil {
                     else -> null
                 }
             }
+            is IntInsnNode -> {
+                if (insn.opcode == Opcodes.BIPUSH || insn.opcode == Opcodes.SIPUSH) {
+                    return Type.INT_TYPE
+                }
+                throw IllegalArgumentException("IntInsnNode with invalid opcode ${insn.opcode} in getConstantType")
+            }
         }
 
         val index = CONSTANTS_ALL.indexOf(insn.opcode)

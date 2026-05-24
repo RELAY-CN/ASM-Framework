@@ -4,23 +4,40 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
+import org.objectweb.asm.tree.AbstractInsnNode
+import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
+import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 /**
  * Redirect 注入器。
  *
- * 查找目标方法中的匹配调用指令，并用 ASM 方法调用替换原调用点。
- * 目标签名可包含 owner，也可只包含方法名与描述符；缺少方法描述符时会被视为非法签名。
+ * 查找目标方法中的匹配方法调用、字段读取、字段写入或简单数组元素访问指令，并用 ASM 方法调用替换原指令。
+ *
+ * 方法调用目标使用 `owner.name(desc)` 或 `name(desc)` 格式；字段读取目标使用
+ * `owner.field:desc`、`field:desc` 或 `field` 格式。字段写入目标格式与字段读取相同，
+ * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素访问使用 [InjectionPoint.FIELD]
+ * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get` 或 `array=set` 区分读取与写入。
+ * 方法调用、字段读取、字段写入与数组元素访问重定向支持静态处理器、`@JvmStatic` 处理器或 Kotlin `object` 实例处理器。
+ * 处理器需先接收原调用或字段访问需要的栈参数，后续可按顺序接收目标方法的部分参数。
+ *
+ * @param redirectTarget 要重定向的方法调用或字段访问签名
+ * @param injectionPoint Redirect 的定位点类型；[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
+ * 会强制按字段访问语义解析目标
+ * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、字段读取、字段写入与数组元素访问重定向
+ * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -28,25 +45,39 @@ import java.lang.reflect.Modifier
 class RedirectInjector(
     method: Method,
     asmInfo: AsmInfo,
-    private val targetMethodSignature: String,
+    private val redirectTarget: String,
+    private val injectionPoint: InjectionPoint = InjectionPoint.INVOKE,
+    private val ordinal: Int = -1,
+    private val args: Array<String> = emptyArray(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 替换目标方法中的匹配调用点。
+     * 替换目标方法中的匹配调用点、字段读取点、字段写入点或数组元素访问点。
      *
      * @param target 目标方法
-     * @return 至少替换一个调用点时返回 `true`
-     * @throws IllegalArgumentException 目标调用签名无法解析时抛出
-     * @throws RuntimeException 替换调用或返回值适配失败时抛出
+     * @return 至少替换一个调用点、字段读取点、字段写入点或数组元素访问点时返回 `true`
+     * @throws IllegalArgumentException 目标方法调用或字段签名无法解析时抛出
+     * @throws RuntimeException 替换调用、字段访问或返回值适配失败时抛出
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
     override fun inject(target: MethodNode): Boolean {
-        val (targetOwner, targetName, targetDesc) = parseTargetMethod(targetMethodSignature)
+        val arrayAccessMode = arrayAccessMode()
+        if (arrayAccessMode != null) {
+            return injectArrayAccess(target, arrayAccessMode)
+        }
+        if (isFieldAssignRedirect()) {
+            return injectFieldAssign(target)
+        }
+        if (isFieldReadRedirect()) {
+            return injectFieldRead(target)
+        }
+
+        val (targetOwner, targetName, targetDesc) = parseTargetMethod(redirectTarget)
 
         if (targetName == null || targetDesc == null) {
             throw IllegalArgumentException(
-                "Invalid target method signature: $targetMethodSignature " +
+                "Invalid target method signature: $redirectTarget " +
                     "(parsed: owner=$targetOwner, name=$targetName, desc=$targetDesc)",
             )
         }
@@ -54,10 +85,128 @@ class RedirectInjector(
         val instructions = target.instructions
         var transformed = false
         val insns = instructions.toArray()
+        var matchedOrdinal = 0
 
         for (insn in insns) {
             if (insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                replaceMethodCall(instructions, insn)
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+                replaceMethodCall(target, instructions, insn)
+                transformed = true
+            }
+        }
+
+        return transformed
+    }
+
+    private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun isFieldReadRedirect(): Boolean =
+        injectionPoint == InjectionPoint.FIELD ||
+            (redirectTarget.contains(':') && !redirectTarget.contains('('))
+
+    private fun isFieldAssignRedirect(): Boolean = injectionPoint == InjectionPoint.FIELD_ASSIGN
+
+    private fun arrayAccessMode(): ArrayAccessMode? {
+        val arrayArg = args.firstOrNull { it.trim().startsWith("array=") } ?: return null
+        return when (arrayArg.substringAfter('=').trim().lowercase()) {
+            "get" -> ArrayAccessMode.GET
+            "set" -> ArrayAccessMode.SET
+            else -> throw IllegalArgumentException("Unsupported Redirect array access mode: $arrayArg")
+        }
+    }
+
+    private fun injectArrayAccess(
+        target: MethodNode,
+        mode: ArrayAccessMode,
+    ): Boolean {
+        val fieldTarget = parseFieldTarget(redirectTarget)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("Invalid target array field signature: $redirectTarget")
+        }
+        if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
+            throw IllegalArgumentException("Redirect array access target must be an array field: $redirectTarget")
+        }
+
+        val instructions = target.instructions
+        var transformed = false
+        val insns = instructions.toArray()
+        var matchedOrdinal = 0
+        val targetOpcodes =
+            when (mode) {
+                ArrayAccessMode.GET -> ARRAY_READ_OPS
+                ArrayAccessMode.SET -> ARRAY_WRITE_OPS
+            }
+
+        for (insn in insns) {
+            if (insn.opcode !in targetOpcodes) {
+                continue
+            }
+
+            val fieldInsn = findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            replaceArrayAccess(target, instructions, insn, fieldInsn, mode)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectFieldRead(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(redirectTarget)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("Invalid target field signature: $redirectTarget")
+        }
+
+        val instructions = target.instructions
+        var transformed = false
+        val insns = instructions.toArray()
+        var matchedOrdinal = 0
+
+        for (insn in insns) {
+            if (insn is FieldInsnNode &&
+                insn.opcode in FIELD_READ_OPS &&
+                matchesTargetField(insn, fieldTarget)
+            ) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+                replaceFieldRead(target, instructions, insn)
+                transformed = true
+            }
+        }
+
+        return transformed
+    }
+
+    private fun injectFieldAssign(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(redirectTarget)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("Invalid target field signature: $redirectTarget")
+        }
+
+        val instructions = target.instructions
+        var transformed = false
+        val insns = instructions.toArray()
+        var matchedOrdinal = 0
+
+        for (insn in insns) {
+            if (insn is FieldInsnNode &&
+                insn.opcode in FIELD_WRITE_OPS &&
+                matchesTargetField(insn, fieldTarget)
+            ) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+                replaceFieldAssign(target, instructions, insn)
                 transformed = true
             }
         }
@@ -112,23 +261,56 @@ class RedirectInjector(
         return targetDesc.isEmpty() || insn.desc == targetDesc
     }
 
+    private fun parseFieldTarget(signature: String): FieldTarget {
+        if (signature.isEmpty()) {
+            return FieldTarget(null, null, null)
+        }
+
+        val colonIndex = signature.indexOf(':')
+        val ownerAndName = if (colonIndex >= 0) signature.substring(0, colonIndex) else signature
+        val desc = if (colonIndex >= 0) signature.substring(colonIndex + 1) else null
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            FieldTarget(
+                owner = ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                name = ownerAndName.substring(separatorIndex + 1),
+                desc = desc,
+            )
+        } else {
+            FieldTarget(owner = null, name = ownerAndName, desc = desc)
+        }
+    }
+
+    private fun matchesTargetField(
+        insn: FieldInsnNode,
+        target: FieldTarget,
+    ): Boolean {
+        if (target.owner != null && insn.owner != target.owner) {
+            return false
+        }
+        if (target.name != null && insn.name != target.name) {
+            return false
+        }
+        return target.desc == null || insn.desc == target.desc
+    }
+
     private fun replaceMethodCall(
+        target: MethodNode,
         instructions: InsnList,
         originalInsn: MethodInsnNode,
     ) {
-        validateHandlerSignature(originalInsn)
+        val targetParamCount = validateHandlerSignature(target, originalInsn)
 
         val il = InsnList()
-        val instanceType = Type.getType(asmInfo.asmClass)
-        il.add(
-            MethodInsnNode(
-                Opcodes.INVOKESTATIC,
-                instanceType.internalName,
-                asmMethod.name,
-                Type.getMethodDescriptor(asmMethod),
-                false,
-            ),
-        )
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectHandlerCall(target, originalInsn, il, targetParamCount)
+        }
 
         val originalReturnType = Type.getReturnType(originalInsn.desc)
         val handlerReturnType = Type.getReturnType(asmMethod)
@@ -142,26 +324,287 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
-    private fun validateHandlerSignature(originalInsn: MethodInsnNode) {
-        if (!Modifier.isStatic(asmMethod.modifiers)) {
-            throw IllegalStateException("Redirect handler ${asmMethod.name} must be static or @JvmStatic")
+    private fun addStaticHandlerCall(il: InsnList) {
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESTATIC,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun addObjectHandlerCall(
+        target: MethodNode,
+        originalInsn: MethodInsnNode,
+        il: InsnList,
+        targetParamCount: Int,
+    ) {
+        val callParamTypes = Type.getArgumentTypes(originalInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val receiverIndex =
+            if (originalInsn.opcode == Opcodes.INVOKESTATIC) {
+                null
+            } else {
+                nextTempIndex.also { nextTempIndex += 1 }
+            }
+        val argSlots =
+            callParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+
+        for (index in callParamTypes.indices.reversed()) {
+            storeStackValue(il, callParamTypes[index], argSlots[index])
+        }
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ASTORE, receiverIndex))
+        }
+
+        addHandlerOwner(il)
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
+        }
+        for (index in callParamTypes.indices) {
+            loadFromVariable(il, callParamTypes[index], argSlots[index])
+        }
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun replaceFieldRead(
+        target: MethodNode,
+        instructions: InsnList,
+        originalInsn: FieldInsnNode,
+    ) {
+        val targetParamCount = validateFieldHandlerSignature(target, originalInsn)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectFieldReadHandlerCall(target, originalInsn, il, targetParamCount)
+        }
+
+        val fieldType = Type.getType(originalInsn.desc)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (fieldType != handlerReturnType && fieldType.sort >= Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, fieldType.internalName))
+        }
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(originalInsn)
+    }
+
+    private fun replaceFieldAssign(
+        target: MethodNode,
+        instructions: InsnList,
+        originalInsn: FieldInsnNode,
+    ) {
+        val targetParamCount = validateFieldAssignHandlerSignature(target, originalInsn)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectFieldAssignHandlerCall(target, originalInsn, il, targetParamCount)
+        }
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(originalInsn)
+    }
+
+    private fun replaceArrayAccess(
+        target: MethodNode,
+        instructions: InsnList,
+        arrayInsn: AbstractInsnNode,
+        fieldInsn: FieldInsnNode,
+        mode: ArrayAccessMode,
+    ) {
+        val targetParamCount = validateArrayAccessHandlerSignature(target, fieldInsn, mode)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectArrayAccessHandlerCall(target, fieldInsn, il, targetParamCount, mode)
+        }
+
+        if (mode == ArrayAccessMode.GET) {
+            val elementType = Type.getType(fieldInsn.desc).elementType
+            val handlerReturnType = Type.getReturnType(asmMethod)
+            if (elementType != handlerReturnType && elementType.sort >= Type.ARRAY) {
+                il.add(TypeInsnNode(Opcodes.CHECKCAST, elementType.internalName))
+            }
+        }
+
+        instructions.insertBefore(arrayInsn, il)
+        instructions.remove(arrayInsn)
+    }
+
+    private fun addObjectFieldReadHandlerCall(
+        target: MethodNode,
+        originalInsn: FieldInsnNode,
+        il: InsnList,
+        targetParamCount: Int,
+    ) {
+        val receiverIndex =
+            if (originalInsn.opcode == Opcodes.GETSTATIC) {
+                null
+            } else {
+                nextLocalIndex(target)
+            }
+
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ASTORE, receiverIndex))
+        }
+
+        addHandlerOwner(il)
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
+        }
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun addObjectFieldAssignHandlerCall(
+        target: MethodNode,
+        originalInsn: FieldInsnNode,
+        il: InsnList,
+        targetParamCount: Int,
+    ) {
+        val fieldType = Type.getType(originalInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val receiverIndex =
+            if (originalInsn.opcode == Opcodes.PUTSTATIC) {
+                null
+            } else {
+                nextTempIndex.also { nextTempIndex += 1 }
+            }
+        val valueIndex = nextTempIndex
+
+        storeStackValue(il, fieldType, valueIndex)
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ASTORE, receiverIndex))
+        }
+
+        addHandlerOwner(il)
+        if (receiverIndex != null) {
+            il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
+        }
+        loadFromVariable(il, fieldType, valueIndex)
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun addObjectArrayAccessHandlerCall(
+        target: MethodNode,
+        fieldInsn: FieldInsnNode,
+        il: InsnList,
+        targetParamCount: Int,
+        mode: ArrayAccessMode,
+    ) {
+        val arrayType = Type.getType(fieldInsn.desc)
+        val elementType = arrayType.elementType
+        var nextTempIndex = nextLocalIndex(target)
+        val arrayIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val indexIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val valueIndex =
+            if (mode == ArrayAccessMode.SET) {
+                nextTempIndex.also { nextTempIndex += elementType.size }
+            } else {
+                null
+            }
+
+        if (valueIndex != null) {
+            storeStackValue(il, elementType, valueIndex)
+        }
+        storeStackValue(il, Type.INT_TYPE, indexIndex)
+        storeStackValue(il, arrayType, arrayIndex)
+
+        addHandlerOwner(il)
+        loadFromVariable(il, arrayType, arrayIndex)
+        loadFromVariable(il, Type.INT_TYPE, indexIndex)
+        if (valueIndex != null) {
+            loadFromVariable(il, elementType, valueIndex)
+        }
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun validateHandlerSignature(
+        target: MethodNode,
+        originalInsn: MethodInsnNode,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
         }
 
         val expectedParams = buildExpectedHandlerParams(originalInsn)
         val actualParams = Type.getArgumentTypes(asmMethod)
-        if (expectedParams.size != actualParams.size) {
+        if (actualParams.size < expectedParams.size) {
             throw IllegalStateException(
-                "Redirect handler ${asmMethod.name} parameter count mismatch: expected ${expectedParams.toList()}, actual ${actualParams.toList()}",
+                "Redirect handler ${asmMethod.name} parameter count mismatch: expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
             )
         }
 
-        expectedParams.zip(actualParams).forEachIndexed { index, (expected, actual) ->
+        expectedParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
             if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalStateException(
                     "Redirect handler ${asmMethod.name} parameter #$index mismatch: expected stack type $expected, actual $actual",
                 )
             }
         }
+
+        val requestedTargetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
 
         val originalReturnType = Type.getReturnType(originalInsn.desc)
         val handlerReturnType = Type.getReturnType(asmMethod)
@@ -170,6 +613,153 @@ class RedirectInjector(
                 "Redirect handler ${asmMethod.name} return type mismatch: original $originalReturnType, handler $handlerReturnType",
             )
         }
+        return requestedTargetParamCount
+    }
+
+    private fun validateTargetMethodParameters(
+        target: MethodNode,
+        actualParams: Array<Type>,
+        stackParamCount: Int,
+    ): Int {
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - stackParamCount
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[stackParamCount + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Redirect handler ${asmMethod.name} target parameter #$index mismatch: expected $expected, actual $actual",
+                )
+            }
+        }
+        return requestedTargetParamCount
+    }
+
+    private fun validateFieldHandlerSignature(
+        target: MethodNode,
+        originalInsn: FieldInsnNode,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val expectedParams = buildExpectedFieldHandlerParams(originalInsn)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedParams.size) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} parameter count mismatch: expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Redirect handler ${asmMethod.name} parameter #$index mismatch: expected stack type $expected, actual $actual",
+                )
+            }
+        }
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+
+        val fieldType = Type.getType(originalInsn.desc)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(fieldType, handlerReturnType)) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} return type mismatch: original $fieldType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateFieldAssignHandlerSignature(
+        target: MethodNode,
+        originalInsn: FieldInsnNode,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val expectedParams = buildExpectedFieldAssignHandlerParams(originalInsn)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedParams.size) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} parameter count mismatch: expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Redirect handler ${asmMethod.name} parameter #$index mismatch: expected stack type $expected, actual $actual",
+                )
+            }
+        }
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (handlerReturnType != Type.VOID_TYPE) {
+            throw IllegalStateException(
+                "Redirect field assign handler ${asmMethod.name} must return void, actual $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateArrayAccessHandlerSignature(
+        target: MethodNode,
+        fieldInsn: FieldInsnNode,
+        mode: ArrayAccessMode,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val expectedParams = buildExpectedArrayAccessHandlerParams(fieldInsn, mode)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedParams.size) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} parameter count mismatch: expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Redirect handler ${asmMethod.name} parameter #$index mismatch: expected stack type $expected, actual $actual",
+                )
+            }
+        }
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (mode == ArrayAccessMode.GET) {
+            val elementType = Type.getType(fieldInsn.desc).elementType
+            if (!isReturnCompatible(elementType, handlerReturnType)) {
+                throw IllegalStateException(
+                    "Redirect array read handler ${asmMethod.name} return type mismatch: original $elementType, handler $handlerReturnType",
+                )
+            }
+        } else if (handlerReturnType != Type.VOID_TYPE) {
+            throw IllegalStateException(
+                "Redirect array write handler ${asmMethod.name} must return void, actual $handlerReturnType",
+            )
+        }
+        return targetParamCount
     }
 
     private fun buildExpectedHandlerParams(originalInsn: MethodInsnNode): Array<Type> {
@@ -179,6 +769,60 @@ class RedirectInjector(
         } else {
             (listOf(Type.getObjectType(originalInsn.owner)) + originalParams).toTypedArray()
         }
+    }
+
+    private fun buildExpectedFieldHandlerParams(originalInsn: FieldInsnNode): Array<Type> =
+        if (originalInsn.opcode == Opcodes.GETSTATIC) {
+            emptyArray()
+        } else {
+            arrayOf(Type.getObjectType(originalInsn.owner))
+        }
+
+    private fun buildExpectedFieldAssignHandlerParams(originalInsn: FieldInsnNode): Array<Type> {
+        val fieldType = Type.getType(originalInsn.desc)
+        return if (originalInsn.opcode == Opcodes.PUTSTATIC) {
+            arrayOf(fieldType)
+        } else {
+            arrayOf(Type.getObjectType(originalInsn.owner), fieldType)
+        }
+    }
+
+    private fun buildExpectedArrayAccessHandlerParams(
+        fieldInsn: FieldInsnNode,
+        mode: ArrayAccessMode,
+    ): Array<Type> {
+        val arrayType = Type.getType(fieldInsn.desc)
+        return if (mode == ArrayAccessMode.GET) {
+            arrayOf(arrayType, Type.INT_TYPE)
+        } else {
+            arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
+        }
+    }
+
+    private fun findArrayFieldProducer(
+        arrayInsn: AbstractInsnNode,
+        target: FieldTarget,
+    ): FieldInsnNode? {
+        var cursor = arrayInsn.previous
+        while (cursor != null) {
+            if (cursor is FieldInsnNode) {
+                if (cursor.opcode in FIELD_READ_OPS && matchesTargetField(cursor, target)) {
+                    val fieldType = Type.getType(cursor.desc)
+                    if (fieldType.sort != Type.ARRAY) {
+                        throw IllegalArgumentException(
+                            "Redirect array access target must be an array field: ${cursor.owner}.${cursor.name}:${cursor.desc}",
+                        )
+                    }
+                    return cursor
+                }
+                return null
+            }
+            if (cursor is MethodInsnNode || cursor.opcode in ARRAY_READ_OPS || cursor.opcode in ARRAY_WRITE_OPS) {
+                return null
+            }
+            cursor = cursor.previous
+        }
+        return null
     }
 
     private fun isHandlerParameterCompatible(
@@ -200,5 +844,132 @@ class RedirectInjector(
         if (handler == Type.VOID_TYPE) return false
         if (original == handler) return true
         return (original.sort == Type.OBJECT || original.sort == Type.ARRAY) && handler.sort >= Type.ARRAY
+    }
+
+    private fun addHandlerOwner(il: InsnList) {
+        if (isHandlerStatic()) {
+            return
+        }
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            FieldInsnNode(
+                Opcodes.GETSTATIC,
+                instanceType.internalName,
+                "INSTANCE",
+                "L${instanceType.internalName};",
+            ),
+        )
+    }
+
+    private fun isHandlerStatic(): Boolean = Modifier.isStatic(asmMethod.modifiers)
+
+    private fun loadFromVariable(
+        il: InsnList,
+        paramType: Type,
+        varIndex: Int,
+    ) {
+        InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
+    }
+
+    private fun loadTargetMethodParameters(
+        il: InsnList,
+        target: MethodNode,
+        requestedTargetParamCount: Int,
+    ) {
+        if (requestedTargetParamCount <= 0) {
+            return
+        }
+
+        var paramVarIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        for (index in 0 until requestedTargetParamCount) {
+            val paramType = targetParamTypes[index]
+            loadFromVariable(il, paramType, paramVarIndex)
+            paramVarIndex += paramType.size
+        }
+    }
+
+    private fun storeStackValue(
+        il: InsnList,
+        paramType: Type,
+        varIndex: Int,
+    ) {
+        when (paramType.sort) {
+            Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR -> {
+                il.add(VarInsnNode(Opcodes.ISTORE, varIndex))
+            }
+            Type.LONG -> {
+                il.add(VarInsnNode(Opcodes.LSTORE, varIndex))
+            }
+            Type.FLOAT -> {
+                il.add(VarInsnNode(Opcodes.FSTORE, varIndex))
+            }
+            Type.DOUBLE -> {
+                il.add(VarInsnNode(Opcodes.DSTORE, varIndex))
+            }
+            else -> {
+                il.add(VarInsnNode(Opcodes.ASTORE, varIndex))
+            }
+        }
+    }
+
+    private fun nextLocalIndex(target: MethodNode): Int {
+        var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
+        for (paramType in Type.getArgumentTypes(target.desc)) {
+            maxIndex += paramType.size
+        }
+        for (localVar in target.localVariables) {
+            maxIndex = maxOf(maxIndex, localVar.index + Type.getType(localVar.desc).size)
+        }
+        for (insn in target.instructions.toArray()) {
+            if (insn is VarInsnNode) {
+                val size =
+                    when (insn.opcode) {
+                        Opcodes.LLOAD, Opcodes.LSTORE, Opcodes.DLOAD, Opcodes.DSTORE -> 2
+                        else -> 1
+                    }
+                maxIndex = maxOf(maxIndex, insn.`var` + size)
+            }
+        }
+        return maxIndex
+    }
+
+    private data class FieldTarget(
+        val owner: String?,
+        val name: String?,
+        val desc: String?,
+    )
+
+    private enum class ArrayAccessMode {
+        GET,
+        SET,
+    }
+
+    private companion object {
+        private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+        private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+        private val ARRAY_READ_OPS =
+            setOf(
+                Opcodes.IALOAD,
+                Opcodes.LALOAD,
+                Opcodes.FALOAD,
+                Opcodes.DALOAD,
+                Opcodes.AALOAD,
+                Opcodes.BALOAD,
+                Opcodes.CALOAD,
+                Opcodes.SALOAD,
+            )
+        private val ARRAY_WRITE_OPS =
+            setOf(
+                Opcodes.IASTORE,
+                Opcodes.LASTORE,
+                Opcodes.FASTORE,
+                Opcodes.DASTORE,
+                Opcodes.AASTORE,
+                Opcodes.BASTORE,
+                Opcodes.CASTORE,
+                Opcodes.SASTORE,
+            )
     }
 }
