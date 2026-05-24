@@ -211,7 +211,8 @@ annotation class ModifyArg(
  * @param method 目标方法签名
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
- * @param slice 预留参数，当前实现未使用
+ * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
