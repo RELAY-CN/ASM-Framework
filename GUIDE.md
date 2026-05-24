@@ -628,6 +628,7 @@ object CacheMixin {
 ```
 
 `@ModifyReturnValue` 默认会修改目标方法的全部非 void 返回点；`ordinal` 可限定只修改第 N 个返回点。
+关键返回值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的非 void 返回点数量计数。
 
 ### 场景 4: 修改常量
 
@@ -918,7 +919,7 @@ fun onEveryReturn() {
 }
 ```
 
-同样的契约也适用于关键参数修改、关键参数组修改、关键变量修改、关键常量修改和关键重定向：
+同样的契约也适用于关键参数修改、关键参数组修改、关键变量修改、关键返回值修改、关键常量修改和关键重定向：
 
 ```kotlin
 @ModifyArg(
@@ -948,6 +949,14 @@ fun normalizeArguments(args: Args) {
     allow = 1,
 )
 fun normalizeStoredLocal(value: String): String = value.trim()
+
+@ModifyReturnValue(
+    method = "lookup(Ljava/lang/String;)Ljava/lang/String;",
+    ordinal = 0,
+    require = 1,
+    allow = 1,
+)
+fun fallbackLookupResult(original: String?): String = original ?: "default"
 
 @ModifyConstant(method = "maxPlayers()I", constant = "20", require = 1, allow = 1)
 fun expandLimit(original: Int): Int = original * 2
