@@ -597,6 +597,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyArgMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyArgContractTarget", modifyArgContractTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyArgAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyArgMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyArgContractTarget", modifyArgContractTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyArgExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyArgMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("ModifyArgContractTarget", modifyArgContractTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun modifyArgSliceLimitsInvokeCallArgumentMatchesBetweenFromAndTo() {
         AsmRegistry.register(InvokeModifyArgSliceMixin::class.java)
 
@@ -4128,6 +4179,51 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "modified"
     }
 
+    @AsmMixin("ModifyArgContractTarget")
+    object RequireThreeModifyArgMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "ModifyArgContractTarget.combine(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            require = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ModifyArgContractTarget")
+    object AllowOneModifyArgMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "ModifyArgContractTarget.combine(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ModifyArgContractTarget")
+    object ExpectThreeModifyArgMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "ModifyArgContractTarget.combine(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            expect = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
     @AsmMixin("SliceInvokeModifyArgTarget")
     object InvokeModifyArgSliceMixin {
         @ModifyArg(
@@ -7581,6 +7677,70 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun modifyArgContractTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyArgContractTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first-")
+            visitLdcInsn("original")
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "ModifyArgContractTarget",
+                "combine",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second-")
+            visitLdcInsn("original")
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "ModifyArgContractTarget",
+                "combine",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "combine",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
             visitEnd()
         }
         cw.visitEnd()
