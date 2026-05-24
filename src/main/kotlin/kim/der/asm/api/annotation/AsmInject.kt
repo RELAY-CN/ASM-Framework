@@ -35,7 +35,8 @@ package kim.der.asm.api.annotation
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
- * @param slice 预留参数，当前实现未实现按切片范围缩小查找
+ * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] 注入支持用 [Slice.from] / [Slice.to]
+ * 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用
@@ -130,7 +131,8 @@ enum class InjectionPoint {
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式。
  *
- * @param value 预留字段，当前实现未使用
+ * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] 注入的 [Slice] 边界
+ * 当前仅支持 [InjectionPoint.INVOKE]
  * @param target 目标方法调用、构造器调用、字段、NEW 类型或 CHECKCAST 类型签名
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
@@ -168,8 +170,10 @@ enum class Shift {
 /**
  * 注入点切片范围。
  *
- * 用于描述在某段字节码范围内查找注入点的起止条件。
- * 当前实现未启用 slice 过滤，字段仅作为元数据保留。
+ * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
+ * [InjectionPoint.INVOKE] 注入支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；
+ * 起始边界之后、结束边界之前的调用点才会参与匹配，边界指令本身不会作为候选注入点。
+ * [AsmInject.ordinal] 会在切片内重新计数。指定的边界未命中时，切片按空范围处理。
  *
  * @param from 起始定位条件
  * @param to 结束定位条件

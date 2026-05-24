@@ -157,7 +157,7 @@ object RemoveInterfacesMixin
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
 - `at: At = At()` - 精确注入位置
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
-- `slice: Slice = Slice()` - 注入点切片
+- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` 注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `inline: Boolean = false` - 是否内联代码
@@ -170,6 +170,10 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
+
+普通 `@AsmInject(target = InjectionPoint.INVOKE)` 支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE`
+的切片边界。框架只在起始边界之后、结束边界之前查找目标调用；边界调用本身不会作为候选注入点，`ordinal`
+也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、new 出来的对象、类型转换对象或异常对象传给 handler。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
@@ -760,13 +764,17 @@ At(
 
 ### Slice
 
-用于定义查找范围。
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE)` 支持 `from` / `to`
+为 `InjectionPoint.INVOKE` 的边界切片；其他注解中的 `slice` 仍为预留参数。
 
 **参数：**
 
-- `from: At = At()` - 起始位置
-- `to: At = At()` - 结束位置
+- `from: At = At()` - 起始位置；命中该边界之后开始查找候选注入点
+- `to: At = At()` - 结束位置；命中该边界之前停止查找候选注入点
 - `id: String = ""` - 切片标识符
+
+边界调用本身不参与候选匹配，`ordinal` 会在切片范围内重新计数。若指定的 `from` 或 `to` 未命中，
+切片按空范围处理。
 
 **示例：**
 
