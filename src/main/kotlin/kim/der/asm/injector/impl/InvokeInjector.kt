@@ -5,8 +5,11 @@
 package kim.der.asm.injector.impl
 
 import kim.der.asm.api.annotation.AsmInject
+import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.CallbackInfo
+import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Shift
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.injector.util.AsmMethodCallGenerator
@@ -71,10 +74,15 @@ class InvokeInjector(
         val instructions = target.instructions
         var injectionCount = 0
         val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns, injectAnnotation.slice)
 
         // 查找所有匹配的方法调用
         var matchedOrdinal = 0
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+
             if (insn is MethodInsnNode) {
                 if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
                     val currentOrdinal = matchedOrdinal++
@@ -101,6 +109,58 @@ class InvokeInjector(
         }
 
         return injectionCount
+    }
+
+    private fun resolveSliceRange(
+        insns: Array<AbstractInsnNode>,
+        slice: Slice,
+    ): Pair<Int, Int> {
+        val startIndex =
+            if (hasSliceBoundary(slice.from)) {
+                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (hasSliceBoundary(slice.to)) {
+                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
+            } else {
+                insns.size
+            }
+
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+
+    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
+
+    private fun findSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @AsmInject(INVOKE): ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+        }
+
+        return null
     }
 
     private fun matchesOrdinal(
