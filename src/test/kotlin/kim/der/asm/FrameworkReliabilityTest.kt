@@ -1935,6 +1935,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyConstantMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiIntConstantTarget", multiIntConstantTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyConstantAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyConstantMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiIntConstantTarget", multiIntConstantTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyConstantExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyConstantMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("MultiIntConstantTarget", multiIntConstantTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun modifyConstantWithoutExplicitValueSkipsOtherConstantTypes() {
         AsmRegistry.register(StringOnlyModifyConstantMixin::class.java)
 
@@ -5628,6 +5679,27 @@ class FrameworkReliabilityTest {
         @ModifyConstant(method = "value()I", constant = "7", ordinal = 1)
         @JvmStatic
         fun modify(original: Int): Int = original + 35
+    }
+
+    @AsmMixin("MultiIntConstantTarget")
+    object RequireThreeModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "7", require = 3)
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("MultiIntConstantTarget")
+    object AllowOneModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "7", allow = 1)
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("MultiIntConstantTarget")
+    object ExpectThreeModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "7", expect = 3)
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
     }
 
     @AsmMixin("StrictTarget")
