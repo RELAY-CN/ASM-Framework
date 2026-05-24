@@ -360,14 +360,14 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 
 ### @Redirect
 
-重定向目标方法中的方法调用、构造器调用、字段读取、字段写入或简单数组元素访问。
+重定向目标方法中的方法调用、构造器调用、字段读取、字段写入、简单数组元素访问或数组长度读取。
 
 方法调用重定向会替换匹配的调用指令。构造器重定向会替换常见 `NEW/DUP/args/INVOKESPECIAL <init>` 构造表达式。字段读取重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD`，
 会替换匹配的 `GETFIELD` / `GETSTATIC` 指令。字段写入重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD_ASSIGN`，
-会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
-并通过 `at.args = ["array=get"]` 或 `at.args = ["array=set"]` 区分数组读取与写入。
+会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问与数组长度重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
+并通过 `at.args = ["array=get"]`、`at.args = ["array=set"]` 或 `at.args = ["array=length"]` 区分数组读取、写入与长度读取。
 
-方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
+方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
 
 方法调用重定向的 handler 参数形态：
 
@@ -383,17 +383,18 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 - 静态字段写入：原写入值，并可继续追加目标方法参数前缀，返回 `void`
 - 数组元素读取：数组引用、`Int` 索引，并可继续追加目标方法参数前缀，返回元素值
 - 数组元素写入：数组引用、`Int` 索引、原元素值，并可继续追加目标方法参数前缀，返回 `void`
+- 数组长度读取：数组引用，并可继续追加目标方法参数前缀，返回 `Int`
 
 **参数：**
 
 - `method: String = ""` - 目标方法签名
 - `target: String = ""` - 要重定向的方法调用、构造器调用或字段访问签名
-- `at: At = At()` - 注入位置；`at.value = InjectionPoint.FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` 可匹配数组元素访问，`FIELD_ASSIGN` 时按字段写入语义匹配
-- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向中生效
+- `at: At = At()` - 注入位置；`at.value = InjectionPoint.FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配
+- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向中生效
 - `slice: Slice = Slice()` - 切片范围
 - `remap: Boolean = false` - 是否重映射
 
-方法调用、构造器调用、字段读取、字段写入与数组元素访问重定向都可用 `ordinal` 只替换第 N 个匹配点。
+方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向都可用 `ordinal` 只替换第 N 个匹配点。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -697,7 +698,7 @@ val callback = CallbackInfo.returnable("value")
 `CHECKCAST` 完成后的对象表达式值”。`@ModifyReceiver` 会把 `INVOKE`
 解释为“匹配实例调用前的 receiver 改写”，把 `FIELD` 解释为“匹配实例字段读取前的 receiver 改写”，
 把 `FIELD_ASSIGN` 解释为“匹配实例字段写入前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
-handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
+handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值、数组元素值或数组长度的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
 解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/CAST/THROW)`
@@ -715,8 +716,8 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `target: String = ""` - 目标方法、字段或类型签名
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 偏移量
-- `args: Array<String> = []` - 附加定位参数；`@Redirect` 和 `@WrapOperation` 当前支持 `array=get`
-  与 `array=set`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
+- `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`
+  与 `array=length`，`@WrapOperation` 当前支持 `array=get` 与 `array=set`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
   与 `array=length`
 
 **`target` 格式：**
@@ -728,8 +729,8 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `CAST`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
 - `THROW`: 不需要 `target`，匹配 `ATHROW`
 
-`@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]` 或 `args = ["array=set"]`，
-把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取或写入。`@WrapOperation`
+`@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]`、`args = ["array=set"]` 或 `args = ["array=length"]`，
+把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取、数组元素写入或 `ARRAYLENGTH`。`@WrapOperation`
 可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入。
 `@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；也可使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。
 
