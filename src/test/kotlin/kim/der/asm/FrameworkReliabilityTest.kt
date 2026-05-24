@@ -2555,6 +2555,47 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectConstructorCallReplacesNewObjectExpression() {
+        AsmRegistry.register(ConstructorRedirectMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("redirected-raw", result)
+    }
+
+    @Test
+    fun redirectConstructorCallCanUseTargetMethodParameters() {
+        AsmRegistry.register(ConstructorRedirectWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NewParamTarget", newParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NewParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("create", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "prefix", 7)
+
+        assertEquals("prefix-7", result.toString())
+    }
+
+    @Test
+    fun redirectConstructorCallWithMismatchedHandlerReturnFailsDuringTransform() {
+        AsmRegistry.register(MismatchedConstructorRedirectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("return type mismatch") == true ||
+                exception.cause?.message?.contains("parameter") == true,
+        )
+    }
+
+    @Test
     fun redirectFieldReadReplacesGetFieldValue() {
         AsmRegistry.register(FieldReadRedirectMixin::class.java)
 
@@ -3048,6 +3089,48 @@ class FrameworkReliabilityTest {
             suffix: String,
             count: Int,
         ): String = "$value-$suffix$count"
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object ConstructorRedirectMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): StringBuilder = StringBuilder("redirected-$value")
+    }
+
+    @AsmMixin("NewParamTarget")
+    object ConstructorRedirectWithTargetParamsMixin {
+        @Redirect(
+            method = "create(Ljava/lang/String;I)Ljava/lang/StringBuilder;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>()V",
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            prefix: String,
+            count: Int,
+        ): StringBuilder = StringBuilder("$prefix-$count")
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object MismatchedConstructorRedirectMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
     }
 
     @AsmMixin("RedirectParamTarget")
