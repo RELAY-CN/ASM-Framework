@@ -321,6 +321,7 @@ annotation class WrapOperation(
  * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
  * 数组元素写入使用 [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定，
  * 当前匹配由最近的目标数组字段读取产生数组引用的 `xASTORE` 指令。
+ * [InjectionPoint.INVOKE] 模式可使用 [slice] 把候选调用限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
  *
  * ASM 方法要求：
  *
@@ -336,7 +337,7 @@ annotation class WrapOperation(
  * @param method 目标方法签名
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
- * @param slice 预留参数，当前实现未使用
+ * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 模式支持 INVOKE 边界切片
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
