@@ -27,4 +27,19 @@ interface AsmInjector {
      * @date 2025-11-24
      */
     fun inject(target: MethodNode): Boolean
+
+    /**
+     * 注入到目标方法并返回实际命中的操作点数量。
+     *
+     * 默认实现会调用 [inject] 并把成功改写折算为 1 次命中。需要支持命中数契约的注入器应覆盖该方法，
+     * 返回真实插入或替换的操作点数量。
+     *
+     * @param target 目标方法
+     * @return 实际命中的操作点数量
+     * @throws RuntimeException 注入过程中遇到不合法签名、参数映射或字节码结构时可抛出运行时异常
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    fun injectCount(target: MethodNode): Int = if (inject(target)) 1 else 0
 }

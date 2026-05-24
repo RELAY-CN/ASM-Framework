@@ -37,7 +37,9 @@ class TailInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    override fun injectCount(target: MethodNode): Int {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         val il = InsnList()
 
@@ -67,24 +69,26 @@ class TailInjector(
 
         // 查找所有 RETURN 指令并在第一个之前插入
         val instructions = target.instructions
-        var foundReturn = false
+        var injectionCount = 0
 
         for (insn in instructions.toArray()) {
             if (insn is InsnNode && insn.opcode in RETURN_OPS) {
                 // 复制指令列表以避免重复插入
                 instructions.insertBefore(insn, cloneInsnList(il))
-                foundReturn = true
+                injectionCount++
             }
         }
 
         // 如果没有找到 RETURN，在最后添加
-        if (!foundReturn && instructions.size() > 0) {
+        if (injectionCount == 0 && instructions.size() > 0) {
             instructions.insertBefore(instructions.last, il)
+            injectionCount = 1
         } else if (instructions.size() == 0) {
             instructions.add(il)
+            injectionCount = 1
         }
 
-        return foundReturn || instructions.size() > 0
+        return injectionCount
     }
 
     private fun cloneInsnList(source: InsnList): InsnList {

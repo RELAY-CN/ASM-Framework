@@ -839,15 +839,18 @@ class TargetClassContext(
         val targetMethod = requireTargetMethod(annotation.method)
 
         // 如果设置了 inline=true，则内联 ASM 方法的字节码
-        if (annotation.inline) {
-            return injectInlineCode(targetMethod, method, annotation)
-        }
+        val injectionCount =
+            if (annotation.inline) {
+                injectInlineCode(targetMethod, method, annotation)
+            } else {
+                // 否则使用普通的注入器在指定位置注入代码
+                val injector = AsmInjectorFactory.createInjector(annotation.target, method, asmInfo)
+                injector.injectCount(targetMethod)
+            }
 
-        // 否则使用普通的注入器在指定位置注入代码
-        val injector = AsmInjectorFactory.createInjector(annotation.target, method, asmInfo)
-        return requireInjectorMatched(
-            injector.inject(targetMethod),
-            "@AsmInject",
+        return requireAsmInjectCount(
+            injectionCount,
+            annotation,
             method,
             annotation.method,
         )
@@ -864,7 +867,7 @@ class TargetClassContext(
         target: MethodNode,
         asmMethod: Method,
         annotation: AsmInject,
-    ): Boolean {
+    ): Int {
         val il =
             InlineCodeGenerator.inlineMethodCode(
                 target,
@@ -874,7 +877,7 @@ class TargetClassContext(
             )
 
         // 根据注入点位置插入代码
-        when (annotation.target) {
+        return when (annotation.target) {
             InjectionPoint.HEAD -> {
                 // 在方法开头插入
                 // 注意：HEAD 注入在最后处理，所以此时 RETURN 注入已经完成
@@ -883,35 +886,41 @@ class TargetClassContext(
                 } else {
                     target.instructions.insertBefore(target.instructions.first, il)
                 }
+                1
             }
             InjectionPoint.TAIL -> {
                 // 在所有 RETURN 之前插入
                 // 注意：TAIL 注入在第一轮处理，只处理原始的 RETURN 指令
                 val insns = target.instructions.toArray()
+                var injectionCount = 0
                 for (insn in insns) {
                     if (insn is InsnNode && insn.opcode in RETURN_OPS) {
                         target.instructions.insertBefore(insn, il)
+                        injectionCount = 1
                         break
                     }
                 }
                 // 如果没有找到 RETURN，在末尾添加
-                if (target.instructions.size() == 0 ||
-                    target.instructions.toArray().none { it is InsnNode && it.opcode in RETURN_OPS }
-                ) {
+                if (injectionCount == 0) {
                     target.instructions.add(il)
+                    injectionCount = 1
                 }
+                injectionCount
             }
             InjectionPoint.RETURN -> {
                 // 在每个 RETURN 之前插入
                 // 注意：RETURN 注入在第一轮处理，只处理原始的 RETURN 指令
                 // HEAD 注入创建的 RETURN 指令不会被处理（因为 HEAD 注入在 RETURN 注入之后执行）
                 val insns = target.instructions.toArray()
+                var injectionCount = 0
                 for (insn in insns) {
                     if (insn is InsnNode && insn.opcode in RETURN_OPS) {
                         // 为每个 RETURN 创建新的指令列表副本
                         target.instructions.insertBefore(insn, cloneInsnList(il))
+                        injectionCount++
                     }
                 }
+                injectionCount
             }
             else -> {
                 // 默认在方法开头插入
@@ -920,10 +929,9 @@ class TargetClassContext(
                 } else {
                     target.instructions.insertBefore(target.instructions.first, il)
                 }
+                1
             }
         }
-
-        return true
     }
 
     private fun cloneInsnList(source: InsnList): InsnList {
@@ -1347,6 +1355,37 @@ class TargetClassContext(
     private fun requireTargetField(fieldName: String): FieldNode =
         classNode.fields.find { it.name == fieldName }
             ?: throw IllegalStateException(buildMissingTargetFieldMessage(fieldName))
+
+    private fun requireAsmInjectCount(
+        injectionCount: Int,
+        annotation: AsmInject,
+        method: Method,
+        targetMethodSignature: String,
+    ): Boolean {
+        val requiredCount = if (annotation.require > 0) annotation.require else 1
+        if (injectionCount < requiredCount) {
+            throw IllegalStateException(
+                "@AsmInject handler ${method.name} requires at least $requiredCount injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
+            throw IllegalStateException(
+                "@AsmInject handler ${method.name} allows at most ${annotation.allow} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
+            System.err.println(
+                "Warning: @AsmInject handler ${method.name} expected ${annotation.expect} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        return injectionCount > 0
+    }
 
     private fun requireInjectorMatched(
         transformed: Boolean,
