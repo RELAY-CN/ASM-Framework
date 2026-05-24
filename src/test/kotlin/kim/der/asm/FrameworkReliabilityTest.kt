@@ -2670,6 +2670,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableExposesCountContractParameters() {
+        val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun modifyVariableAtHeadRewritesStaticMethodParameterByLocalIndex() {
         AsmRegistry.register(ModifyVariableStaticParamMixin::class.java)
 
