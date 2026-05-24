@@ -24,7 +24,7 @@ import java.lang.reflect.Method
 /**
  * 指令点注入器。
  *
- * 用于处理字段访问、字段赋值、对象创建与抛异常等单条字节码指令附近的普通 `@AsmInject`。
+ * 用于处理字段访问、字段赋值、对象创建、类型转换与抛异常等单条字节码指令附近的普通 `@AsmInject`。
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
  * 由于 JVM verifier 不允许在未初始化对象仍位于栈顶时插入普通方法调用，[InjectionPoint.NEW] 不支持 [Shift.AFTER]。
  *

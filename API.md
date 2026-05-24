@@ -162,13 +162,13 @@ object RemoveInterfacesMixin
 - `expect: Int = 1` - 期望的注入次数
 - `inline: Boolean = false` - 是否内联代码
 
-handler 首参可以是 `CallbackInfo`。普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `THROW`
+handler 首参可以是 `CallbackInfo`。普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW`
 指令点注入，可在 `CallbackInfo` 后按顺序接收目标方法参数前缀。
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入。`Shift.REPLACE` 按替换原调用处理，
 handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
 
-`FIELD` / `FIELD_ASSIGN` / `NEW` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、new 出来的对象或异常对象传给 handler。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、new 出来的对象、类型转换对象或异常对象传给 handler。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -290,17 +290,17 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 
 ### @ModifyExpressionValue
 
-修改目标方法内匹配表达式产生的值。当前实现支持修改方法调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、数组元素读取值，以及 `NEW` 对象构造完成后的实例，适合保留原操作逻辑、只调整表达式结果的场景。
+修改目标方法内匹配表达式产生的值。当前实现支持修改方法调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、数组元素读取值、`NEW` 对象构造完成后的实例，以及 `CHECKCAST` 类型转换完成后的对象值，适合保留原操作逻辑、只调整表达式结果的场景。
 
 **参数：**
 
 - `method: String = ""` - 目标方法签名
-- `at: At = At(value = InjectionPoint.INVOKE)` - 表达式定位；当前支持 `INVOKE`、`INVOKE_ASSIGN`、`FIELD` 与 `NEW`
+- `at: At = At(value = InjectionPoint.INVOKE)` - 表达式定位；当前支持 `INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`NEW` 与 `CAST`
 - `ordinal: Int = -1` - 表达式匹配序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
 - `slice: Slice = Slice()` - 切片范围，当前未使用
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值，并返回同类型的新值。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。该注解不会替换原调用、字段读取、数组读取或构造器调用，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
+`@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值，并返回同类型的新值。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。该注解不会替换原调用、字段读取、数组读取、构造器调用或类型转换指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`At.target` 为类型 internal name 或 binary name。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -684,19 +684,21 @@ val callback = CallbackInfo.returnable("value")
 - `LOAD` - 局部变量读取前（当前用于 `@ModifyVariable`）
 - `STORE` - 局部变量写入后（当前用于 `@ModifyVariable`）
 - `NEW` - NEW 操作前
+- `CAST` - 类型转换后
 - `THROW` - 抛出异常前
 
 其中 `INVOKE_ASSIGN` 当前复用 `INVOKE` 注入器；是否在调用前后插入由 `At.shift` 决定。
 `@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”，把
 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
-完成后的元素值”，把 `NEW` 解释为“匹配对象构造完成后的实例”。`@ModifyReceiver` 会把 `INVOKE`
+完成后的元素值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
+`CHECKCAST` 完成后的对象表达式值”。`@ModifyReceiver` 会把 `INVOKE`
 解释为“匹配实例调用前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
 handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字段值或数组元素值的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
-解释为“匹配字段写入或数组元素写入前的条件判断”。`FIELD_ASSIGN`、`THROW` 使用指令点注入器，
-支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持 `Shift.BEFORE` 与
-`Shift.REPLACE`。`LOAD` 与 `STORE` 不支持普通 `@AsmInject`，当前仅用于 `@ModifyVariable`
+解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/CAST/THROW)`
+使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持
+`Shift.BEFORE` 与 `Shift.REPLACE`。`LOAD` 与 `STORE` 不支持普通 `@AsmInject`，当前仅用于 `@ModifyVariable`
 的局部变量读取点或写入点改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
 
 ### At
@@ -706,7 +708,7 @@ handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字
 **参数：**
 
 - `value: InjectionPoint = InjectionPoint.HEAD` - 注入点类型
-- `target: String = ""` - 目标方法/字段签名
+- `target: String = ""` - 目标方法、字段或类型签名
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 偏移量
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 和 `@WrapOperation` 当前支持 `array=get`
@@ -718,6 +720,7 @@ handler 替换匹配方法调用”，把 `FIELD` 解释为“用可读取原字
 - `FIELD`: `owner.field:desc`、`field:desc` 或 `field`，例如 `com/example/Target.name:Ljava/lang/String;`
 - `FIELD_ASSIGN`: 与 `FIELD` 相同，但只匹配 `PUTFIELD` / `PUTSTATIC`
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
+- `CAST`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
 - `THROW`: 不需要 `target`，匹配 `ATHROW`
 
 `@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]` 或 `args = ["array=set"]`，

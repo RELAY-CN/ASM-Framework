@@ -348,9 +348,11 @@ annotation class WrapWithCondition(
  * 修改表达式值注解。
  *
  * 用于修改目标方法内某个表达式产生的值（语义参考 Mixin Extras 的 `@ModifyExpressionValue`）。
- * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD] 与
- * [InjectionPoint.NEW]，可修改匹配方法调用完成后的非 `void` 返回值、字段读取值、数组元素读取值或对象构造完成后的实例。
- * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取或构造器调用，只在表达式产生值后把原值交给 handler 改写。
+ * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
+ * [InjectionPoint.NEW] 与 [InjectionPoint.CAST]，可修改匹配方法调用完成后的非 `void` 返回值、字段读取值、
+ * 数组元素读取值、对象构造完成后的实例或 `CHECKCAST` 完成后的类型转换结果。
+ * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用或类型转换指令，只在表达式产生值后
+ * 把原值交给 handler 改写。
  *
  * ASM 方法要求：
  *
@@ -360,10 +362,11 @@ annotation class WrapWithCondition(
  * - 方法调用目标的 [At.target] 必须指定调用签名，字段读取目标必须指定字段签名
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象
+ * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象
  *
  * @param method 目标方法签名
- * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]
- * 与 [InjectionPoint.NEW]
+ * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
+ * [InjectionPoint.NEW] 与 [InjectionPoint.CAST]
  * @param ordinal 匹配表达式序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
  * @param slice 预留参数，当前实现未使用
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
