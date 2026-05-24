@@ -118,6 +118,7 @@ class RedirectInjector(
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
             "get" -> ArrayAccessMode.GET
             "set" -> ArrayAccessMode.SET
+            "length" -> ArrayAccessMode.LENGTH
             else -> throw IllegalArgumentException("Unsupported Redirect array access mode: $arrayArg")
         }
     }
@@ -142,6 +143,7 @@ class RedirectInjector(
             when (mode) {
                 ArrayAccessMode.GET -> ARRAY_READ_OPS
                 ArrayAccessMode.SET -> ARRAY_WRITE_OPS
+                ArrayAccessMode.LENGTH -> setOf(Opcodes.ARRAYLENGTH)
             }
 
         for (insn in insns) {
@@ -610,7 +612,12 @@ class RedirectInjector(
         val elementType = arrayType.elementType
         var nextTempIndex = nextLocalIndex(target)
         val arrayIndex = nextTempIndex.also { nextTempIndex += 1 }
-        val indexIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val indexIndex =
+            if (mode == ArrayAccessMode.LENGTH) {
+                null
+            } else {
+                nextTempIndex.also { nextTempIndex += 1 }
+            }
         val valueIndex =
             if (mode == ArrayAccessMode.SET) {
                 nextTempIndex.also { nextTempIndex += elementType.size }
@@ -621,12 +628,16 @@ class RedirectInjector(
         if (valueIndex != null) {
             storeStackValue(il, elementType, valueIndex)
         }
-        storeStackValue(il, Type.INT_TYPE, indexIndex)
+        if (indexIndex != null) {
+            storeStackValue(il, Type.INT_TYPE, indexIndex)
+        }
         storeStackValue(il, arrayType, arrayIndex)
 
         addHandlerOwner(il)
         loadFromVariable(il, arrayType, arrayIndex)
-        loadFromVariable(il, Type.INT_TYPE, indexIndex)
+        if (indexIndex != null) {
+            loadFromVariable(il, Type.INT_TYPE, indexIndex)
+        }
         if (valueIndex != null) {
             loadFromVariable(il, elementType, valueIndex)
         }
@@ -862,6 +873,12 @@ class RedirectInjector(
                     "Redirect array read handler ${asmMethod.name} return type mismatch: original $elementType, handler $handlerReturnType",
                 )
             }
+        } else if (mode == ArrayAccessMode.LENGTH) {
+            if (handlerReturnType != Type.INT_TYPE) {
+                throw IllegalStateException(
+                    "Redirect array length handler ${asmMethod.name} must return int, actual $handlerReturnType",
+                )
+            }
         } else if (handlerReturnType != Type.VOID_TYPE) {
             throw IllegalStateException(
                 "Redirect array write handler ${asmMethod.name} must return void, actual $handlerReturnType",
@@ -900,10 +917,10 @@ class RedirectInjector(
         mode: ArrayAccessMode,
     ): Array<Type> {
         val arrayType = Type.getType(fieldInsn.desc)
-        return if (mode == ArrayAccessMode.GET) {
-            arrayOf(arrayType, Type.INT_TYPE)
-        } else {
-            arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
+        return when (mode) {
+            ArrayAccessMode.GET -> arrayOf(arrayType, Type.INT_TYPE)
+            ArrayAccessMode.SET -> arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
+            ArrayAccessMode.LENGTH -> arrayOf(arrayType)
         }
     }
 
@@ -1095,6 +1112,7 @@ class RedirectInjector(
     private enum class ArrayAccessMode {
         GET,
         SET,
+        LENGTH,
     }
 
     private companion object {
