@@ -105,7 +105,7 @@ val transformedBytes = processor.transform(
 - **@Overwrite** - 完全覆盖方法
 - **@ModifyArg** - 修改方法参数
 - **@ModifyArgs** - 修改方法调用参数组
-- **@ModifyReceiver** - 修改实例方法调用 receiver
+- **@ModifyReceiver** - 修改实例方法调用或实例字段访问 receiver
 - **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、构造器调用、字段读取、字段写入或数组元素读写
 - **@WrapWithCondition** - 按条件跳过 `void` 调用、字段写入或数组元素写入
 - **@ModifyExpressionValue** - 修改表达式值
@@ -198,6 +198,26 @@ object ValidationMixin {
         ),
     )
     fun rewriteConcatReceiver(receiver: String, prefix: String, count: Int): String = "$prefix$count"
+
+    @ModifyReceiver(
+        method = "displayName(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.FIELD,
+            target = "com/example/Player.name:Ljava/lang/String;",
+        ),
+    )
+    fun rewriteNameReadReceiver(player: Any, fallback: String): Any =
+        selectFallbackPlayer(player, fallback)
+
+    @ModifyReceiver(
+        method = "rename(Ljava/lang/String;Ljava/lang/String;)V",
+        at = At(
+            value = InjectionPoint.FIELD_ASSIGN,
+            target = "com/example/Player.name:Ljava/lang/String;",
+        ),
+    )
+    fun rewriteNameWriteReceiver(player: Any, name: String, source: String): Any =
+        selectWritablePlayer(player, name, source)
 
     @WrapOperation(
         method = "decorate(Ljava/lang/String;I)Ljava/lang/String;",
@@ -420,7 +440,7 @@ object ValidationMixin {
 }
 ```
 
-`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀。`@ModifyReceiver` 用于只替换实例方法调用 receiver 的场景，handler 第一个参数接收原 receiver 并返回兼容的新 receiver，原调用参数会按原顺序继续传给目标调用，后续参数可接收目标方法参数前缀。
+`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver 并返回兼容的新 receiver；`INVOKE` 会保留原调用参数，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，后续参数可接收目标方法参数前缀。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
 
 `@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入或数组元素读写替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；
