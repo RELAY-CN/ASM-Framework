@@ -5,6 +5,9 @@
 package kim.der.asm
 
 import kim.der.asm.api.annotation.Accessor
+import kim.der.asm.api.annotation.AddField
+import kim.der.asm.api.annotation.AddInterface
+import kim.der.asm.api.annotation.Args
 import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
@@ -12,16 +15,26 @@ import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Invoker
 import kim.der.asm.api.annotation.ModifyArg
+import kim.der.asm.api.annotation.ModifyArgs
 import kim.der.asm.api.annotation.ModifyConstant
+import kim.der.asm.api.annotation.ModifyExpressionValue
+import kim.der.asm.api.annotation.ModifyReceiver
 import kim.der.asm.api.annotation.ModifyReturnValue
+import kim.der.asm.api.annotation.ModifyVariable
+import kim.der.asm.api.annotation.Mutable
+import kim.der.asm.api.annotation.Operation
 import kim.der.asm.api.annotation.Redirect
 import kim.der.asm.api.annotation.RedirectAllMethods
 import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Overwrite
+import kim.der.asm.api.annotation.RemoveField
+import kim.der.asm.api.annotation.RemoveInterface
 import kim.der.asm.api.annotation.RemoveMethod
 import kim.der.asm.api.annotation.RemoveSynchronized
 import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.api.annotation.Shift
+import kim.der.asm.api.annotation.WrapOperation
+import kim.der.asm.api.annotation.WrapWithCondition
 import kim.der.asm.transformer.AsmProcessor
 import kim.der.asm.transformer.AsmTransformException
 import org.junit.jupiter.api.AfterEach
@@ -95,6 +108,16 @@ class FrameworkReliabilityTest {
             AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
         }
     }
+
+    @Test
+    fun redirectWithTooManyTargetMethodParametersFailsDuringTransform() {
+        AsmRegistry.register(TooManyRedirectTargetParametersMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("RedirectParamTarget", redirectParamTargetBytes(), javaClass.classLoader)
+        }
+    }
+
     @Test
     fun overwriteWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleOverwriteMixin::class.java)
@@ -221,6 +244,48 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun returnInjectOrdinalSelectsSingleMatchedReturnPoint() {
+        AsmRegistry.register(ReturnOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "value" && it.desc == "(Z)Ljava/lang/String;" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ReturnOrdinalMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val returnIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn.opcode == Opcodes.ARETURN) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(2, returnIndexes.size)
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(true, handlerCallIndexes.single() > returnIndexes[0])
+        assertEquals(true, handlerCallIndexes.single() < returnIndexes[1])
+    }
+
+    @Test
+    fun modifyReturnValueOrdinalSelectsSingleMatchedReturnPoint() {
+        AsmRegistry.register(ModifyReturnValueOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        assertEquals("first", clazz.getMethod("value", Boolean::class.javaPrimitiveType).invoke(instance, true))
+        assertEquals("modified-second", clazz.getMethod("value", Boolean::class.javaPrimitiveType).invoke(instance, false))
+    }
+
+    @Test
     fun invokeReplaceWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleInvokeReplaceMixin::class.java)
 
@@ -333,6 +398,49 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeBeforeInjectionCanUseTargetMethodParametersAfterCallArguments() {
+        AsmRegistry.register(InvokeBeforeWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticRedirectParamTarget", staticRedirectParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticRedirectParamTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 4)
+
+        assertEquals("42", result)
+    }
+
+    @Test
+    fun invokeAfterInjectionCanUseTargetMethodParametersWithCallbackInfo() {
+        AsmRegistry.register(InvokeAfterWithCallbackAndTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticRedirectParamTarget", staticRedirectParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticRedirectParamTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 5)
+
+        assertEquals("42", result)
+    }
+
+    @Test
+    fun invokeInjectionCanUseTargetMethodParametersWithoutCallArguments() {
+        AsmRegistry.register(InvokeWithTargetParamsWithoutCallArgumentsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectParamTarget", redirectParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 6)
+
+        assertEquals("base", result)
+    }
+
+    @Test
+    fun invokeInjectionWithTooManyTargetMethodParametersFailsDuringTransform() {
+        AsmRegistry.register(TooManyInvokeTargetParametersMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StaticRedirectParamTarget", staticRedirectParamTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun invokeBeforeInjectionDoesNotOverlapWideCallArgumentLocals() {
         AsmRegistry.register(InvokeBeforeWideStaticCallArgumentMixin::class.java)
 
@@ -351,6 +459,992 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("ArgTarget", argTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun modifyArgCanUseTargetMethodParametersAtMethodStart() {
+        AsmRegistry.register(ModifyArgWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArgTarget", argTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("value-value", result)
+    }
+
+    @Test
+    fun modifyArgCanUseStaticTargetMethodParametersAtMethodStart() {
+        AsmRegistry.register(StaticModifyArgWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticArgTarget", staticArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticArgTarget", transformed)
+        val result = clazz.getMethod("echo", String::class.java).invoke(null, "value")
+
+        assertEquals("value-value-static", result)
+    }
+
+    @Test
+    fun modifyArgAtInvokeRewritesSelectedCallArgument() {
+        AsmRegistry.register(InvokeModifyArgMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-modified", result)
+    }
+
+    @Test
+    fun modifyArgAtInvokeCanUseTargetMethodParameters() {
+        AsmRegistry.register(InvokeModifyArgWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "InvokeModifyArgParamTarget",
+            invokeModifyArgParamTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("InvokeModifyArgParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 7)
+
+        assertEquals("prefix-original-suffix7", result)
+    }
+
+    @Test
+    fun modifyArgOrdinalSelectsSingleInvokeCallArgument() {
+        AsmRegistry.register(InvokeModifyArgOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiInvokeModifyArgTarget", multiInvokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiInvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first-original:second-modified", result)
+    }
+
+    @Test
+    fun modifyArgAtConstructorInvokeRewritesSelectedArgument() {
+        AsmRegistry.register(ConstructorModifyArgMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed", result)
+    }
+
+    @Test
+    fun modifyArgsAtInvokeRewritesMultipleCallArguments() {
+        AsmRegistry.register(ModifyArgsReplaceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello changed", result)
+    }
+
+    @Test
+    fun modifyArgsAtInvokeCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyArgsWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsParamTarget", modifyArgsParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 7)
+
+        assertEquals("left-suffix-right-7", result)
+    }
+
+    @Test
+    fun modifyArgsOrdinalSelectsSingleInvokeCall() {
+        AsmRegistry.register(ModifyArgsOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiModifyArgsTarget", multiModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first raw:second changed", result)
+    }
+
+    @Test
+    fun modifyArgsWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyArgsParametersMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be Args") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionAtInvokeSkipsStaticVoidCallWhenFalse() {
+        AsmRegistry.register(WrapConditionStaticDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionStaticTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun wrapWithConditionAtInvokeAllowsStaticVoidCallWhenTrue() {
+        AsmRegistry.register(WrapConditionStaticAllowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionStaticTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertEquals("raw", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtInvokeReceivesInstanceReceiverAndCallArguments() {
+        AsmRegistry.register(WrapConditionInstanceCallMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapConditionInstanceTarget", wrapConditionInstanceTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionInstanceTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("run").invoke(instance)
+
+        assertEquals("raw3", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtInvokeCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapConditionWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapConditionParamTarget", wrapConditionParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionParamTarget", transformed)
+        val result = clazz.getMethod("run", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 7)
+
+        assertEquals("raw-suffix7", result)
+    }
+
+    @Test
+    fun wrapWithConditionOrdinalSelectsSingleInvokeCall() {
+        AsmRegistry.register(WrapConditionOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiWrapConditionTarget", multiWrapConditionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiWrapConditionTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertEquals("first", result)
+    }
+
+    @Test
+    fun wrapWithConditionRejectsNonVoidInvokeCall() {
+        AsmRegistry.register(WrapConditionNonVoidCallMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("only supports void method calls") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionWithNonBooleanHandlerFailsDuringTransform() {
+        AsmRegistry.register(WrapConditionNonBooleanHandlerMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("must return boolean") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionAtFieldAssignSkipsPutFieldWhenFalse() {
+        AsmRegistry.register(WrapConditionFieldAssignDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "blocked")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun wrapWithConditionAtFieldAssignAllowsPutFieldWhenTrue() {
+        AsmRegistry.register(WrapConditionFieldAssignAllowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "allowed")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("allowed", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtStaticFieldAssignSkipsPutStaticWhenFalse() {
+        AsmRegistry.register(WrapConditionStaticFieldAssignDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "blocked")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun wrapWithConditionAtFieldAssignCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapConditionFieldAssignWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "field", "suffix", 5)
+        val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "unused", 0)
+
+        assertEquals("field", result)
+    }
+
+    @Test
+    fun wrapWithConditionFieldAssignOrdinalSelectsSingleWrite() {
+        AsmRegistry.register(WrapConditionFieldAssignOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "FieldAssignOrdinalTarget",
+            fieldAssignOrdinalTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("FieldAssignOrdinalTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeBoth", String::class.java, String::class.java).invoke(instance, "first", "second")
+        val result = clazz.getField("name").get(instance)
+
+        assertEquals("first", result)
+    }
+
+    @Test
+    fun wrapWithConditionFieldAssignWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(WrapConditionFieldAssignMismatchedParametersMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("parameter #") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayWriteSkipsObjectArrayStoreWhenFalse() {
+        AsmRegistry.register(WrapConditionArrayWriteDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "blocked")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("raw", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayWriteAllowsObjectArrayStoreWhenTrue() {
+        AsmRegistry.register(WrapConditionArrayWriteAllowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "allowed")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("allowed", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayWriteSkipsPrimitiveArrayStoreWhenFalse() {
+        AsmRegistry.register(WrapConditionPrimitiveArrayWriteDenyMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "PrimitiveArrayAccessTarget",
+                primitiveArrayAccessTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .invoke(instance, 0, 99)
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(40, result)
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayWriteCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapConditionArrayWriteWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayParamTarget", arrayParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java, String::class.java)
+            .invoke(instance, 0, "field", "suffix")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType, String::class.java)
+            .invoke(instance, 0, "unused")
+
+        assertEquals("field", result)
+    }
+
+    @Test
+    fun wrapWithConditionArrayWriteWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(WrapConditionArrayWriteMismatchedParametersMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("parameter #") == true,
+        )
+    }
+
+    @Test
+    fun modifyExpressionValueAtInvokeRewritesCallReturnValue() {
+        AsmRegistry.register(ModifyExpressionValueTrimMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-changed", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtInvokeCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueWithTargetParamsMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ExpressionValueParamTarget", expressionValueParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "prefix", 7)
+
+        assertEquals("prefix-raw-7", result)
+    }
+
+    @Test
+    fun modifyExpressionValueOrdinalSelectsSingleInvokeReturnValue() {
+        AsmRegistry.register(ModifyExpressionValueOrdinalMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("MultiExpressionValueTarget", multiExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:second-changed", result)
+    }
+
+    @Test
+    fun modifyExpressionValueWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyExpressionValueMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
+    fun modifyExpressionValueAtFieldRewritesGetFieldValue() {
+        AsmRegistry.register(ModifyExpressionValueFieldReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("raw-field", result)
+    }
+
+    @Test
+    fun modifyExpressionValueFieldMatchesNameOnlyTarget() {
+        AsmRegistry.register(ModifyExpressionValueFieldNameOnlyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("raw-name-only-field", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtStaticFieldRewritesGetStaticValue() {
+        AsmRegistry.register(ModifyExpressionValueStaticFieldReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "raw")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals("raw-static-field", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtFieldCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueFieldWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "raw", "ignored", 0)
+        val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 7)
+
+        assertEquals("raw-suffix7", result)
+    }
+
+    @Test
+    fun modifyExpressionValueFieldOrdinalSelectsSingleRead() {
+        AsmRegistry.register(ModifyExpressionValueFieldOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiFieldReadTarget", multiFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readTwice").invoke(instance)
+
+        assertEquals("raw-changed", result)
+    }
+
+    @Test
+    fun modifyExpressionValueFieldWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyExpressionValueFieldMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayReadRewritesObjectArrayElementValue() {
+        AsmRegistry.register(ModifyExpressionValueArrayReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("raw-array", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayReadRewritesPrimitiveArrayElementValue() {
+        AsmRegistry.register(ModifyExpressionValuePrimitiveArrayReadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("PrimitiveArrayAccessTarget", primitiveArrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayReadCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueArrayReadWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayParamTarget", arrayParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "suffix")
+
+        assertEquals("raw-suffix", result)
+    }
+
+    @Test
+    fun modifyExpressionValueArrayReadWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyExpressionValueArrayReadMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
+    fun modifyExpressionValueAtNewRewritesConstructedObject() {
+        AsmRegistry.register(ModifyExpressionValueNewMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "NewInstructionTarget",
+            newInstructionTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("NewInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("create").invoke(instance).toString()
+
+        assertEquals("changed", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtNewCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueNewWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NewParamTarget", newParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NewParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("create", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "prefix", 7)
+            .toString()
+
+        assertEquals("prefix-7", result)
+    }
+
+    @Test
+    fun modifyExpressionValueNewOrdinalSelectsSingleConstruction() {
+        AsmRegistry.register(ModifyExpressionValueNewOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiNewTarget", multiNewTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiNewTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:changed", result)
+    }
+
+    @Test
+    fun modifyExpressionValueNewWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyExpressionValueNewMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform(
+                    "NewInstructionTarget",
+                    newInstructionTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
+    fun modifyReceiverAtInvokeReplacesInstanceCallReceiver() {
+        AsmRegistry.register(ModifyReceiverConcatMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed-call", result)
+    }
+
+    @Test
+    fun modifyReceiverAtInvokeCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyReceiverWithTargetParamsMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ModifyReceiverParamTarget", modifyReceiverParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "prefix", 7)
+
+        assertEquals("prefix7-call", result)
+    }
+
+    @Test
+    fun modifyReceiverOrdinalSelectsSingleInvokeReceiver() {
+        AsmRegistry.register(ModifyReceiverOrdinalMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first-a:changed-b", result)
+    }
+
+    @Test
+    fun modifyReceiverRejectsStaticInvokeCall() {
+        AsmRegistry.register(ModifyReceiverStaticCallMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("StaticInvokeArgTarget", staticInvokeArgTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("instance method calls") == true,
+        )
+    }
+
+    @Test
+    fun modifyReceiverWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyReceiverMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
+    fun wrapOperationAtInvokeCanCallOriginalInstanceMethod() {
+        AsmRegistry.register(WrapOperationInstanceCallMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("original-wrapped-call", result)
+    }
+
+    @Test
+    fun wrapOperationAtInvokeCanSkipOriginalCall() {
+        AsmRegistry.register(WrapOperationSkipCallMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("skipped", result)
+    }
+
+    @Test
+    fun wrapOperationAtInvokeCanCallOriginalMultipleTimes() {
+        AsmRegistry.register(WrapOperationMultipleCallsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("original-first|original-second", result)
+    }
+
+    @Test
+    fun wrapOperationAtStaticInvokeCanCallOriginalMethod() {
+        AsmRegistry.register(WrapOperationStaticCallMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticInvokeArgTarget", staticInvokeArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticInvokeArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("wrapped-43", result)
+    }
+
+    @Test
+    fun wrapOperationAtInvokeCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapOperationWithTargetParamsMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ModifyReceiverParamTarget", modifyReceiverParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "prefix", 7)
+
+        assertEquals("prefix7-call", result)
+    }
+
+    @Test
+    fun wrapOperationOrdinalSelectsSingleInvokeCall() {
+        AsmRegistry.register(WrapOperationOrdinalMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first-a:wrapped-b", result)
+    }
+
+    @Test
+    fun wrapOperationWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedWrapOperationMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("Operation") == true,
+        )
+    }
+
+    @Test
+    fun wrapOperationAtFieldCanCallOriginalGetField() {
+        AsmRegistry.register(WrapOperationFieldReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("wrapped-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtPrimitiveFieldCanCallOriginalGetField() {
+        AsmRegistry.register(WrapOperationPrimitiveFieldReadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "PrimitiveFieldPointTarget",
+                primitiveFieldPointTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("PrimitiveFieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType).invoke(instance, 40)
+        val result = clazz.getMethod("readScore").invoke(instance)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun wrapOperationAtStaticFieldCanCallOriginalGetStatic() {
+        AsmRegistry.register(WrapOperationStaticFieldReadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "raw")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals("wrapped-static-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtFieldCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapOperationFieldWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "raw", "ignored", 0)
+        val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 7)
+
+        assertEquals("raw-suffix7", result)
+    }
+
+    @Test
+    fun wrapOperationFieldOrdinalSelectsSingleRead() {
+        AsmRegistry.register(WrapOperationFieldOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiFieldReadTarget", multiFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readTwice").invoke(instance)
+
+        assertEquals("raw-wrapped", result)
+    }
+
+    @Test
+    fun wrapOperationAtFieldWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedWrapOperationFieldReadMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("Operation") == true,
+        )
+    }
+
+    @Test
+    fun wrapOperationAtFieldAssignCanCallOriginalPutFieldWithChangedValue() {
+        AsmRegistry.register(WrapOperationFieldAssignMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("wrapped-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtFieldAssignCanSkipOriginalPutField() {
+        AsmRegistry.register(WrapOperationFieldAssignSkipMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun wrapOperationAtPrimitiveFieldAssignCanCallOriginalPutFieldWithChangedValue() {
+        AsmRegistry.register(WrapOperationPrimitiveFieldAssignMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "PrimitiveFieldPointTarget",
+                primitiveFieldPointTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("PrimitiveFieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType).invoke(instance, 40)
+        val result = clazz.getMethod("readScore").invoke(instance)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun wrapOperationAtStaticFieldAssignCanCallOriginalPutStaticWithChangedValue() {
+        AsmRegistry.register(WrapOperationStaticFieldAssignMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "raw")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals("wrapped-static-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtFieldAssignCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapOperationFieldAssignWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "raw", "suffix", 7)
+        val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "unused", 0)
+
+        assertEquals("raw-suffix7", result)
+    }
+
+    @Test
+    fun wrapOperationFieldAssignOrdinalSelectsSingleWrite() {
+        AsmRegistry.register(WrapOperationFieldAssignOrdinalMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("FieldAssignOrdinalTarget", fieldAssignOrdinalTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldAssignOrdinalTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeBoth", String::class.java, String::class.java).invoke(instance, "first", "second")
+        val result = clazz.getField("name").get(instance)
+
+        assertEquals("wrapped-second", result)
+    }
+
+    @Test
+    fun wrapOperationAtFieldAssignWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedWrapOperationFieldAssignMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("Operation") == true,
+        )
     }
 
     @Test
@@ -389,6 +1483,29 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantCanUseTargetMethodParameters() {
+        AsmRegistry.register(ConstantWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstantParamTarget", constantParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstantParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("base-suffix3", result)
+    }
+
+    @Test
+    fun modifyConstantCanUseStaticTargetMethodParameters() {
+        AsmRegistry.register(StaticConstantWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticConstantParamTarget", staticConstantParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticConstantParamTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 4)
+
+        assertEquals("static-suffix4", result)
+    }
+
+    @Test
     fun modifyConstantMatchesExplicitNullConstant() {
         AsmRegistry.register(NullModifyConstantMixin::class.java)
 
@@ -398,6 +1515,42 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("changed", result)
+    }
+
+    @Test
+    fun modifyConstantMatchesBipushIntConstant() {
+        AsmRegistry.register(BipushModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("BipushConstantTarget", bipushConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("BipushConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun modifyConstantMatchesSipushIntConstant() {
+        AsmRegistry.register(SipushModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SipushConstantTarget", sipushConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SipushConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(301, result)
+    }
+
+    @Test
+    fun modifyConstantOrdinalSelectsSingleMatchingConstant() {
+        AsmRegistry.register(OrdinalModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiIntConstantTarget", multiIntConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiIntConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(49, result)
     }
 
     @Test
@@ -416,6 +1569,17 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun mutableFieldOnlyTransformWritesModifiedClassBytes() {
+        AsmRegistry.register(MutableFieldOnlyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FinalFieldTarget", finalFieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val field = classNode.fields.single { it.name == "name" }
+
+        assertEquals(false, (field.access and Opcodes.ACC_FINAL) != 0)
     }
 
     @Test
@@ -443,6 +1607,147 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun removeFieldRemovesTargetField() {
+        AsmRegistry.register(RemoveFieldMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(false, classNode.fields.any { it.name == "name" })
+    }
+
+    @Test
+    fun removeFieldOnMixinFieldUsesAnnotatedFieldName() {
+        AsmRegistry.register(RemoveFieldByFieldDeclarationMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(false, classNode.fields.any { it.name == "name" })
+    }
+
+    @Test
+    fun removeFieldInfersTargetFieldFromRemoveMethodName() {
+        AsmRegistry.register(RemoveFieldByRemoveMethodNameMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(false, classNode.fields.any { it.name == "name" })
+    }
+
+    @Test
+    fun removeFieldInfersTargetFieldFromAccessorStyleMethodNames() {
+        AsmRegistry.register(RemoveFieldByGetterNameMixin::class.java)
+        AsmRegistry.register(RemoveFieldBySetterNameMixin::class.java)
+        AsmRegistry.register(RemoveFieldByBooleanGetterNameMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldInferenceTarget", fieldInferenceTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(false, classNode.fields.any { it.name == "name" })
+        assertEquals(false, classNode.fields.any { it.name == "score" })
+        assertEquals(false, classNode.fields.any { it.name == "active" })
+    }
+
+    @Test
+    fun removeFieldWithMissingTargetFailsDuringTransform() {
+        AsmRegistry.register(MissingRemoveFieldTargetMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun addFieldAddsMissingFieldDeclaration() {
+        AsmRegistry.register(AddFieldMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val field = classNode.fields.single { it.name == "extraName" }
+
+        assertEquals("Ljava/lang/String;", field.desc)
+        assertEquals(true, (field.access and Opcodes.ACC_PRIVATE) != 0)
+    }
+
+    @Test
+    fun addFieldUsesExplicitTargetName() {
+        AsmRegistry.register(AddRenamedFieldMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val field = classNode.fields.single { it.name == "renamedScore" }
+
+        assertEquals("I", field.desc)
+    }
+
+    @Test
+    fun addFieldSkipsExistingFieldName() {
+        AsmRegistry.register(AddExistingFieldMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(1, classNode.fields.count { it.name == "name" })
+    }
+
+    @Test
+    fun addInterfaceAddsMissingInterface() {
+        AsmRegistry.register(AddCloseableInterfaceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InterfaceTarget", interfaceTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(true, classNode.interfaces.contains("java/io/Closeable"))
+    }
+
+    @Test
+    fun addInterfaceDoesNotDuplicateExistingInterface() {
+        AsmRegistry.register(AddRunnableInterfaceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InterfaceTarget", interfaceTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val runnableCount = classNode.interfaces.count { it == "java/lang/Runnable" }
+
+        assertEquals(1, runnableCount)
+    }
+
+    @Test
+    fun addInterfaceNormalizesBinaryNamesAndDeduplicatesInput() {
+        AsmRegistry.register(AddNormalizedInterfacesMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InterfaceTarget", interfaceTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(1, classNode.interfaces.count { it == "java/lang/Runnable" })
+        assertEquals(1, classNode.interfaces.count { it == "java/lang/Cloneable" })
+        assertEquals(true, classNode.interfaces.contains("java/io/Serializable"))
+    }
+
+    @Test
+    fun removeInterfaceRemovesExistingInterface() {
+        AsmRegistry.register(RemoveRunnableInterfaceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InterfaceTarget", interfaceTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(false, classNode.interfaces.contains("java/lang/Runnable"))
+    }
+
+    @Test
+    fun removeInterfaceNormalizesBinaryNamesAndDeduplicatesInput() {
+        AsmRegistry.register(RemoveNormalizedInterfacesMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiInterfaceTarget", multiInterfaceTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        assertEquals(false, classNode.interfaces.contains("java/lang/Runnable"))
+        assertEquals(false, classNode.interfaces.contains("java/lang/Cloneable"))
+        assertEquals(true, classNode.interfaces.contains("java/io/Serializable"))
     }
 
     @Test
@@ -550,6 +1855,39 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeInjectOrdinalSelectsSingleMatchedCall() {
+        AsmRegistry.register(InvokeOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiInvokeTarget", multiInvokeTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "call" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeOrdinalMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val trimIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode &&
+                insn.owner == "java/lang/String" &&
+                insn.name == "trim"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(2, trimIndexes.size)
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(true, handlerCallIndexes.single() > trimIndexes[0])
+        assertEquals(true, handlerCallIndexes.single() < trimIndexes[1])
+    }
+
+    @Test
     fun redirectAllMethodsDoesNotRequireExplicitMethodTarget() {
         AsmRegistry.register(RedirectAllTrimMixin::class.java)
 
@@ -602,6 +1940,183 @@ class FrameworkReliabilityTest {
         assertEquals(true, instanceLoad != null)
         assertEquals(true, argumentLoad != null)
         assertEquals(true, instructionsBeforeCall.indexOf(instanceLoad) < instructionsBeforeCall.indexOf(argumentLoad))
+    }
+
+    @Test
+    fun modifyVariableAtHeadRewritesInstanceMethodParameterByLocalIndex() {
+        AsmRegistry.register(ModifyVariableInstanceParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("modified-value", result)
+    }
+
+    @Test
+    fun modifyVariableAtHeadRewritesStaticMethodParameterByLocalIndex() {
+        AsmRegistry.register(ModifyVariableStaticParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticVariableTarget", staticVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticVariableTarget", transformed)
+        val result = clazz.getMethod("echo", String::class.java).invoke(null, "value")
+
+        assertEquals("static-value", result)
+    }
+
+    @Test
+    fun modifyVariableAtHeadCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyVariableHeadTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("value-value", result)
+    }
+
+    @Test
+    fun modifyVariableAtHeadCanUseStaticTargetMethodParameters() {
+        AsmRegistry.register(ModifyVariableStaticHeadTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticVariableTarget", staticVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticVariableTarget", transformed)
+        val result = clazz.getMethod("echo", String::class.java).invoke(null, "value")
+
+        assertEquals("value-value-static", result)
+    }
+
+    @Test
+    fun modifyVariableAtHeadSelectsParameterByTypeOrdinal() {
+        AsmRegistry.register(ModifyVariableOrdinalParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("OrdinalVariableTarget", ordinalVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("OrdinalVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("combine", String::class.java, String::class.java).invoke(instance, "first", "second")
+
+        assertEquals("first:ordinal-second", result)
+    }
+
+    @Test
+    fun modifyVariableAtStoreRewritesStoredLocalVariableByIndex() {
+        AsmRegistry.register(ModifyVariableStoreMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("stored-local", result)
+    }
+
+    @Test
+    fun modifyVariableAtStoreSelectsStoredLocalVariableByTypeOrdinal() {
+        AsmRegistry.register(ModifyVariableStoreOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StoreOrdinalVariableTarget", storeOrdinalVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreOrdinalVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:stored-second", result)
+    }
+
+    @Test
+    fun modifyVariableAtStoreCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyVariableStoreTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StoreVariableParamTarget", storeVariableParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreVariableParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result =
+            clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("stored-local-suffix3", result)
+    }
+
+    @Test
+    fun modifyVariableAtLoadRewritesLoadedLocalVariableByIndex() {
+        AsmRegistry.register(ModifyVariableLoadMixin::class.java)
+
+        val transformed = AsmProcessor().transform("LoadVariableTarget", loadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("loaded-local", result)
+    }
+
+    @Test
+    fun modifyVariableAtLoadSelectsLoadedLocalVariableByTypeOrdinal() {
+        AsmRegistry.register(ModifyVariableLoadOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("LoadOrdinalVariableTarget", loadOrdinalVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadOrdinalVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:loaded-second", result)
+    }
+
+    @Test
+    fun modifyVariableAtLoadCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyVariableLoadTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("LoadVariableParamTarget", loadVariableParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadVariableParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result =
+            clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("loaded-local-suffix3", result)
+    }
+
+    @Test
+    fun modifyVariableWithTooManyTargetMethodParametersFailsDuringTransform() {
+        AsmRegistry.register(TooManyModifyVariableParametersMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requests 2 target parameter(s)") == true,
+        )
+    }
+
+    @Test
+    fun asmInjectLoadFailsWithUnsupportedInjectionPoint() {
+        AsmRegistry.register(UnsupportedLoadInjectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("LoadVariableTarget", loadVariableTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("InjectionPoint.LOAD is supported only by @ModifyVariable") == true,
+        )
+    }
+
+    @Test
+    fun asmInjectStoreFailsWithUnsupportedInjectionPoint() {
+        AsmRegistry.register(UnsupportedStoreInjectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("InjectionPoint.STORE is supported only by @ModifyVariable") == true,
+        )
     }
 
     @Test
@@ -720,6 +2235,477 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun fieldInjectInsertsHandlerBeforeMatchedFieldRead() {
+        AsmRegistry.register(FieldReadInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "readName" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, FieldReadInjectMixin::class.java, "inject")
+        val fieldReadIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.FieldInsnNode &&
+                it.opcode == Opcodes.GETFIELD &&
+                it.owner == "FieldPointTarget" &&
+                it.name == "name"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, fieldReadIndex >= 0)
+        assertEquals(fieldReadIndex - 1, handlerCallIndex)
+    }
+
+    @Test
+    fun fieldInjectOrdinalSelectsSingleMatchedFieldRead() {
+        AsmRegistry.register(FieldReadOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiFieldReadTarget", multiFieldReadTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "readTwice" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(FieldReadOrdinalMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val fieldReadIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.FieldInsnNode &&
+                insn.opcode == Opcodes.GETFIELD &&
+                insn.owner == "MultiFieldReadTarget" &&
+                insn.name == "name"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(2, fieldReadIndexes.size)
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(fieldReadIndexes[1] - 1, handlerCallIndexes.single())
+    }
+
+    @Test
+    fun fieldInjectWithMissingTargetFailsDuringTransform() {
+        AsmRegistry.register(MissingFieldReadInjectMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun fieldInjectDropsUnusedHandlerReturnValue() {
+        AsmRegistry.register(FieldReadReturningHandlerMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun redirectMethodCallSupportsKotlinObjectHandler() {
+        AsmRegistry.register(ObjectInstanceRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("object- value ", result)
+    }
+
+    @Test
+    fun redirectMethodCallCanUseTargetMethodParameters() {
+        AsmRegistry.register(RedirectWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectParamTarget", redirectParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("base-suffix3", result)
+    }
+
+    @Test
+    fun redirectStaticMethodCallCanUseTargetMethodParameters() {
+        AsmRegistry.register(StaticRedirectWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticRedirectParamTarget", staticRedirectParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticRedirectParamTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 4)
+
+        assertEquals("42-suffix4", result)
+    }
+
+    @Test
+    fun redirectFieldReadReplacesGetFieldValue() {
+        AsmRegistry.register(FieldReadRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("redirected", result)
+    }
+
+    @Test
+    fun redirectFieldReadSupportsKotlinObjectHandler() {
+        AsmRegistry.register(ObjectInstanceFieldReadRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("object-field", result)
+    }
+
+    @Test
+    fun redirectFieldReadMatchesNameOnlyTargetWhenAtValueIsField() {
+        AsmRegistry.register(FieldReadNameOnlyRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("name-only", result)
+    }
+
+    @Test
+    fun redirectStaticFieldReadReplacesGetStaticValue() {
+        AsmRegistry.register(StaticFieldReadRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals("static-redirected", result)
+    }
+
+    @Test
+    fun redirectStaticFieldReadSupportsKotlinObjectHandler() {
+        AsmRegistry.register(ObjectInstanceStaticFieldReadRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals("object-static-field", result)
+    }
+
+    @Test
+    fun redirectFieldReadCanUseTargetMethodParameters() {
+        AsmRegistry.register(FieldReadWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("field-suffix3", result)
+    }
+
+    @Test
+    fun redirectStaticFieldReadCanUseTargetMethodParameters() {
+        AsmRegistry.register(StaticFieldReadWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldParamTarget", staticFieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldParamTarget", transformed)
+        val result = clazz.getMethod("readName", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 4)
+
+        assertEquals("static-field-suffix4", result)
+    }
+
+    @Test
+    fun redirectFieldAssignReplacesPutFieldWrite() {
+        AsmRegistry.register(FieldAssignRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "original")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals(null, result)
+        assertEquals("original", FieldAssignRedirectMixin.lastValue)
+    }
+
+    @Test
+    fun redirectFieldAssignSupportsKotlinObjectHandler() {
+        ObjectInstanceFieldAssignRedirectMixin.lastValue = null
+        AsmRegistry.register(ObjectInstanceFieldAssignRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "original")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals(null, result)
+        assertEquals("object-original", ObjectInstanceFieldAssignRedirectMixin.lastValue)
+    }
+
+    @Test
+    fun redirectStaticFieldAssignReplacesPutStaticWrite() {
+        AsmRegistry.register(StaticFieldAssignRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "static-original")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals(null, result)
+        assertEquals("static-original", StaticFieldAssignRedirectMixin.lastValue)
+    }
+
+    @Test
+    fun redirectStaticFieldAssignSupportsKotlinObjectHandler() {
+        ObjectInstanceStaticFieldAssignRedirectMixin.lastValue = null
+        AsmRegistry.register(ObjectInstanceStaticFieldAssignRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "static-original")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals(null, result)
+        assertEquals("object-static-original", ObjectInstanceStaticFieldAssignRedirectMixin.lastValue)
+    }
+
+    @Test
+    fun redirectFieldAssignCanUseTargetMethodParameters() {
+        FieldAssignWithTargetParamsMixin.lastValue = null
+        AsmRegistry.register(FieldAssignWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldParamTarget", fieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "field", "suffix", 5)
+
+        assertEquals("field-suffix5", FieldAssignWithTargetParamsMixin.lastValue)
+    }
+
+    @Test
+    fun redirectStaticFieldAssignCanUseTargetMethodParameters() {
+        StaticFieldAssignWithTargetParamsMixin.lastValue = null
+        AsmRegistry.register(StaticFieldAssignWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldParamTarget", staticFieldParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldParamTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java, String::class.java, Int::class.javaPrimitiveType)
+            .invoke(null, "static-field", "suffix", 6)
+
+        assertEquals("static-field-suffix6", StaticFieldAssignWithTargetParamsMixin.lastValue)
+    }
+
+    @Test
+    fun redirectArrayReadReplacesObjectArrayElementAccess() {
+        AsmRegistry.register(ArrayReadRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("redirected-raw", result)
+    }
+
+    @Test
+    fun redirectArrayWriteReplacesObjectArrayElementStore() {
+        AsmRegistry.register(ArrayWriteRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "raw")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("written-raw", result)
+    }
+
+    @Test
+    fun redirectArrayReadReplacesPrimitiveArrayElementAccess() {
+        AsmRegistry.register(PrimitiveArrayReadRedirectMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("PrimitiveArrayAccessTarget", primitiveArrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun redirectArrayWriteReplacesPrimitiveArrayElementStore() {
+        AsmRegistry.register(PrimitiveArrayWriteRedirectMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("PrimitiveArrayAccessTarget", primitiveArrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(instance, 0, 40)
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(42, result)
+    }
+
+    @Test
+    fun redirectArrayReadCanUseTargetMethodParameters() {
+        AsmRegistry.register(ArrayReadWithTargetParamsRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayParamTarget", arrayParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "suffix")
+
+        assertEquals("raw-suffix", result)
+    }
+
+    @Test
+    fun redirectArrayReadWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedArrayReadRedirectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("parameter #") == true,
+        )
+    }
+
+    @Test
+    fun redirectOrdinalSelectsSingleMethodCall() {
+        AsmRegistry.register(RedirectOrdinalTrimMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectOrdinalTarget", redirectOrdinalTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectOrdinalTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:redirected", result)
+    }
+
+    @Test
+    fun redirectOrdinalSelectsSingleFieldRead() {
+        AsmRegistry.register(FieldReadRedirectOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldReadOrdinalTarget", fieldReadOrdinalTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldReadOrdinalTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getField("name").set(instance, "original")
+        val result = clazz.getMethod("readBoth").invoke(instance)
+
+        assertEquals("original:redirected", result)
+    }
+
+    @Test
+    fun redirectOrdinalSelectsSingleFieldAssign() {
+        FieldAssignRedirectOrdinalMixin.lastValue = null
+        AsmRegistry.register(FieldAssignRedirectOrdinalMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "FieldAssignOrdinalTarget",
+            fieldAssignOrdinalTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("FieldAssignOrdinalTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getMethod("writeBoth", String::class.java, String::class.java).invoke(instance, "first", "second")
+        val result = clazz.getField("name").get(instance)
+
+        assertEquals("first", result)
+        assertEquals("second", FieldAssignRedirectOrdinalMixin.lastValue)
+    }
+
+    @Test
+    fun fieldAssignInjectInsertsHandlerBeforeMatchedFieldWrite() {
+        AsmRegistry.register(FieldAssignInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "writeName" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, FieldAssignInjectMixin::class.java, "inject")
+        val fieldWriteIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.FieldInsnNode &&
+                it.opcode == Opcodes.PUTFIELD &&
+                it.owner == "FieldPointTarget" &&
+                it.name == "name"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, fieldWriteIndex >= 0)
+        assertEquals(fieldWriteIndex - 1, handlerCallIndex)
+    }
+
+    @Test
+    fun newInjectInsertsHandlerBeforeMatchedNewInstruction() {
+        AsmRegistry.register(NewInstructionInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "create" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, NewInstructionInjectMixin::class.java, "inject")
+        val newIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.TypeInsnNode &&
+                it.opcode == Opcodes.NEW &&
+                it.desc == "java/lang/StringBuilder"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, newIndex >= 0)
+        assertEquals(newIndex - 1, handlerCallIndex)
+    }
+
+    @Test
+    fun newInjectAfterShiftFailsDuringTransform() {
+        AsmRegistry.register(NewInstructionAfterInjectMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
+    fun throwInjectInsertsHandlerBeforeMatchedThrowInstruction() {
+        AsmRegistry.register(ThrowInstructionInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ThrowPointTarget", throwPointTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "fail" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, ThrowInstructionInjectMixin::class.java, "inject")
+        val throwIndex = instructions.indexOfFirst { it.opcode == Opcodes.ATHROW }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, throwIndex >= 0)
+        assertEquals(throwIndex - 1, handlerCallIndex)
+    }
+
+    @Test
     fun overwriteDoesNotRewriteNonShadowOverloadByNameOnly() {
         AsmRegistry.register(ShadowOverloadOverwriteMixin::class.java)
 
@@ -787,6 +2773,71 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun invalidHandler(unexpected: Int): String = unexpected.toString()
     }
+
+    @AsmMixin("RedirectTarget")
+    object ObjectInstanceRedirectMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        fun redirect(value: String): String = "object-$value"
+    }
+
+    @AsmMixin("RedirectParamTarget")
+    object RedirectWithTargetParamsMixin {
+        @Redirect(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            value: String,
+            suffix: String,
+            count: Int,
+        ): String = "${value.trim()}-$suffix$count"
+    }
+
+    @AsmMixin("StaticRedirectParamTarget")
+    object StaticRedirectWithTargetParamsMixin {
+        @Redirect(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            value: Int,
+            suffix: String,
+            count: Int,
+        ): String = "$value-$suffix$count"
+    }
+
+    @AsmMixin("RedirectParamTarget")
+    object TooManyRedirectTargetParametersMixin {
+        @Redirect(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            value: String,
+            suffix: String,
+            count: Int,
+            unavailable: String,
+        ): String = "$value$suffix$count$unavailable"
+    }
+
     @AsmMixin("ReturnTarget")
     object IncompatibleOverwriteMixin {
         @Overwrite("value()Ljava/lang/String;")
@@ -889,6 +2940,21 @@ class FrameworkReliabilityTest {
         fun inject(callback: CallbackInfo) {
             callback.getReturnValue<Char>()
         }
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object ReturnOrdinalMixin {
+        @AsmInject(method = "value(Z)Ljava/lang/String;", target = InjectionPoint.RETURN, ordinal = 1)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object ModifyReturnValueOrdinalMixin {
+        @ModifyReturnValue(method = "value(Z)Ljava/lang/String;", ordinal = 1)
+        @JvmStatic
+        fun modify(original: String): String = "modified-$original"
     }
 
     @AsmMixin("RedirectTarget")
@@ -1009,6 +3075,100 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("StaticRedirectParamTarget")
+    object InvokeBeforeWithTargetParamsMixin {
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(
+            value: Int,
+            suffix: String,
+            count: Int,
+        ) {
+            if (value != 42 || suffix != "suffix" || count != 4) {
+                throw IllegalStateException("Unexpected invoke arguments: $value, $suffix, $count")
+            }
+        }
+    }
+
+    @AsmMixin("StaticRedirectParamTarget")
+    object InvokeAfterWithCallbackAndTargetParamsMixin {
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+                shift = Shift.AFTER,
+            ),
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfo,
+            value: Int,
+            suffix: String,
+            count: Int,
+        ) {
+            if (callback.isCancelled() || value != 42 || suffix != "suffix" || count != 5) {
+                throw IllegalStateException("Unexpected invoke arguments: $value, $suffix, $count")
+            }
+        }
+    }
+
+    @AsmMixin("RedirectParamTarget")
+    object InvokeWithTargetParamsWithoutCallArgumentsMixin {
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(
+            suffix: String,
+            count: Int,
+        ) {
+            if (suffix != "suffix" || count != 6) {
+                throw IllegalStateException("Unexpected target arguments: $suffix, $count")
+            }
+        }
+    }
+
+    @AsmMixin("StaticRedirectParamTarget")
+    object TooManyInvokeTargetParametersMixin {
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(
+            value: Int,
+            suffix: String,
+            count: Int,
+            unavailable: String,
+        ) {
+            value.toString()
+            suffix.length
+            count.toString()
+            unavailable.length
+        }
+    }
+
     @AsmMixin("WideInvokeArgTarget")
     object InvokeBeforeWideStaticCallArgumentMixin {
         @AsmInject(
@@ -1037,8 +3197,1146 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun modify(
             original: String,
+            targetValue: String,
             unavailable: String,
-        ): String = "$original$unavailable"
+        ): String = "$original$targetValue$unavailable"
+    }
+
+    @AsmMixin("ArgTarget")
+    object ModifyArgWithTargetParamsMixin {
+        @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
+        @JvmStatic
+        fun modify(
+            original: String,
+            targetValue: String,
+        ): String = "$original-$targetValue"
+    }
+
+    @AsmMixin("StaticArgTarget")
+    object StaticModifyArgWithTargetParamsMixin {
+        @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
+        @JvmStatic
+        fun modify(
+            original: String,
+            targetValue: String,
+        ): String = "$original-$targetValue-static"
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InvokeModifyArgMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified"
+    }
+
+    @AsmMixin("InvokeModifyArgParamTarget")
+    object InvokeModifyArgWithTargetParamsMixin {
+        @ModifyArg(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "$original-$suffix$count"
+    }
+
+    @AsmMixin("MultiInvokeModifyArgTarget")
+    object InvokeModifyArgOrdinalMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified"
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object ConstructorModifyArgMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsReplaceMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("ModifyArgsParamTarget")
+    object ModifyArgsWithTargetParamsMixin {
+        @ModifyArgs(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "ModifyArgsParamTarget.join(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            args: Args,
+            suffix: String,
+            count: Int,
+        ) {
+            args.set(0, "${args.get<String>(0)}-$suffix")
+            args.set(1, "right")
+            args.set(2, count)
+        }
+    }
+
+    @AsmMixin("MultiModifyArgsTarget")
+    object ModifyArgsOrdinalMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object MismatchedModifyArgsParametersMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: String) {
+            args.length
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionStaticDenyMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionStaticAllowMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean = value == "raw"
+    }
+
+    @AsmMixin("WrapConditionInstanceTarget")
+    object WrapConditionInstanceCallMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionInstanceTarget.record(Ljava/lang/String;I)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(
+            target: Any,
+            value: String,
+            count: Int,
+        ): Boolean {
+            target.hashCode()
+            return value == "raw" && count == 3
+        }
+    }
+
+    @AsmMixin("WrapConditionParamTarget")
+    object WrapConditionWithTargetParamsMixin {
+        @WrapWithCondition(
+            method = "run(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionParamTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(
+            value: String,
+            suffix: String,
+            count: Int,
+        ): Boolean = value == "raw" && suffix == "suffix" && count == 7
+    }
+
+    @AsmMixin("MultiWrapConditionTarget")
+    object WrapConditionOrdinalMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "MultiWrapConditionTarget.record(Ljava/lang/String;)V",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object WrapConditionNonVoidCallMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(target: String): Boolean {
+            target.length
+            return false
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionNonBooleanHandlerMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(value: String): String = value
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldAssignDenyMixin {
+        @WrapWithCondition(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldAssignAllowMixin {
+        @WrapWithCondition(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            return value == "allowed"
+        }
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object WrapConditionStaticFieldAssignDenyMixin {
+        @WrapWithCondition(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "StaticFieldPointTarget.name:Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object WrapConditionFieldAssignWithTargetParamsMixin {
+        @WrapWithCondition(
+            method = "writeName(Ljava/lang/String;Ljava/lang/String;I)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldParamTarget.name:Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+            targetValue: String,
+            suffix: String,
+            count: Int,
+        ): Boolean {
+            target.hashCode()
+            return value == targetValue && suffix == "suffix" && count == 5
+        }
+    }
+
+    @AsmMixin("FieldAssignOrdinalTarget")
+    object WrapConditionFieldAssignOrdinalMixin {
+        @WrapWithCondition(
+            method = "writeBoth(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldAssignOrdinalTarget.name:Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldAssignMismatchedParametersMixin {
+        @WrapWithCondition(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Int,
+            value: String,
+        ): Boolean = target > 0 && value.isNotEmpty()
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayWriteDenyMixin {
+        @WrapWithCondition(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ): Boolean {
+            array[index].length
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayWriteAllowMixin {
+        @WrapWithCondition(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ): Boolean = array[index] == "raw" && value == "allowed"
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object WrapConditionPrimitiveArrayWriteDenyMixin {
+        @WrapWithCondition(
+            method = "writeScore(II)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: IntArray,
+            index: Int,
+            value: Int,
+        ): Boolean {
+            array[index].toString()
+            value.toString()
+            return false
+        }
+    }
+
+    @AsmMixin("ArrayParamTarget")
+    object WrapConditionArrayWriteWithTargetParamsMixin {
+        @WrapWithCondition(
+            method = "writeName(ILjava/lang/String;Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayParamTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: Array<String>,
+            index: Int,
+            value: String,
+            targetIndex: Int,
+            targetValue: String,
+            suffix: String,
+        ): Boolean =
+            array[index] == "raw" && index == targetIndex && value == targetValue && suffix == "suffix"
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayWriteMismatchedParametersMixin {
+        @WrapWithCondition(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: Array<String>,
+            index: String,
+            value: String,
+        ): Boolean = array[index.length] == value
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object ModifyExpressionValueTrimMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("ExpressionValueParamTarget")
+    object ModifyExpressionValueWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            prefix: String,
+            count: Int,
+        ): String = "$prefix-$original-$count"
+    }
+
+    @AsmMixin("MultiExpressionValueTarget")
+    object ModifyExpressionValueOrdinalMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object MismatchedModifyExpressionValueMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyExpressionValueFieldReadMixin {
+        @ModifyExpressionValue(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-field"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyExpressionValueFieldNameOnlyMixin {
+        @ModifyExpressionValue(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "name"),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-name-only-field"
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object ModifyExpressionValueStaticFieldReadMixin {
+        @ModifyExpressionValue(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-static-field"
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object ModifyExpressionValueFieldWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "readName(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "$original-$suffix$count"
+    }
+
+    @AsmMixin("MultiFieldReadTarget")
+    object ModifyExpressionValueFieldOrdinalMixin {
+        @ModifyExpressionValue(
+            method = "readTwice()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "MultiFieldReadTarget.name:Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object MismatchedModifyExpressionValueFieldMixin {
+        @ModifyExpressionValue(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayReadMixin {
+        @ModifyExpressionValue(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-array"
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object ModifyExpressionValuePrimitiveArrayReadMixin {
+        @ModifyExpressionValue(
+            method = "readScore(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 2
+    }
+
+    @AsmMixin("ArrayParamTarget")
+    object ModifyExpressionValueArrayReadWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "readName(ILjava/lang/String;)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayParamTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            index: Int,
+            suffix: String,
+        ): String {
+            if (index != 0) {
+                throw IllegalStateException("Unexpected index: $index")
+            }
+            return "$original-$suffix"
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object MismatchedModifyExpressionValueArrayReadMixin {
+        @ModifyExpressionValue(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object ModifyExpressionValueNewMixin {
+        @ModifyExpressionValue(
+            method = "create()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+        )
+        @JvmStatic
+        fun modify(original: StringBuilder): StringBuilder {
+            original.length
+            return StringBuilder("changed")
+        }
+    }
+
+    @AsmMixin("NewParamTarget")
+    object ModifyExpressionValueNewWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "create(Ljava/lang/String;I)Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+        )
+        @JvmStatic
+        fun modify(
+            original: StringBuilder,
+            prefix: String,
+            count: Int,
+        ): StringBuilder {
+            original.length
+            return StringBuilder("$prefix-$count")
+        }
+    }
+
+    @AsmMixin("MultiNewTarget")
+    object ModifyExpressionValueNewOrdinalMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: StringBuilder): StringBuilder {
+            original.length
+            return StringBuilder("changed")
+        }
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object MismatchedModifyExpressionValueNewMixin {
+        @ModifyExpressionValue(
+            method = "create()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object ModifyReceiverConcatMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("ModifyReceiverParamTarget")
+    object ModifyReceiverWithTargetParamsMixin {
+        @ModifyReceiver(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            prefix: String,
+            count: Int,
+        ): String {
+            original.length
+            return "$prefix$count"
+        }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object ModifyReceiverOrdinalMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("StaticInvokeArgTarget")
+    object ModifyReceiverStaticCallMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object MismatchedModifyReceiverMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object WrapOperationInstanceCallMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            value.length
+            return operation.call(target, "-wrapped-call")
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object WrapOperationSkipCallMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            value.length
+            operation.hashCode()
+            return "skipped"
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object WrapOperationMultipleCallsMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            value.length
+            return "${operation.call(target, "-first")}|${operation.call(target, "-second")}"
+        }
+    }
+
+    @AsmMixin("StaticInvokeArgTarget")
+    object WrapOperationStaticCallMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/Integer.toString(I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            value: Int,
+            operation: Operation<String>,
+        ): String = "wrapped-${operation.call(value + 1)}"
+    }
+
+    @AsmMixin("ModifyReceiverParamTarget")
+    object WrapOperationWithTargetParamsMixin {
+        @WrapOperation(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+            prefix: String,
+            count: Int,
+        ): String {
+            target.length
+            value.length
+            return operation.call("$prefix$count", value)
+        }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object WrapOperationOrdinalMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            return operation.call("wrapped", value)
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object MismatchedWrapOperationMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+        ): String = target + value
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldReadMixin {
+        @WrapOperation(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String = "wrapped-${operation.call(target)}"
+    }
+
+    @AsmMixin("PrimitiveFieldPointTarget")
+    object WrapOperationPrimitiveFieldReadMixin {
+        @WrapOperation(
+            method = "readScore()I",
+            at = At(value = InjectionPoint.FIELD, target = "PrimitiveFieldPointTarget.score:I"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<Int>,
+        ): Int = operation.call(target) + 2
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object WrapOperationStaticFieldReadMixin {
+        @WrapOperation(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(operation: Operation<String>): String = "wrapped-static-${operation.call()}"
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object WrapOperationFieldWithTargetParamsMixin {
+        @WrapOperation(
+            method = "readName(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+            suffix: String,
+            count: Int,
+        ): String = "${operation.call(target)}-$suffix$count"
+    }
+
+    @AsmMixin("MultiFieldReadTarget")
+    object WrapOperationFieldOrdinalMixin {
+        @WrapOperation(
+            method = "readTwice()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "MultiFieldReadTarget.name:Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String {
+            target.hashCode()
+            return "${operation.call(target)}-wrapped"
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object MismatchedWrapOperationFieldReadMixin {
+        @WrapOperation(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(target: Any): String = target.toString()
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldAssignMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(target, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldAssignSkipMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            target.hashCode()
+            value.length
+            operation.hashCode()
+        }
+    }
+
+    @AsmMixin("PrimitiveFieldPointTarget")
+    object WrapOperationPrimitiveFieldAssignMixin {
+        @WrapOperation(
+            method = "writeScore(I)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "PrimitiveFieldPointTarget.score:I"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: Int,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(target, value + 2)
+        }
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object WrapOperationStaticFieldAssignMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call("wrapped-static-$value")
+        }
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object WrapOperationFieldAssignWithTargetParamsMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;Ljava/lang/String;I)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+            targetValue: String,
+            suffix: String,
+            count: Int,
+        ) {
+            assertEquals(value, targetValue)
+            operation.call(target, "$value-$suffix$count")
+        }
+    }
+
+    @AsmMixin("FieldAssignOrdinalTarget")
+    object WrapOperationFieldAssignOrdinalMixin {
+        @WrapOperation(
+            method = "writeBoth(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldAssignOrdinalTarget.name:Ljava/lang/String;",
+            ),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(target, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object MismatchedWrapOperationFieldAssignMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            value.length
+        }
     }
 
     @AsmMixin("ReturnTarget")
@@ -1055,11 +4353,54 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "changed"
     }
 
+    @AsmMixin("ConstantParamTarget")
+    object ConstantWithTargetParamsMixin {
+        @ModifyConstant(method = "value(Ljava/lang/String;I)Ljava/lang/String;", constant = "base-")
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "$original$suffix$count"
+    }
+
+    @AsmMixin("StaticConstantParamTarget")
+    object StaticConstantWithTargetParamsMixin {
+        @ModifyConstant(method = "value(Ljava/lang/String;I)Ljava/lang/String;", constant = "static-")
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "$original$suffix$count"
+    }
+
     @AsmMixin("NullConstantTarget")
     object NullModifyConstantMixin {
         @ModifyConstant(method = "value()Ljava/lang/Object;", constant = "null")
         @JvmStatic
         fun modify(original: Any?): Any = "changed"
+    }
+
+    @AsmMixin("BipushConstantTarget")
+    object BipushModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "7")
+        @JvmStatic
+        fun modify(original: Int): Int = original + 35
+    }
+
+    @AsmMixin("SipushConstantTarget")
+    object SipushModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "300")
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("MultiIntConstantTarget")
+    object OrdinalModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "7", ordinal = 1)
+        @JvmStatic
+        fun modify(original: Int): Int = original + 35
     }
 
     @AsmMixin("StrictTarget")
@@ -1072,6 +4413,13 @@ class FrameworkReliabilityTest {
     class MismatchedShadowFieldMixin {
         @Shadow
         private val name: Int = 0
+    }
+
+    @AsmMixin("FinalFieldTarget")
+    class MutableFieldOnlyMixin {
+        @Shadow
+        @Mutable
+        private val name: String? = null
     }
 
     @AsmMixin("StrictTarget")
@@ -1095,6 +4443,104 @@ class FrameworkReliabilityTest {
         fun missing() {
         }
     }
+
+    @AsmMixin("FieldTarget")
+    object RemoveFieldMixin {
+        @RemoveField("name")
+        @JvmStatic
+        fun removeName() {
+        }
+    }
+
+    @AsmMixin("FieldTarget")
+    object RemoveFieldByFieldDeclarationMixin {
+        @RemoveField
+        @JvmField
+        val name: String? = null
+    }
+
+    @AsmMixin("FieldTarget")
+    object RemoveFieldByRemoveMethodNameMixin {
+        @RemoveField
+        @JvmStatic
+        fun removeName() {
+        }
+    }
+
+    @AsmMixin("FieldInferenceTarget")
+    object RemoveFieldByGetterNameMixin {
+        @RemoveField
+        @JvmStatic
+        fun getName(): String = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("FieldInferenceTarget")
+    object RemoveFieldBySetterNameMixin {
+        @RemoveField
+        @JvmStatic
+        fun setScore(score: Int) {
+            score.hashCode()
+        }
+    }
+
+    @AsmMixin("FieldInferenceTarget")
+    object RemoveFieldByBooleanGetterNameMixin {
+        @RemoveField
+        @JvmStatic
+        fun isActive(): Boolean = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("FieldTarget")
+    object MissingRemoveFieldTargetMixin {
+        @RemoveField("missing")
+        @JvmStatic
+        fun removeMissing() {
+        }
+    }
+
+    @AsmMixin("StrictTarget")
+    class AddFieldMixin {
+        @AddField
+        private var extraName: String? = null
+    }
+
+    @AsmMixin("StrictTarget")
+    class AddRenamedFieldMixin {
+        @AddField("renamedScore")
+        private var score: Int = 0
+    }
+
+    @AsmMixin("FieldTarget")
+    class AddExistingFieldMixin {
+        @AddField("name")
+        private var duplicateName: String? = null
+    }
+
+    @AsmMixin("InterfaceTarget")
+    @AddInterface("java/io/Closeable")
+    object AddCloseableInterfaceMixin
+
+    @AsmMixin("InterfaceTarget")
+    @AddInterface("java/lang/Runnable")
+    object AddRunnableInterfaceMixin
+
+    @AsmMixin("InterfaceTarget")
+    @AddInterface(
+        value = "java.lang.Runnable",
+        interfaces = ["java.lang.Cloneable", "java/io/Serializable", "java.lang.Cloneable"],
+    )
+    object AddNormalizedInterfacesMixin
+
+    @AsmMixin("InterfaceTarget")
+    @RemoveInterface("java/lang/Runnable")
+    object RemoveRunnableInterfaceMixin
+
+    @AsmMixin("MultiInterfaceTarget")
+    @RemoveInterface(
+        value = "java.lang.Runnable",
+        interfaces = ["java.lang.Cloneable", "java/lang/Runnable"],
+    )
+    object RemoveNormalizedInterfacesMixin
 
     @AsmMixin("StrictTarget")
     object MissingRemoveSynchronizedTargetMixin {
@@ -1200,6 +4646,19 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("MultiInvokeTarget")
+    object InvokeOrdinalMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("RedirectAllTarget")
     @RedirectAllMethods
     object RedirectAllTrimMixin {
@@ -1224,6 +4683,172 @@ class FrameworkReliabilityTest {
     object ObjectInstanceStaticModifyArgMixin {
         @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
         fun modify(original: String): String = original
+    }
+
+    @AsmMixin("VariableTarget")
+    object ModifyVariableInstanceParamMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified-$original"
+    }
+
+    @AsmMixin("StaticVariableTarget")
+    object ModifyVariableStaticParamMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 0,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "static-$original"
+    }
+
+    @AsmMixin("VariableTarget")
+    object ModifyVariableHeadTargetParamsMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            targetValue: String,
+        ): String = "$original-$targetValue"
+    }
+
+    @AsmMixin("StaticVariableTarget")
+    object ModifyVariableStaticHeadTargetParamsMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 0,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            targetValue: String,
+        ): String = "$original-$targetValue-static"
+    }
+
+    @AsmMixin("OrdinalVariableTarget")
+    object ModifyVariableOrdinalParamMixin {
+        @ModifyVariable(
+            method = "combine(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "ordinal-$original"
+    }
+
+    @AsmMixin("StoreVariableTarget")
+    object ModifyVariableStoreMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("StoreOrdinalVariableTarget")
+    object ModifyVariableStoreOrdinalMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("StoreVariableParamTarget")
+    object ModifyVariableStoreTargetParamsMixin {
+        @ModifyVariable(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            index = 3,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "stored-$original-$suffix$count"
+    }
+
+    @AsmMixin("LoadVariableTarget")
+    object ModifyVariableLoadMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "loaded-$original"
+    }
+
+    @AsmMixin("LoadVariableParamTarget")
+    object ModifyVariableLoadTargetParamsMixin {
+        @ModifyVariable(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            index = 3,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "loaded-$original-$suffix$count"
+    }
+
+    @AsmMixin("VariableTarget")
+    object TooManyModifyVariableParametersMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            targetValue: String,
+            unavailable: String,
+        ): String = "$original$targetValue$unavailable"
+    }
+
+    @AsmMixin("LoadOrdinalVariableTarget")
+    object ModifyVariableLoadOrdinalMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "loaded-$original"
+    }
+
+    @AsmMixin("LoadVariableTarget")
+    object UnsupportedLoadInjectMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.LOAD)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("StoreVariableTarget")
+    object UnsupportedStoreInjectMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.STORE)
+        @JvmStatic
+        fun inject() {
+        }
     }
 
     @AsmMixin("StaticReturnTarget")
@@ -1282,6 +4907,446 @@ class FrameworkReliabilityTest {
         fun modify(type: Class<*>): Class<*> = type
     }
 
+    @AsmMixin("FieldPointTarget")
+    object FieldReadInjectMixin {
+        @AsmInject(
+            method = "readName()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("MultiFieldReadTarget")
+    object FieldReadOrdinalMixin {
+        @AsmInject(
+            method = "readTwice()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "MultiFieldReadTarget.name:Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object MissingFieldReadInjectMixin {
+        @AsmInject(
+            method = "readName()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.missing:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldReadReturningHandlerMixin {
+        @AsmInject(
+            method = "readName()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject(): Int = 1
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldReadRedirectMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(target: Any): String = "redirected"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ObjectInstanceFieldReadRedirectMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        fun redirect(target: Any): String {
+            target.hashCode()
+            return "object-field"
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldReadNameOnlyRedirectMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "name"),
+        )
+        @JvmStatic
+        fun redirect(target: Any): String = "name-only"
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object StaticFieldReadRedirectMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(): String = "static-redirected"
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object ObjectInstanceStaticFieldReadRedirectMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        fun redirect(): String = "object-static-field"
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object FieldReadWithTargetParamsMixin {
+        @Redirect(
+            method = "readName(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            suffix: String,
+            count: Int,
+        ): String {
+            target.hashCode()
+            return "field-$suffix$count"
+        }
+    }
+
+    @AsmMixin("StaticFieldParamTarget")
+    object StaticFieldReadWithTargetParamsMixin {
+        @Redirect(
+            method = "readName(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "StaticFieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(
+            suffix: String,
+            count: Int,
+        ): String = "static-field-$suffix$count"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldAssignRedirectMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            lastValue = value
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ObjectInstanceFieldAssignRedirectMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            lastValue = "object-$value"
+        }
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object StaticFieldAssignRedirectMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(value: String) {
+            lastValue = value
+        }
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object ObjectInstanceStaticFieldAssignRedirectMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+        )
+        fun redirect(value: String) {
+            lastValue = "object-$value"
+        }
+    }
+
+    @AsmMixin("FieldParamTarget")
+    object FieldAssignWithTargetParamsMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;Ljava/lang/String;I)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+            targetValue: String,
+            suffix: String,
+            count: Int,
+        ) {
+            target.hashCode()
+            if (value != targetValue) {
+                throw IllegalStateException("Unexpected target value: $targetValue")
+            }
+            lastValue = "$value-$suffix$count"
+        }
+    }
+
+    @AsmMixin("StaticFieldParamTarget")
+    object StaticFieldAssignWithTargetParamsMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;Ljava/lang/String;I)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "StaticFieldParamTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(
+            value: String,
+            targetValue: String,
+            suffix: String,
+            count: Int,
+        ) {
+            if (value != targetValue) {
+                throw IllegalStateException("Unexpected target value: $targetValue")
+            }
+            lastValue = "$value-$suffix$count"
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ArrayReadRedirectMixin {
+        @Redirect(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+        ): String = "redirected-${array[index]}"
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ArrayWriteRedirectMixin {
+        @Redirect(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ) {
+            array[index] = "written-$value"
+        }
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object PrimitiveArrayReadRedirectMixin {
+        @Redirect(
+            method = "readScore(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: IntArray,
+            index: Int,
+        ): Int = array[index] + 2
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object PrimitiveArrayWriteRedirectMixin {
+        @Redirect(
+            method = "writeScore(II)V",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: IntArray,
+            index: Int,
+            value: Int,
+        ) {
+            array[index] = value + 2
+        }
+    }
+
+    @AsmMixin("ArrayParamTarget")
+    object ArrayReadWithTargetParamsRedirectMixin {
+        @Redirect(
+            method = "readName(ILjava/lang/String;)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayParamTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+            targetIndex: Int,
+            suffix: String,
+        ): String {
+            if (index != targetIndex) {
+                throw IllegalStateException("Unexpected array index: $index")
+            }
+            return "${array[index]}-$suffix"
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object MismatchedArrayReadRedirectMixin {
+        @Redirect(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: String,
+        ): String = array[index.length]
+    }
+
+    @AsmMixin("RedirectOrdinalTarget")
+    object RedirectOrdinalTrimMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun redirect(value: String): String = "redirected"
+    }
+
+    @AsmMixin("FieldReadOrdinalTarget")
+    object FieldReadRedirectOrdinalMixin {
+        @Redirect(
+            method = "readBoth()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "FieldReadOrdinalTarget.name:Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun redirect(target: Any): String {
+            target.hashCode()
+            return "redirected"
+        }
+    }
+
+    @AsmMixin("FieldAssignOrdinalTarget")
+    object FieldAssignRedirectOrdinalMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeBoth(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldAssignOrdinalTarget.name:Ljava/lang/String;"),
+            ordinal = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            lastValue = value
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldAssignInjectMixin {
+        @AsmInject(
+            method = "writeName(Ljava/lang/String;)V",
+            target = InjectionPoint.FIELD_ASSIGN,
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object NewInstructionInjectMixin {
+        @AsmInject(
+            method = "create()Ljava/lang/StringBuilder;",
+            target = InjectionPoint.NEW,
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object NewInstructionAfterInjectMixin {
+        @AsmInject(
+            method = "create()Ljava/lang/StringBuilder;",
+            target = InjectionPoint.NEW,
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder", shift = Shift.AFTER),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("ThrowPointTarget")
+    object ThrowInstructionInjectMixin {
+        @AsmInject(method = "fail()V", target = InjectionPoint.THROW)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("ShadowOverloadTarget")
     class ShadowOverloadOverwriteMixin {
         @Shadow
@@ -1325,6 +5390,135 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun redirectParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RedirectParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" base ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticRedirectParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticRedirectParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "value",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitIntInsn(Opcodes.BIPUSH, 42)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiInvokeTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiInvokeTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "call", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" first ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" second ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun redirectOrdinalTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RedirectOrdinalTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" first ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" second ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldReadOrdinalTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldReadOrdinalTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PUBLIC, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readBoth", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FieldReadOrdinalTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FieldReadOrdinalTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldAssignOrdinalTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldAssignOrdinalTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PUBLIC, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeBoth", "(Ljava/lang/String;Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldAssignOrdinalTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldAssignOrdinalTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
@@ -1376,6 +5570,175 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun variableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "VariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "echo", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "echo", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun ordinalVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "OrdinalVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "combine",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun storeVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StoreVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("local")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun storeOrdinalVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StoreOrdinalVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun storeVariableParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StoreVariableParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("local")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun loadVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("local")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun loadVariableParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadVariableParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("local")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun loadOrdinalVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadOrdinalVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun staticReturnTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticReturnTarget", null, "java/lang/Object", null)
@@ -1415,6 +5778,27 @@ class FrameworkReliabilityTest {
             visitIntInsn(Opcodes.BIPUSH, 'a'.code)
             visitInsn(Opcodes.IRETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiReturnTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiReturnTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Z)Ljava/lang/String;", null, null).apply {
+            val secondReturn = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFEQ, secondReturn)
+            visitLdcInsn("first")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(secondReturn)
+            visitLdcInsn("second")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
             visitEnd()
         }
         cw.visitEnd()
@@ -1475,6 +5859,442 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun invokeModifyArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeModifyArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("prefix-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeModifyArgParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeModifyArgParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("prefix-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiInvokeModifyArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiInvokeModifyArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun constructorModifyArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorModifyArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("raw")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun modifyArgsTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyArgsTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("hello raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun modifyArgsParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyArgsParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("left")
+            visitLdcInsn("unused")
+            visitInsn(Opcodes.ICONST_0)
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "ModifyArgsParamTarget",
+                "join",
+                "(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "join",
+            "(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("-")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn("-")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiModifyArgsTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiModifyArgsTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wrapConditionStaticTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapConditionStaticTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "run", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("raw")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "WrapConditionStaticTarget", "record", "(Ljava/lang/String;)V", false)
+            visitFieldInsn(Opcodes.GETSTATIC, "WrapConditionStaticTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "record", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.PUTSTATIC, "WrapConditionStaticTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wrapConditionInstanceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapConditionInstanceTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("raw")
+            visitInsn(Opcodes.ICONST_3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "WrapConditionInstanceTarget", "record", "(Ljava/lang/String;I)V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "WrapConditionInstanceTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "record", "(Ljava/lang/String;I)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitFieldInsn(Opcodes.PUTFIELD, "WrapConditionInstanceTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wrapConditionParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapConditionParamTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "run",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn("raw")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "WrapConditionParamTarget", "record", "(Ljava/lang/String;)V", false)
+            visitFieldInsn(Opcodes.GETSTATIC, "WrapConditionParamTarget", "last", "Ljava/lang/String;")
+            visitLdcInsn("-")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "record", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.PUTSTATIC, "WrapConditionParamTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiWrapConditionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiWrapConditionTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "run", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "MultiWrapConditionTarget", "record", "(Ljava/lang/String;)V", false)
+            visitLdcInsn("second")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "MultiWrapConditionTarget", "record", "(Ljava/lang/String;)V", false)
+            visitFieldInsn(Opcodes.GETSTATIC, "MultiWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "record", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.PUTSTATIC, "MultiWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun expressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" raw ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun expressionValueParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ExpressionValueParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" raw ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" first ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" second ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun modifyReceiverTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyReceiverTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("original")
+            visitLdcInsn("-call")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun modifyReceiverParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyReceiverParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("original")
+            visitLdcInsn("-call")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiModifyReceiverTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiModifyReceiverTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first")
+            visitLdcInsn("-a")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second")
+            visitLdcInsn("-b")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun fieldTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldTarget", null, "java/lang/Object", null)
@@ -1483,6 +6303,364 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun fieldInferenceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldInferenceTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitField(Opcodes.ACC_PRIVATE, "score", "I", null, null).visitEnd()
+        cw.visitField(Opcodes.ACC_PRIVATE, "active", "Z", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun finalFieldTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FinalFieldTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_FINAL, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun interfaceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InterfaceTarget", null, "java/lang/Object", arrayOf("java/lang/Runnable"))
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiInterfaceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC,
+            "MultiInterfaceTarget",
+            null,
+            "java/lang/Object",
+            arrayOf("java/lang/Runnable", "java/lang/Cloneable", "java/io/Serializable"),
+        )
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldPointTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldPointTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readName", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FieldPointTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeName", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldPointTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun primitiveFieldPointTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "PrimitiveFieldPointTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "score", "I", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readScore", "()I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "PrimitiveFieldPointTarget", "score", "I")
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeScore", "(I)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "PrimitiveFieldPointTarget", "score", "I")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticFieldPointTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticFieldPointTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "readName", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitFieldInsn(Opcodes.GETSTATIC, "StaticFieldPointTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "writeName", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.PUTSTATIC, "StaticFieldPointTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldParamTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readName", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FieldParamTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeName", "(Ljava/lang/String;Ljava/lang/String;I)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldParamTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticFieldParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticFieldParamTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "readName",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitFieldInsn(Opcodes.GETSTATIC, "StaticFieldParamTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "writeName",
+            "(Ljava/lang/String;Ljava/lang/String;I)V",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.PUTSTATIC, "StaticFieldParamTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun arrayAccessTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ArrayAccessTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "names", "[Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ICONST_1)
+            visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("raw")
+            visitInsn(Opcodes.AASTORE)
+            visitFieldInsn(Opcodes.PUTFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(5, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readName", "(I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.AALOAD)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeName", "(ILjava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.AASTORE)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun primitiveArrayAccessTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "PrimitiveArrayAccessTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "scores", "[I", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ICONST_1)
+            visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_INT)
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_0)
+            visitIntInsn(Opcodes.BIPUSH, 40)
+            visitInsn(Opcodes.IASTORE)
+            visitFieldInsn(Opcodes.PUTFIELD, "PrimitiveArrayAccessTarget", "scores", "[I")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(5, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readScore", "(I)I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "PrimitiveArrayAccessTarget", "scores", "[I")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.IALOAD)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeScore", "(II)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "PrimitiveArrayAccessTarget", "scores", "[I")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitInsn(Opcodes.IASTORE)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun arrayParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ArrayParamTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "names", "[Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ICONST_1)
+            visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("raw")
+            visitInsn(Opcodes.AASTORE)
+            visitFieldInsn(Opcodes.PUTFIELD, "ArrayParamTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(5, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readName", "(ILjava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayParamTarget", "names", "[Ljava/lang/String;")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.AALOAD)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeName", "(ILjava/lang/String;Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ArrayParamTarget", "names", "[Ljava/lang/String;")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.AASTORE)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(3, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiFieldReadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiFieldReadTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readTwice", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "MultiFieldReadTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "MultiFieldReadTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeName", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "MultiFieldReadTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun accessorConflictTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "AccessorConflictTarget", null, "java/lang/Object", null)
@@ -1498,6 +6676,25 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun throwPointTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ThrowPointTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "fail", "()V", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/IllegalStateException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("failed")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ATHROW)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun invokerConflictTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokerConflictTarget", null, "java/lang/Object", null)
@@ -1525,9 +6722,16 @@ class FrameworkReliabilityTest {
         addDefaultConstructor(cw)
         cw.visitMethod(Opcodes.ACC_PUBLIC, "create", "()Ljava/lang/StringBuilder;", null, null).apply {
             visitCode()
+            visitInsn(Opcodes.NOP)
             visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
             visitInsn(Opcodes.DUP)
-            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false)
+            visitMethodInsn(
+                Opcodes.INVOKESPECIAL,
+                "java/lang/StringBuilder",
+                "<init>",
+                "()V",
+                false,
+            )
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
             visitEnd()
@@ -1535,6 +6739,93 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun newParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NewParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "create",
+            "(Ljava/lang/String;I)Ljava/lang/StringBuilder;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiNewTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiNewTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("first")
+            visitMethodInsn(
+                Opcodes.INVOKESPECIAL,
+                "java/lang/StringBuilder",
+                "<init>",
+                "(Ljava/lang/String;)V",
+                false,
+            )
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "toString",
+                "()Ljava/lang/String;",
+                false,
+            )
+            visitLdcInsn(":")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("second")
+            visitMethodInsn(
+                Opcodes.INVOKESPECIAL,
+                "java/lang/StringBuilder",
+                "<init>",
+                "(Ljava/lang/String;)V",
+                false,
+            )
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "toString",
+                "()Ljava/lang/String;",
+                false,
+            )
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun castInstructionTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "CastInstructionTarget", null, "java/lang/Object", null)
@@ -1588,6 +6879,42 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun constantParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstantParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("base-")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun staticConstantParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticConstantParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "value",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn("static-")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun nullConstantTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NullConstantTarget", null, "java/lang/Object", null)
@@ -1597,6 +6924,57 @@ class FrameworkReliabilityTest {
             visitInsn(Opcodes.ACONST_NULL)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun bipushConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "BipushConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()I", null, null).apply {
+            visitCode()
+            visitIntInsn(Opcodes.BIPUSH, 7)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sipushConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SipushConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()I", null, null).apply {
+            visitCode()
+            visitIntInsn(Opcodes.SIPUSH, 300)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiIntConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiIntConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()I", null, null).apply {
+            visitCode()
+            visitIntInsn(Opcodes.BIPUSH, 7)
+            visitVarInsn(Opcodes.ISTORE, 1)
+            visitIntInsn(Opcodes.BIPUSH, 7)
+            visitVarInsn(Opcodes.ISTORE, 2)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitInsn(Opcodes.IADD)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
@@ -1649,6 +7027,19 @@ class FrameworkReliabilityTest {
         val classNode = ClassNode()
         ClassReader(bytes).accept(classNode, ClassReader.EXPAND_FRAMES)
         return classNode
+    }
+
+    private fun handlerCallIndex(
+        instructions: Array<org.objectweb.asm.tree.AbstractInsnNode>,
+        owner: Class<*>,
+        methodName: String,
+    ): Int {
+        val ownerName = org.objectweb.asm.Type.getInternalName(owner)
+        return instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode &&
+                it.owner == ownerName &&
+                it.name == methodName
+        }
     }
 
     private fun loadClass(
