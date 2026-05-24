@@ -1682,6 +1682,45 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtArrayLengthCanCallOriginalArrayLength() {
+        AsmRegistry.register(WrapOperationArrayLengthMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount").invoke(instance)
+
+        assertEquals(6, result)
+    }
+
+    @Test
+    fun wrapOperationAtArrayLengthCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapOperationArrayLengthWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount", Int::class.javaPrimitiveType).invoke(instance, 4)
+
+        assertEquals(5, result)
+    }
+
+    @Test
+    fun wrapOperationArrayLengthWithMismatchedHandlerReturnFailsDuringTransform() {
+        AsmRegistry.register(MismatchedWrapOperationArrayLengthMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("array length handler") == true,
+        )
+    }
+
+    @Test
     fun wrapOperationAtArrayWriteCanCallOriginalObjectArrayStoreWithChangedValue() {
         AsmRegistry.register(WrapOperationArrayWriteMixin::class.java)
 
@@ -4986,6 +5025,58 @@ class FrameworkReliabilityTest {
             index: Int,
             operation: Operation<Int>,
         ): Int = operation.call(array, index) + 2
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayLengthMixin {
+        @WrapOperation(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            operation: Operation<Int>,
+        ): Int = operation.call(array) + 5
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayLengthWithTargetParamsMixin {
+        @WrapOperation(
+            method = "nameCount(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            operation: Operation<Int>,
+            bonus: Int,
+        ): Int = operation.call(array) + bonus
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object MismatchedWrapOperationArrayLengthMixin {
+        @WrapOperation(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            operation: Operation<String>,
+        ): String = operation.call(array)
     }
 
     @AsmMixin("ArrayAccessTarget")
