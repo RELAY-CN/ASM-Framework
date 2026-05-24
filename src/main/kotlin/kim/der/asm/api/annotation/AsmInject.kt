@@ -55,7 +55,8 @@ annotation class AsmInject(
  * 注入点枚举。
  *
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[FIELD]、
- * [FIELD_ASSIGN]、[NEW] 与 [THROW]；[LOAD] 与 [STORE] 当前用于 [kim.der.asm.api.annotation.ModifyVariable]。
+ * [FIELD_ASSIGN]、[NEW]、[CAST] 与 [THROW]；[LOAD] 与 [STORE] 当前用于
+ * [kim.der.asm.api.annotation.ModifyVariable]。
  * 其中指令点注入会在匹配指令前后插入 handler，
  * 不会替换原始指令或自动传递栈顶操作数。
  *
@@ -92,6 +93,9 @@ enum class InjectionPoint {
 
     /** NEW 操作前 */
     NEW,
+
+    /** 类型转换后 */
+    CAST,
 
     /** 抛出异常前 */
     THROW,
