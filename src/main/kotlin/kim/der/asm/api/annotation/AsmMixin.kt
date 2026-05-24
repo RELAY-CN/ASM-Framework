@@ -479,6 +479,8 @@ annotation class ModifyReturnValue(
  * - 返回类型必须与被修改常量的类型一致
  * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
  *   边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
+ * - [require] / [allow] 可约束实际替换的常量数量，目标字节码漂移时会在转换阶段失败
+ * - [expect] 用于调试期望命中数，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）

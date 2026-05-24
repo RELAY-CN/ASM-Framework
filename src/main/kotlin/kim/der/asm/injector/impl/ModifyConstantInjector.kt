@@ -25,6 +25,7 @@ import java.lang.reflect.Modifier
  * 支持 `LDC`、`ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
  * `BIPUSH` 与 `SIPUSH` 形式的常量加载。
  * ASM 方法的第一个参数接收原常量，后续参数可按顺序接收目标方法的部分参数。
+ * [injectCount] 会返回实际替换的常量数量，供上层执行 `@ModifyConstant` 的命中数契约校验。
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
  * @param ordinal 匹配常量序号；负数表示处理全部匹配常量
@@ -52,6 +53,16 @@ class ModifyConstantInjector(
      */
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
+    /**
+     * 替换目标方法中匹配的常量，并返回实际替换数量。
+     *
+     * @param target 目标方法
+     * @return 实际替换的常量数量
+     * @throws IllegalArgumentException ASM 方法参数或返回类型与常量类型不匹配时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun injectCount(target: MethodNode): Int {
         val instructions = target.instructions
         var injectionCount = 0
