@@ -23,10 +23,10 @@ package kim.der.asm.api.annotation
  * - INVOKE 的 REPLACE 注入按替换原调用处理，handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
- * @param target 注入点类型；当前实现支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/THROW
+ * @param target 注入点类型；当前实现支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST/THROW
  * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
  * @param require 预留参数，当前实现未强制校验
- * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
+ * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 预留参数，当前实现未实现按切片范围缩小查找
  * @param allow 预留参数，当前实现未限制最大注入次数
@@ -104,8 +104,8 @@ enum class InjectionPoint {
 /**
  * 调用点定位信息。
  *
- * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- * 与 [InjectionPoint.NEW] 的匹配目标，并通过 [shift] 指定在匹配指令前/后插入 handler。
+ * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * [InjectionPoint.NEW] 与 [InjectionPoint.CAST] 的匹配目标，并通过 [shift] 指定在匹配指令前/后插入 handler。
  *
  * 注意：
  *
@@ -113,16 +113,20 @@ enum class InjectionPoint {
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 只支持 BEFORE 或 REPLACE；AFTER 会在未初始化对象仍位于栈顶时插入调用，当前实现会拒绝该配置。
+ * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
- * - [Redirect] 可通过 [args] 中的 `array=get` 或 `array=set`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取或写入。
+ * - [Redirect] 与 [WrapOperation] 可通过 [args] 中的 `array=get` 或 `array=set`，
+ *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取或写入。
+ * - [WrapWithCondition] 可通过 [args] 中的 `array=set`，把 [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素写入。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get`，把 [InjectionPoint.FIELD]
  *   目标解释为数组元素读取表达式。
  *
  * @param value 预留字段，当前实现未使用
- * @param target 目标方法调用、字段或 NEW 类型签名
+ * @param target 目标方法调用、字段、NEW 类型或 CHECKCAST 类型签名
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
- * @param args 附加定位参数；当前 [Redirect] 支持 `array=get` 与 `array=set`，[ModifyExpressionValue] 支持 `array=get`
+ * @param args 附加定位参数；当前 [Redirect] 与 [WrapOperation] 支持 `array=get` 与 `array=set`，
+ * [WrapWithCondition] 支持 `array=set`，[ModifyExpressionValue] 支持 `array=get`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */

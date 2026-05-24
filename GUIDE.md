@@ -152,7 +152,7 @@ object LoggingMixin {
 }
 ```
 
-普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`THROW`
+普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`THROW`
 等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
@@ -358,6 +358,15 @@ object ValidationMixin {
     fun rewriteConstructedBuffer(value: StringBuilder, prefix: String): StringBuilder =
         StringBuilder("$prefix:${value.length}")
 
+    @ModifyExpressionValue(
+        method = "castName(Ljava/lang/Object;)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.CAST,
+            target = "java/lang/String",
+        ),
+    )
+    fun rewriteCastValue(value: String, raw: Any): String = "$raw:${value.trim()}"
+
     @ModifyVariable(
         method = "validate(Ljava/lang/String;)Z",
         at = At(value = InjectionPoint.HEAD),
@@ -403,10 +412,10 @@ object ValidationMixin {
 handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用
 receiver（仅实例调用）和调用参数，字段写入模式下 handler 先接收字段 owner（仅实例字段）和待写入值。
 数组写入模式通过 `args = ["array=set"]` 指定，并让 handler 接收数组引用、`Int` 索引与待写入元素值，
-后续都可接收目标方法参数前缀。`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取或对象构造但
-改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值或已初始化对象并
+后续都可接收目标方法参数前缀。`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、对象构造或类型转换但
+改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值、已初始化对象或转换后的对象并
 返回同类型新值，后续参数可接收目标方法参数前缀；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
-数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，数组读取模式通过 `args = ["array=get"]`
+数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，数组读取模式通过 `args = ["array=get"]`
 指定，调用点可用 `ordinal` 精确选择。
 
 `@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值，后续参数可继续接收目标方法参数前缀。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 `ordinal` 选择第 N 个同类型匹配项。
@@ -585,7 +594,7 @@ object MultiInjectMixin {
 
 ### 场景 11: 指令点注入
 
-`FIELD`、`FIELD_ASSIGN`、`THROW` 可以把 handler 插入到具体字节码指令前后，`NEW` 可以插入到对象创建指令之前，适合观察字段访问、字段写入、对象创建或异常抛出位置。
+`FIELD`、`FIELD_ASSIGN`、`CAST`、`THROW` 可以把 handler 插入到具体字节码指令前后，`NEW` 可以插入到对象创建指令之前，适合观察字段访问、字段写入、类型转换、对象创建或异常抛出位置。
 
 ```kotlin
 @AsmMixin("com/example/Player")
@@ -613,10 +622,20 @@ object FieldPointMixin {
     fun beforeNewStringBuilder() {
         println("StringBuilder will be created")
     }
+
+    @AsmInject(
+        method = "castName(Ljava/lang/Object;)Ljava/lang/String;",
+        target = InjectionPoint.CAST,
+        at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+    )
+    @JvmStatic
+    fun beforeStringCast() {
+        println("value will be cast to String")
+    }
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、new 出来的对象或异常对象传给 handler。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、new 出来的对象、类型转换对象或异常对象传给 handler。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
