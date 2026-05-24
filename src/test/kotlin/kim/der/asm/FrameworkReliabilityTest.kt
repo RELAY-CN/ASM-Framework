@@ -1926,6 +1926,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantExposesCountContractParameters() {
+        val methods = ModifyConstant::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun modifyConstantWithoutExplicitValueSkipsOtherConstantTypes() {
         AsmRegistry.register(StringOnlyModifyConstantMixin::class.java)
 
