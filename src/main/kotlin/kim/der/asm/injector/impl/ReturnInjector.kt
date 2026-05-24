@@ -39,10 +39,12 @@ class ReturnInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
-        val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return false
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    override fun injectCount(target: MethodNode): Int {
+        val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
 
         // 检查是否需要 CallbackInfo
@@ -216,11 +218,11 @@ class ReturnInjector(
                 }
 
                 instructions.insertBefore(insn, il)
-                transformed = true
+                injectionCount++
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(

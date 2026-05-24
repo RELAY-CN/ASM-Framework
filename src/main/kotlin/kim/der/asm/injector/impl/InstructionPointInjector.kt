@@ -50,12 +50,14 @@ class InstructionPointInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
-        val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return false
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    override fun injectCount(target: MethodNode): Int {
+        val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
         requireSupportedShift(injectAnnotation.at.shift)
         val matcher = buildMatcher(injectAnnotation.at.target)
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
 
         for (insn in instructions.toArray()) {
@@ -73,10 +75,10 @@ class InstructionPointInjector(
                 Shift.BEFORE, Shift.REPLACE -> instructions.insertBefore(insn, il)
                 Shift.AFTER -> instructions.insert(insn, il)
             }
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(

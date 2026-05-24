@@ -43,17 +43,19 @@ class InvokeInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    override fun injectCount(target: MethodNode): Int {
         // 从 @AsmInject 注解中获取 @At 信息
         val injectAnnotation =
             asmMethod.getAnnotation(AsmInject::class.java)
-                ?: return false
+                ?: return 0
 
         val at = injectAnnotation.at
         val targetMethodSignature = at.target
 
         if (targetMethodSignature.isEmpty()) {
-            return false
+            return 0
         }
 
         // 解析目标方法签名
@@ -67,7 +69,7 @@ class InvokeInjector(
         }
 
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val insns = instructions.toArray()
 
         // 查找所有匹配的方法调用
@@ -83,22 +85,22 @@ class InvokeInjector(
                     when (at.shift) {
                         Shift.BEFORE -> {
                             injectBeforeCall(instructions, insn, target)
-                            transformed = true
+                            injectionCount++
                         }
                         Shift.AFTER -> {
                             injectAfterCall(instructions, insn, target)
-                            transformed = true
+                            injectionCount++
                         }
                         Shift.REPLACE -> {
                             replaceCall(instructions, insn, target)
-                            transformed = true
+                            injectionCount++
                         }
                     }
                 }
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(
