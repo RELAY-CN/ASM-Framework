@@ -1565,6 +1565,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverExposesCountContractParameters() {
+        val methods = ModifyReceiver::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun modifyReceiverSliceLimitsInvokeReceiverMatchesBetweenFromAndTo() {
         AsmRegistry.register(ModifyReceiverSliceMixin::class.java)
 
