@@ -2915,6 +2915,45 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectArrayLengthReplacesArrayLengthAccess() {
+        AsmRegistry.register(ArrayLengthRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount").invoke(instance)
+
+        assertEquals(6, result)
+    }
+
+    @Test
+    fun redirectArrayLengthCanUseTargetMethodParameters() {
+        AsmRegistry.register(ArrayLengthWithTargetParamsRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount", Int::class.javaPrimitiveType).invoke(instance, 4)
+
+        assertEquals(5, result)
+    }
+
+    @Test
+    fun redirectArrayLengthWithMismatchedHandlerReturnFailsDuringTransform() {
+        AsmRegistry.register(MismatchedArrayLengthRedirectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("array length handler") == true,
+        )
+    }
+
+    @Test
     fun redirectArrayReadWithMismatchedHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(MismatchedArrayReadRedirectMixin::class.java)
 
@@ -5938,6 +5977,51 @@ class FrameworkReliabilityTest {
             }
             return "${array[index]}-$suffix"
         }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ArrayLengthRedirectMixin {
+        @Redirect(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(array: Array<String>): Int = array.size + 5
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ArrayLengthWithTargetParamsRedirectMixin {
+        @Redirect(
+            method = "nameCount(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            bonus: Int,
+        ): Int = array.size + bonus
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object MismatchedArrayLengthRedirectMixin {
+        @Redirect(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(array: Array<String>): String = array.size.toString()
     }
 
     @AsmMixin("ArrayAccessTarget")
