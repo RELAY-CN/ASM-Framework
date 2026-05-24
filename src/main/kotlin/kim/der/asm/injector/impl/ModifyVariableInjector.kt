@@ -32,7 +32,7 @@ import java.lang.reflect.Modifier
  * @param injectionPoint 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param variableIndex 要修改的 JVM 局部变量槽位索引
  * @param ordinal 未指定 [variableIndex] 时，同类型入口参数、读取点或写入点的序号
- * @param slice 切片范围；当前仅 [InjectionPoint.LOAD] 使用 INVOKE 边界缩小匹配范围
+ * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 INVOKE 边界缩小匹配范围
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -127,7 +127,12 @@ class ModifyVariableInjector(
         var transformed = false
         var matchedOrdinal = 0
 
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
                 continue
             }
@@ -340,7 +345,7 @@ class ModifyVariableInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @ModifyVariable(LOAD): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @ModifyVariable(LOAD/STORE): ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
