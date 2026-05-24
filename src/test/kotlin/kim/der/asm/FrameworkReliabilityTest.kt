@@ -681,6 +681,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyArgsMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiModifyArgsTarget", multiModifyArgsTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyArgsAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyArgsMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiModifyArgsTarget", multiModifyArgsTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyArgsExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyArgsMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("MultiModifyArgsTarget", multiModifyArgsTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun modifyArgsAtInvokeRewritesMultipleCallArguments() {
         AsmRegistry.register(ModifyArgsReplaceMixin::class.java)
 
@@ -4299,6 +4350,54 @@ class FrameworkReliabilityTest {
             args.set(0, "${args.get<String>(0)}-$suffix")
             args.set(1, "right")
             args.set(2, count)
+        }
+    }
+
+    @AsmMixin("MultiModifyArgsTarget")
+    object RequireThreeModifyArgsMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            require = 3,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.get<CharSequence>(0)
+        }
+    }
+
+    @AsmMixin("MultiModifyArgsTarget")
+    object AllowOneModifyArgsMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.get<CharSequence>(0)
+        }
+    }
+
+    @AsmMixin("MultiModifyArgsTarget")
+    object ExpectThreeModifyArgsMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            expect = 3,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.get<CharSequence>(0)
         }
     }
 
