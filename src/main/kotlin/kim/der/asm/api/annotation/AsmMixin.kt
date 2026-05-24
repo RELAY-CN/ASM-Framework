@@ -477,11 +477,14 @@ annotation class ModifyReturnValue(
  *
  * - 第一个参数接收原始常量值，后续参数可按顺序接收目标方法的部分参数
  * - 返回类型必须与被修改常量的类型一致
+ * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
+ *   边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
  *
  * @param method 目标方法签名
  * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）
  * @param ordinal 匹配常量序号；`-1` 表示修改全部匹配常量，`0` 及以上表示只修改第 N 个匹配常量
- * @param slice 切片范围；预留给常量匹配范围过滤
+ * @param slice 切片范围；当前常量修改支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24

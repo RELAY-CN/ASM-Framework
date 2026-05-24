@@ -175,12 +175,12 @@ enum class Shift {
  * [InjectionPoint.INVOKE] 调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE] receiver 改写，
  * [WrapOperation] / [WrapWithCondition] 的 [InjectionPoint.INVOKE] 操作包裹或条件包裹，以及
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] 表达式值修改、[ModifyVariable] 的
- * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写改写支持 [from] / [to] 为
- * [InjectionPoint.INVOKE] 的边界；
+ * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写改写，以及 [ModifyConstant] 常量修改
+ * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；
  * 起始边界之后、结束边界之前的调用点才会参与匹配，边界指令本身不会作为候选注入点。
  * [AsmInject.ordinal] / [Redirect.ordinal] / [ModifyArg.ordinal] / [ModifyArgs.ordinal] /
  * [ModifyReceiver.ordinal] / [WrapOperation.ordinal] / [WrapWithCondition.ordinal] /
- * [ModifyExpressionValue.ordinal] / [ModifyVariable.ordinal] 会在切片内重新计数。
+ * [ModifyExpressionValue.ordinal] / [ModifyVariable.ordinal] / [ModifyConstant.ordinal] 会在切片内重新计数。
  * 指定的边界未命中时，切片按空范围处理。
  *
  * @param from 起始定位条件
