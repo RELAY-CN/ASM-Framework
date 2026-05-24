@@ -3119,6 +3119,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectSliceLimitsMethodCallMatchesBetweenFromAndTo() {
+        AsmRegistry.register(RedirectSliceTrimMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectSliceTarget", redirectSliceTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectSliceTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre:redirected:outside", result)
+    }
+
+    @Test
     fun redirectOrdinalSelectsSingleFieldRead() {
         AsmRegistry.register(FieldReadRedirectOrdinalMixin::class.java)
 
@@ -6282,6 +6294,20 @@ class FrameworkReliabilityTest {
         fun redirect(value: String): String = "redirected"
     }
 
+    @AsmMixin("RedirectSliceTarget")
+    object RedirectSliceTrimMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = "redirected"
+    }
+
     @AsmMixin("FieldReadOrdinalTarget")
     object FieldReadRedirectOrdinalMixin {
         @Redirect(
@@ -6524,6 +6550,44 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun redirectSliceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RedirectSliceTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" pre ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" inside ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" outside ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 4)
             visitEnd()
         }
         cw.visitEnd()
