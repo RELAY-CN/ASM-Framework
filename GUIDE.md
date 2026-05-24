@@ -288,6 +288,23 @@ object ValidationMixin {
     ): String = operation.call("$prefix$count", value)
 
     @WrapOperation(
+        method = "decorate(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+        ),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+    )
+    fun wrapConcatInTrace(
+        receiver: String,
+        value: String,
+        operation: Operation<String>,
+    ): String = operation.call(receiver, "traced-$value")
+
+    @WrapOperation(
         method = "displayName(Ljava/lang/String;)Ljava/lang/String;",
         at = At(
             value = InjectionPoint.FIELD,
@@ -517,7 +534,9 @@ object ValidationMixin {
 通过 `FIELD_ASSIGN + args = ["array=set"]` 指定，handler 接收数组引用、`Int` 索引、待写入元素值与
 `Operation<Unit>`；数组长度模式通过 `FIELD + args = ["array=length"]` 指定，handler 接收数组引用与
 `Operation<Int>`。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
-参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。
+参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`
+操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被包裹，
+`ordinal` 会在切片内重新计数。
 
 `@WrapWithCondition` 用于保留原 `void` 调用、字段写入或数组元素写入但按条件跳过副作用的场景。
 handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用

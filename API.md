@@ -248,10 +248,10 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `method: String = ""` - 目标方法签名
 - `at: At = At(value = InjectionPoint.INVOKE)` - 操作点定位；当前支持 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN`
 - `ordinal: Int = -1` - 操作点匹配序号；`-1` 表示包裹全部匹配操作点，`0` 及以上表示只包裹第 N 个匹配操作点
-- `slice: Slice = Slice()` - 切片范围，当前未使用
+- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 模式支持用 `INVOKE` 边界缩小查找范围
 - `remap: Boolean = false` - 是否重映射
 
-`INVOKE` 模式的 handler 会先接收原调用栈参数：实例调用先接收 receiver，再接收原调用参数；静态调用只接收原调用参数。下一参数必须是 `Operation<R>`，其中 `R` 为原调用返回类型；handler 可通过 `operation.call(...)` 执行原始调用，也可以跳过或多次调用。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀，返回类型必须兼容原调用返回类型；原调用为 `void` 时 handler 必须返回 `Unit` / `void`。
+`INVOKE` 模式的 handler 会先接收原调用栈参数：实例调用先接收 receiver，再接收原调用参数；静态调用只接收原调用参数。下一参数必须是 `Operation<R>`，其中 `R` 为原调用返回类型；handler 可通过 `operation.call(...)` 执行原始调用，也可以跳过或多次调用。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀，返回类型必须兼容原调用返回类型；原调用为 `void` 时 handler 必须返回 `Unit` / `void`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选操作点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 当 `INVOKE` 的 `At.target` 指向 `<init>` 构造器时，`@WrapOperation` 会替换常见 `NEW/DUP/args/INVOKESPECIAL` 构造表达式。handler 先接收构造器参数，不接收未初始化 receiver；下一参数必须是 `Operation<T>`，其中 `T` 为构造器 owner 类型；handler 返回类型必须兼容 owner 类型。`operation.call(...)` 只传构造器参数，并通过原构造器创建对象。
 
@@ -768,7 +768,8 @@ At(
 ### Slice
 
 用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通方法调用 `@Redirect`
-以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)` 支持 `from` / `to` 为 `InjectionPoint.INVOKE`
+以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
+`@WrapOperation(at.value = InjectionPoint.INVOKE)` 支持 `from` / `to` 为 `InjectionPoint.INVOKE`
 的边界切片；其他注解中的 `slice` 仍为预留参数。
 
 **参数：**
