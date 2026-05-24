@@ -361,6 +361,8 @@ annotation class WrapWithCondition(
  * 数组元素读取值、数组长度值、对象构造完成后的实例或 `CHECKCAST` 完成后的类型转换结果。
  * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用或类型转换指令，只在表达式产生值后
  * 把原值交给 handler 改写。
+ * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式可使用 [slice] 把候选调用限制在
+ * 一段 INVOKE 边界内，边界指令本身不参与匹配。
  *
  * ASM 方法要求：
  *
@@ -377,7 +379,8 @@ annotation class WrapWithCondition(
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
  * [InjectionPoint.NEW] 与 [InjectionPoint.CAST]
  * @param ordinal 匹配表达式序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
- * @param slice 预留参数，当前实现未使用
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式支持用
+ * [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
