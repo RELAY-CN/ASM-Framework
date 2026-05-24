@@ -64,6 +64,7 @@ object AsmInjectorFactory {
      * @param index 要修改的参数索引
      * @param at 调用点定位；默认 HEAD 时保持入口参数改写语义
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
+     * @param slice 切片范围；当前 INVOKE 调用点参数修改支持 INVOKE 边界切片
      * @return ModifyArg 注入器
      *
      * @author Dr (dr@der.kim)
@@ -75,7 +76,8 @@ object AsmInjectorFactory {
         index: Int,
         at: At = At(),
         ordinal: Int = -1,
-    ): AsmInjector = ModifyArgInjector(method, asmInfo, index, at, ordinal)
+        slice: Slice = Slice(),
+    ): AsmInjector = ModifyArgInjector(method, asmInfo, index, at, ordinal, slice)
 
     /**
      * 创建 ModifyArgs 注入器。
