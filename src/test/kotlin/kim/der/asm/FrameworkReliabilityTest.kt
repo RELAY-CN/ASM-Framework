@@ -45,6 +45,8 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.ClassNode
+import java.io.ByteArrayOutputStream
+import java.io.PrintStream
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -283,6 +285,57 @@ class FrameworkReliabilityTest {
 
         assertEquals("first", clazz.getMethod("value", Boolean::class.javaPrimitiveType).invoke(instance, true))
         assertEquals("modified-second", clazz.getMethod("value", Boolean::class.javaPrimitiveType).invoke(instance, false))
+    }
+
+    @Test
+    fun asmInjectRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeReturnInjectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun asmInjectAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneReturnInjectMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun asmInjectExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeReturnInjectMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
     }
 
     @Test
@@ -3419,6 +3472,30 @@ class FrameworkReliabilityTest {
     @AsmMixin("MultiReturnTarget")
     object ReturnOrdinalMixin {
         @AsmInject(method = "value(Z)Ljava/lang/String;", target = InjectionPoint.RETURN, ordinal = 1)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object RequireThreeReturnInjectMixin {
+        @AsmInject(method = "value(Z)Ljava/lang/String;", target = InjectionPoint.RETURN, require = 3)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object AllowOneReturnInjectMixin {
+        @AsmInject(method = "value(Z)Ljava/lang/String;", target = InjectionPoint.RETURN, allow = 1)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object ExpectThreeReturnInjectMixin {
+        @AsmInject(method = "value(Z)Ljava/lang/String;", target = InjectionPoint.RETURN, expect = 3)
         @JvmStatic
         fun inject() {
         }
