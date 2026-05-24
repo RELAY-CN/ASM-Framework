@@ -307,6 +307,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyReturnValueMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyReturnValueAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyReturnValueMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyReturnValueExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyReturnValueMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("MultiReturnTarget", multiReturnTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun asmInjectRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeReturnInjectMixin::class.java)
 
@@ -3994,6 +4045,27 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "value(Z)Ljava/lang/String;", ordinal = 1)
         @JvmStatic
         fun modify(original: String): String = "modified-$original"
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object RequireThreeModifyReturnValueMixin {
+        @ModifyReturnValue(method = "value(Z)Ljava/lang/String;", require = 3)
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object AllowOneModifyReturnValueMixin {
+        @ModifyReturnValue(method = "value(Z)Ljava/lang/String;", allow = 1)
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("MultiReturnTarget")
+    object ExpectThreeModifyReturnValueMixin {
+        @ModifyReturnValue(method = "value(Z)Ljava/lang/String;", expect = 3)
+        @JvmStatic
+        fun modify(original: String): String = original
     }
 
     @AsmMixin("RedirectTarget")
