@@ -530,6 +530,7 @@ class TargetClassContext(
                 asmInfo,
                 if (annotation.constant.isEmpty()) null else annotation.constant,
                 annotation.ordinal,
+                annotation.slice,
             )
         val transformed = injector.inject(targetMethod)
         if (annotation.constant.isEmpty()) {

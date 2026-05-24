@@ -4,6 +4,9 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.BytecodeUtil
@@ -25,6 +28,7 @@ import java.lang.reflect.Modifier
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
  * @param ordinal 匹配常量序号；负数表示处理全部匹配常量
+ * @param slice 切片范围；当前使用 INVOKE 边界缩小常量匹配范围
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -34,6 +38,7 @@ class ModifyConstantInjector(
     asmInfo: AsmInfo,
     private val constantValue: String? = null,
     private val ordinal: Int = -1,
+    private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 替换目标方法中匹配的常量。
@@ -49,10 +54,14 @@ class ModifyConstantInjector(
         val instructions = target.instructions
         var transformed = false
         val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
         var matchedOrdinal = 0
 
         // 查找所有常量指令
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (!BytecodeUtil.isConstant(insn)) {
                 continue
             }
@@ -98,6 +107,97 @@ class ModifyConstantInjector(
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
+        val startIndex =
+            if (hasSliceBoundary(slice.from)) {
+                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (hasSliceBoundary(slice.to)) {
+                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
+            } else {
+                insns.size
+            }
+
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+
+    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
+
+    private fun findSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @ModifyConstant: ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid ModifyConstant slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+        }
+
+        return null
+    }
+
+    private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun matchesTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
 
     /**
      * 检查常量值是否匹配
