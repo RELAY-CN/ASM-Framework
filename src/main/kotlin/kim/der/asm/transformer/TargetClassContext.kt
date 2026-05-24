@@ -973,6 +973,7 @@ class TargetClassContext(
             annotation.index,
             annotation.at,
             annotation.ordinal,
+            annotation.slice,
         )
         return requireInjectorMatched(
             injector.inject(targetMethod),
