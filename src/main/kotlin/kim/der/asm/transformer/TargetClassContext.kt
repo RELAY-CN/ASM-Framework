@@ -1019,6 +1019,7 @@ class TargetClassContext(
             asmInfo,
             annotation.at,
             annotation.ordinal,
+            annotation.slice,
         )
         return requireInjectorMatched(
             injector.inject(targetMethod),

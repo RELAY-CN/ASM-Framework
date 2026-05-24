@@ -107,6 +107,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param at 调用点定位；当前仅支持 INVOKE
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
+     * @param slice 切片范围；当前 INVOKE receiver 改写支持 INVOKE 边界切片
      * @return ModifyReceiver 注入器
      *
      * @author Dr (dr@der.kim)
@@ -117,7 +118,8 @@ object AsmInjectorFactory {
         asmInfo: AsmInfo,
         at: At,
         ordinal: Int = -1,
-    ): AsmInjector = ModifyReceiverInjector(method, asmInfo, at, ordinal)
+        slice: Slice = Slice(),
+    ): AsmInjector = ModifyReceiverInjector(method, asmInfo, at, ordinal, slice)
 
     /**
      * 创建 WrapOperation 注入器。
