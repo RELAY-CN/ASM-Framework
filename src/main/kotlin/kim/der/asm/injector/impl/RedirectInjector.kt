@@ -65,16 +65,27 @@ class RedirectInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 替换目标方法中的匹配点并返回实际重定向数量。
+     *
+     * @param target 目标方法
+     * @return 实际替换的调用点、构造器调用点、字段访问点、数组访问点或数组长度点数量
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         val arrayAccessMode = arrayAccessMode()
         if (arrayAccessMode != null) {
-            return injectArrayAccess(target, arrayAccessMode)
+            return injectArrayAccessCount(target, arrayAccessMode)
         }
         if (isFieldAssignRedirect()) {
-            return injectFieldAssign(target)
+            return injectFieldAssignCount(target)
         }
         if (isFieldReadRedirect()) {
-            return injectFieldRead(target)
+            return injectFieldReadCount(target)
         }
 
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(redirectTarget)
@@ -87,7 +98,7 @@ class RedirectInjector(
         }
 
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val insns = instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
         var matchedOrdinal = 0
@@ -107,11 +118,11 @@ class RedirectInjector(
                 } else {
                     replaceMethodCall(target, instructions, insn)
                 }
-                transformed = true
+                injectionCount++
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
@@ -181,10 +192,10 @@ class RedirectInjector(
         }
     }
 
-    private fun injectArrayAccess(
+    private fun injectArrayAccessCount(
         target: MethodNode,
         mode: ArrayAccessMode,
-    ): Boolean {
+    ): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("Invalid target array field signature: $redirectTarget")
@@ -194,7 +205,7 @@ class RedirectInjector(
         }
 
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val insns = instructions.toArray()
         var matchedOrdinal = 0
         val targetOpcodes =
@@ -216,20 +227,20 @@ class RedirectInjector(
             }
 
             replaceArrayAccess(target, instructions, insn, fieldInsn, mode)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldRead(target: MethodNode): Boolean {
+    private fun injectFieldReadCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("Invalid target field signature: $redirectTarget")
         }
 
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val insns = instructions.toArray()
         var matchedOrdinal = 0
 
@@ -243,21 +254,21 @@ class RedirectInjector(
                     continue
                 }
                 replaceFieldRead(target, instructions, insn)
-                transformed = true
+                injectionCount++
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldAssign(target: MethodNode): Boolean {
+    private fun injectFieldAssignCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("Invalid target field signature: $redirectTarget")
         }
 
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
         val insns = instructions.toArray()
         var matchedOrdinal = 0
 
@@ -271,11 +282,11 @@ class RedirectInjector(
                     continue
                 }
                 replaceFieldAssign(target, instructions, insn)
-                transformed = true
+                injectionCount++
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
     /**
