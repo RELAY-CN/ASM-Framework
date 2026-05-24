@@ -33,6 +33,7 @@ import kim.der.asm.api.annotation.RemoveMethod
 import kim.der.asm.api.annotation.RemoveSynchronized
 import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.api.annotation.Shift
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.api.annotation.WrapOperation
 import kim.der.asm.api.annotation.WrapWithCondition
 import kim.der.asm.transformer.AsmProcessor
@@ -2269,6 +2270,51 @@ class FrameworkReliabilityTest {
         assertEquals(2, trimIndexes.size)
         assertEquals(1, handlerCallIndexes.size)
         assertEquals(true, handlerCallIndexes.single() > trimIndexes[0])
+        assertEquals(true, handlerCallIndexes.single() < trimIndexes[1])
+    }
+
+    @Test
+    fun asmInjectInvokeSliceLimitsMatchedCallsBetweenFromAndTo() {
+        AsmRegistry.register(InvokeSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceInvokeTarget", sliceInvokeTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "call" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeSliceMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val trimIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode &&
+                insn.owner == "java/lang/String" &&
+                insn.name == "trim"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+        val boundaryIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode &&
+                insn.owner == "java/lang/String" &&
+                insn.name == "toString"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(3, trimIndexes.size)
+        assertEquals(2, boundaryIndexes.size)
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(true, handlerCallIndexes.single() > boundaryIndexes[0])
+        assertEquals(true, handlerCallIndexes.single() < boundaryIndexes[1])
         assertEquals(true, handlerCallIndexes.single() < trimIndexes[1])
     }
 
@@ -5564,6 +5610,22 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceInvokeTarget")
+    object InvokeSliceMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("RedirectAllTarget")
     @RedirectAllMethods
     object RedirectAllTrimMixin {
@@ -6406,6 +6468,34 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.POP)
             visitLdcInsn(" second ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceInvokeTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceInvokeTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "call", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" pre ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" inside ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" outside ")
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
