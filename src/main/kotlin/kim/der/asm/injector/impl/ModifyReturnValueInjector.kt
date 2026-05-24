@@ -40,16 +40,28 @@ class ModifyReturnValueInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 在目标方法返回前修改返回值并返回实际修改数量。
+     *
+     * @param target 目标方法
+     * @return 实际写入返回值修改逻辑的数量
+     * @throws IllegalArgumentException ASM 方法参数或返回类型与目标方法不匹配时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         val returnType = Type.getReturnType(target.desc)
 
         // 如果返回类型是 void，无法修改返回值
         if (returnType == Type.VOID_TYPE) {
-            return false
+            return 0
         }
 
         val instructions = target.instructions
-        var transformed = false
+        var injectionCount = 0
 
         // 查找所有 RETURN 指令（不包括 void return）
         val insns = instructions.toArray()
@@ -173,11 +185,11 @@ class ModifyReturnValueInjector(
                 // 修改后的返回值现在在栈顶，可以直接返回
                 // 替换原来的 RETURN（修改后的返回值已经在栈顶）
                 instructions.insertBefore(insn, il)
-                transformed = true
+                injectionCount++
             }
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
