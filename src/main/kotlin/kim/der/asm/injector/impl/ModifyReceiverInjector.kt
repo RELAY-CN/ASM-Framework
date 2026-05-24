@@ -24,10 +24,10 @@ import java.lang.reflect.Modifier
 /**
  * ModifyReceiver 注入器。
  *
- * 该注入器会匹配目标方法内的实例方法调用，在原调用执行前把 receiver 交给 handler 改写。
- * handler 返回的新 receiver 会替代原 receiver，随后恢复原调用参数并继续执行原调用。
+ * 该注入器会匹配目标方法内的实例方法调用或实例字段访问，在原操作执行前把 receiver 交给 handler 改写。
+ * handler 返回的新 receiver 会替代原 receiver，随后恢复原调用参数或字段写入值并继续执行原操作。
  *
- * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -39,7 +39,7 @@ class ModifyReceiverInjector(
     private val ordinal: Int = -1,
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 在匹配实例调用点前改写 receiver。
+     * 在匹配实例调用点或字段访问点前改写 receiver。
      *
      * @param target 目标方法
      * @return 至少匹配并改写一个 receiver 时返回 `true`
@@ -47,11 +47,17 @@ class ModifyReceiverInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
-        if (at.value != InjectionPoint.INVOKE) {
-            throw IllegalArgumentException("@ModifyReceiver currently supports only INVOKE injection point")
+    override fun inject(target: MethodNode): Boolean =
+        when (at.value) {
+            InjectionPoint.INVOKE -> injectMethodCall(target)
+            InjectionPoint.FIELD -> injectFieldRead(target)
+            InjectionPoint.FIELD_ASSIGN -> injectFieldAssign(target)
+            else -> throw IllegalArgumentException(
+                "@ModifyReceiver supports only INVOKE, FIELD and FIELD_ASSIGN injection points",
+            )
         }
 
+    private fun injectMethodCall(target: MethodNode): Boolean {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
         if (targetName == null || targetDesc == null) {
             throw IllegalArgumentException("@ModifyReceiver INVOKE requires at.target method signature")
@@ -77,7 +83,7 @@ class ModifyReceiverInjector(
 
             val receiverType = Type.getObjectType(insn.owner)
             val targetParamCount = validateHandlerSignature(target, receiverType)
-            val il = buildReceiverModification(target, insn, receiverType, targetParamCount)
+            val il = buildCallReceiverModification(target, insn, receiverType, targetParamCount)
             target.instructions.insertBefore(insn, il)
             transformed = true
         }
@@ -85,7 +91,76 @@ class ModifyReceiverInjector(
         return transformed
     }
 
-    private fun buildReceiverModification(
+    private fun injectFieldRead(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyReceiver FIELD requires at.target field signature")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            if (insn.opcode == Opcodes.GETSTATIC) {
+                throw IllegalArgumentException(
+                    "@ModifyReceiver supports only instance field reads, target ${insn.owner}.${insn.name}:${insn.desc}",
+                )
+            }
+
+            val receiverType = Type.getObjectType(insn.owner)
+            val targetParamCount = validateHandlerSignature(target, receiverType)
+            val il = buildFieldReadReceiverModification(target, receiverType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectFieldAssign(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyReceiver FIELD_ASSIGN requires at.target field signature")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            if (insn.opcode == Opcodes.PUTSTATIC) {
+                throw IllegalArgumentException(
+                    "@ModifyReceiver supports only instance field writes, target ${insn.owner}.${insn.name}:${insn.desc}",
+                )
+            }
+
+            val receiverType = Type.getObjectType(insn.owner)
+            val fieldType = Type.getType(insn.desc)
+            val targetParamCount = validateHandlerSignature(target, receiverType)
+            val il = buildFieldAssignReceiverModification(target, receiverType, fieldType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun buildCallReceiverModification(
         target: MethodNode,
         callInsn: MethodInsnNode,
         receiverType: Type,
@@ -118,15 +193,78 @@ class ModifyReceiverInjector(
             ),
         )
 
-        val handlerReturnType = Type.getReturnType(asmMethod)
-        if (handlerReturnType != receiverType) {
-            il.add(TypeInsnNode(Opcodes.CHECKCAST, receiverType.internalName))
-        }
+        addReceiverCast(il, receiverType)
         for (index in callParamTypes.indices) {
             loadFromVariable(il, callParamTypes[index], argSlots[index])
         }
 
         return il
+    }
+
+    private fun buildFieldReadReceiverModification(
+        target: MethodNode,
+        receiverType: Type,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val receiverIndex = nextLocalIndex(target)
+
+        il.add(VarInsnNode(Opcodes.ASTORE, receiverIndex))
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        addReceiverCast(il, receiverType)
+
+        return il
+    }
+
+    private fun buildFieldAssignReceiverModification(
+        target: MethodNode,
+        receiverType: Type,
+        fieldType: Type,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val receiverIndex = nextLocalIndex(target)
+        val fieldValueIndex = receiverIndex + 1
+
+        storeStackValue(il, fieldType, fieldValueIndex)
+        il.add(VarInsnNode(Opcodes.ASTORE, receiverIndex))
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        addReceiverCast(il, receiverType)
+        loadFromVariable(il, fieldType, fieldValueIndex)
+
+        return il
+    }
+
+    private fun addReceiverCast(
+        il: InsnList,
+        receiverType: Type,
+    ) {
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (handlerReturnType != receiverType) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, receiverType.internalName))
+        }
     }
 
     private fun validateHandlerSignature(
@@ -299,6 +437,36 @@ class ModifyReceiverInjector(
         }
     }
 
+    private fun parseFieldTarget(signature: String): FieldTarget {
+        if (signature.isEmpty()) {
+            return FieldTarget(null, null, null)
+        }
+
+        val ownerAndName: String
+        val desc: String?
+        val colonIndex = signature.indexOf(':')
+        if (colonIndex >= 0) {
+            ownerAndName = signature.substring(0, colonIndex)
+            desc = signature.substring(colonIndex + 1)
+        } else {
+            ownerAndName = signature
+            desc = null
+        }
+
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+        return if (separatorIndex >= 0) {
+            FieldTarget(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            FieldTarget(null, ownerAndName, desc)
+        }
+    }
+
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -312,6 +480,19 @@ class ModifyReceiverInjector(
             return false
         }
         return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetField(
+        insn: FieldInsnNode,
+        target: FieldTarget,
+    ): Boolean {
+        if (target.owner != null && insn.owner != target.owner) {
+            return false
+        }
+        if (target.name != null && insn.name != target.name) {
+            return false
+        }
+        return target.desc == null || insn.desc == target.desc
     }
 
     private fun nextLocalIndex(target: MethodNode): Int {
@@ -333,5 +514,16 @@ class ModifyReceiverInjector(
             }
         }
         return maxIndex
+    }
+
+    private data class FieldTarget(
+        val owner: String?,
+        val name: String?,
+        val desc: String?,
+    )
+
+    private companion object {
+        private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+        private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
     }
 }
