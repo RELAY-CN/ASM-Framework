@@ -54,13 +54,12 @@ class ModifyExpressionValueInjector(
     override fun inject(target: MethodNode): Boolean {
         return when (at.value) {
             InjectionPoint.INVOKE, InjectionPoint.INVOKE_ASSIGN -> injectMethodCallReturn(target)
-            InjectionPoint.FIELD -> {
-                if (isArrayReadMode()) {
-                    injectArrayRead(target)
-                } else {
-                    injectFieldRead(target)
+            InjectionPoint.FIELD ->
+                when (arrayAccessMode()) {
+                    ArrayAccessMode.NONE -> injectFieldRead(target)
+                    ArrayAccessMode.GET -> injectArrayRead(target)
+                    ArrayAccessMode.LENGTH -> injectArrayLength(target)
                 }
-            }
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             else -> throw IllegalArgumentException(
@@ -69,11 +68,14 @@ class ModifyExpressionValueInjector(
         }
     }
 
-    private fun isArrayReadMode(): Boolean {
-        val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return false
+    private fun arrayAccessMode(): ArrayAccessMode {
+        val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return ArrayAccessMode.NONE
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
-            "get" -> true
-            "set" -> throw IllegalArgumentException("@ModifyExpressionValue array access supports only array=get")
+            "get" -> ArrayAccessMode.GET
+            "length" -> ArrayAccessMode.LENGTH
+            "set" -> throw IllegalArgumentException(
+                "@ModifyExpressionValue array access supports only array=get and array=length",
+            )
             else -> throw IllegalArgumentException("Unsupported @ModifyExpressionValue array access mode: $arrayArg")
         }
     }
@@ -165,6 +167,37 @@ class ModifyExpressionValueInjector(
             val expressionType = Type.getType(fieldInsn.desc).elementType
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insert(insn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectArrayLength(target: MethodNode): Boolean {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyExpressionValue requires at.target array field signature")
+        }
+        if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
+            throw IllegalArgumentException("@ModifyExpressionValue array target must be an array field: ${at.target}")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn.opcode != Opcodes.ARRAYLENGTH) {
+                continue
+            }
+
+            findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, Type.INT_TYPE)
+            val il = buildExpressionValueModification(target, Type.INT_TYPE, targetParamCount)
             target.instructions.insert(insn, il)
             transformed = true
         }
@@ -523,6 +556,12 @@ class ModifyExpressionValueInjector(
         val name: String?,
         val desc: String?,
     )
+
+    private enum class ArrayAccessMode {
+        NONE,
+        GET,
+        LENGTH,
+    }
 
     private companion object {
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
