@@ -472,10 +472,15 @@ annotation class ModifyVariable(
  *
  * - 返回类型必须与目标方法返回类型一致
  * - 参数可选：可以只接收原始返回值，也可以追加目标方法的部分参数
+ * - [require] / [allow] 可约束实际返回值修改数量，目标字节码漂移时会在转换阶段失败
+ * - [expect] 用于调试期望返回值修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param at 预留参数，当前实现未使用
  * @param ordinal 返回点序号；`-1` 表示修改全部非 void 返回点，`0` 及以上表示只修改第 N 个返回点
+ * @param require 最小命中数；大于 0 时实际返回值修改数必须不少于该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
+ * @param allow 最大命中数；大于等于 0 时实际返回值修改数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -486,6 +491,9 @@ annotation class ModifyReturnValue(
     val method: String = "",
     val at: At = At(),
     val ordinal: Int = -1,
+    val require: Int = 0,
+    val expect: Int = 1,
+    val allow: Int = -1,
     val remap: Boolean = false,
 )
 
