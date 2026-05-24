@@ -525,6 +525,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgExposesCountContractParameters() {
+        val methods = ModifyArg::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun modifyArgCanUseTargetMethodParametersAtMethodStart() {
         AsmRegistry.register(ModifyArgWithTargetParamsMixin::class.java)
 
