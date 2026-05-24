@@ -55,18 +55,30 @@ class ModifyVariableInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 在目标方法入口、变量读取点前或变量写入点后修改指定局部变量槽位并返回实际修改数量。
+     *
+     * @param target 目标方法
+     * @return 实际写入变量改写逻辑的数量；HEAD 模式最多为 1，LOAD/STORE 模式为匹配读写点数量
+     * @throws IllegalArgumentException 注入点、槽位索引或 handler 签名不合法时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         return when (injectionPoint) {
-            InjectionPoint.HEAD -> injectAtHead(target)
-            InjectionPoint.LOAD -> injectBeforeLoad(target)
-            InjectionPoint.STORE -> injectAfterStore(target)
+            InjectionPoint.HEAD -> injectAtHeadCount(target)
+            InjectionPoint.LOAD -> injectBeforeLoadCount(target)
+            InjectionPoint.STORE -> injectAfterStoreCount(target)
             else -> throw IllegalArgumentException(
                 "@ModifyVariable currently supports only HEAD, LOAD and STORE injection points",
             )
         }
     }
 
-    private fun injectAtHead(target: MethodNode): Boolean {
+    private fun injectAtHeadCount(target: MethodNode): Int {
         val handlerVariableType = requireHandlerVariableArgumentType()
         val variable =
             resolveHeadVariable(target, variableIndex, handlerVariableType, ordinal)
@@ -84,12 +96,12 @@ class ModifyVariableInjector(
             target.instructions.insertBefore(target.instructions.first, il)
         }
 
-        return true
+        return 1
     }
 
-    private fun injectBeforeLoad(target: MethodNode): Boolean {
+    private fun injectBeforeLoadCount(target: MethodNode): Int {
         val handlerVariableType = requireHandlerVariableArgumentType()
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
 
         val insns = target.instructions.toArray()
@@ -116,15 +128,15 @@ class ModifyVariableInjector(
             val targetParamCount = validateHandlerSignature(target, handlerVariableType)
             val il = buildModificationCall(target, handlerVariableType, insn.`var`, targetParamCount)
             target.instructions.insertBefore(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectAfterStore(target: MethodNode): Boolean {
+    private fun injectAfterStoreCount(target: MethodNode): Int {
         val handlerVariableType = requireHandlerVariableArgumentType()
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
 
         val insns = target.instructions.toArray()
@@ -151,10 +163,10 @@ class ModifyVariableInjector(
             val targetParamCount = validateHandlerSignature(target, handlerVariableType)
             val il = buildModificationCall(target, handlerVariableType, insn.`var`, targetParamCount)
             target.instructions.insert(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun resolveHeadVariable(
