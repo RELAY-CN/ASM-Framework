@@ -260,13 +260,14 @@ annotation class ModifyReceiver(
 /**
  * 包裹原始操作注解。
  *
- * 用于把目标方法内匹配的方法调用、构造器调用、字段读取、字段写入或数组元素读写替换为 handler 调用（语义参考
+ * 用于把目标方法内匹配的方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取替换为 handler 调用（语义参考
  * Mixin Extras 的 `@WrapOperation`）。handler 会接收原操作的 receiver（实例调用、实例字段读取与
  * 实例字段写入）、原调用参数、构造器参数、字段写入值或数组访问参数与 [Operation]，可选择调用、跳过或多次调用原始操作。
  *
  * 当前实现支持 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
  * [InjectionPoint.FIELD_ASSIGN] 字段写入；[InjectionPoint.FIELD] 可通过 `args = ["array=get"]`
- * 包裹数组元素读取，[InjectionPoint.FIELD_ASSIGN] 可通过 `args = ["array=set"]` 包裹数组元素写入。
+ * 包裹数组元素读取，通过 `args = ["array=length"]` 包裹数组长度读取；
+ * [InjectionPoint.FIELD_ASSIGN] 可通过 `args = ["array=set"]` 包裹数组元素写入。
  * 构造器调用通过 [InjectionPoint.INVOKE] 与 `<init>` 目标指定，当前支持常见 `NEW/DUP/args/<init>` 形态。
  *
  * ASM 方法要求：
@@ -280,7 +281,8 @@ annotation class ModifyReceiver(
  * - `PUTSTATIC` 的 handler 参数接收待写入值
  * - 数组读取 handler 参数先接收数组引用与 `Int` 索引
  * - 数组写入 handler 参数先接收数组引用、`Int` 索引与待写入元素值
- * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入或数组元素读写
+ * - 数组长度 handler 参数先接收数组引用
+ * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取
  * - handler 返回类型必须兼容原操作返回类型；原调用为 `void` 时 handler 必须返回 `void`，构造器调用必须返回 owner 类型兼容对象
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 必须为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 或 [InjectionPoint.FIELD_ASSIGN]，
