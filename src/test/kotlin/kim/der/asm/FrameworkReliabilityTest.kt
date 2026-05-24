@@ -2566,6 +2566,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableLoadSliceLimitsLocalLoadsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyVariableLoadSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceLoadVariableTarget", sliceLoadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre:loaded-inside:outside", result)
+    }
+
+    @Test
     fun modifyVariableAtLoadCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyVariableLoadTargetParamsMixin::class.java)
 
@@ -6007,6 +6020,21 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "loaded-$original"
     }
 
+    @AsmMixin("SliceLoadVariableTarget")
+    object ModifyVariableLoadSliceMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            index = 1,
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "loaded-$original"
+    }
+
     @AsmMixin("LoadVariableTarget")
     object UnsupportedLoadInjectMixin {
         @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.LOAD)
@@ -7042,6 +7070,47 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceLoadVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceLoadVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 5)
             visitEnd()
         }
         cw.visitEnd()
