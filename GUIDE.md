@@ -408,6 +408,20 @@ object ValidationMixin {
         count > 0 && message.startsWith(prefix)
 
     @WrapWithCondition(
+        method = "notify(Ljava/lang/String;I)V",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/Audit.emit(Ljava/lang/String;)V",
+        ),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+    )
+    fun shouldEmitAuditInsideTrace(message: String, prefix: String, count: Int): Boolean =
+        count > 0 && message.startsWith(prefix)
+
+    @WrapWithCondition(
         method = "setEndpoint(Ljava/lang/String;Ljava/lang/String;)V",
         at = At(
             value = InjectionPoint.FIELD_ASSIGN,
@@ -542,7 +556,9 @@ object ValidationMixin {
 handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用
 receiver（仅实例调用）和调用参数，字段写入模式下 handler 先接收字段 owner（仅实例字段）和待写入值。
 数组写入模式通过 `args = ["array=set"]` 指定，并让 handler 接收数组引用、`Int` 索引与待写入元素值，
-后续都可接收目标方法参数前缀。`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、数组长度、对象构造或类型转换但
+后续都可接收目标方法参数前缀。`INVOKE` 条件包裹可用 `Slice` 限制匹配范围；`from` 边界之后、
+`to` 边界之前的调用才会参与匹配，边界调用本身不会被包裹，`ordinal` 会在切片内重新计数。
+`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、数组长度、对象构造或类型转换但
 改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象或转换后的对象并
 返回同类型新值，后续参数可接收目标方法参数前缀；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，数组读取模式通过 `args = ["array=get"]`
