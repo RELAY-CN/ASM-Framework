@@ -192,6 +192,7 @@ object AsmInjectorFactory {
      * @param injectionPoint 修改位置
      * @param index 要修改的局部变量槽位索引
      * @param ordinal 未指定槽位索引时，同类型入口参数、读取点或写入点的序号
+     * @param slice 切片范围；当前 LOAD 局部变量读取改写支持 INVOKE 边界切片
      * @return ModifyVariable 注入器
      *
      * @author Dr (dr@der.kim)
@@ -203,7 +204,8 @@ object AsmInjectorFactory {
         injectionPoint: InjectionPoint,
         index: Int,
         ordinal: Int,
-    ): AsmInjector = ModifyVariableInjector(method, asmInfo, injectionPoint, index, ordinal)
+        slice: Slice = Slice(),
+    ): AsmInjector = ModifyVariableInjector(method, asmInfo, injectionPoint, index, ordinal, slice)
 
     /**
      * 创建 Redirect 注入器。
