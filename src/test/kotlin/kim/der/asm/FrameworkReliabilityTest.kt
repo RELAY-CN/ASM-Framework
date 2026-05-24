@@ -1916,6 +1916,16 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantExposesSliceParameter() {
+        val hasSliceParameter =
+            ModifyConstant::class.java.declaredMethods.any {
+                it.name == "slice" && it.returnType == Slice::class.java
+            }
+
+        assertEquals(true, hasSliceParameter)
+    }
+
+    @Test
     fun modifyConstantWithoutExplicitValueSkipsOtherConstantTypes() {
         AsmRegistry.register(StringOnlyModifyConstantMixin::class.java)
 
