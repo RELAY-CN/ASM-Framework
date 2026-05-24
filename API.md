@@ -200,10 +200,10 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `index: Int = -1` - 参数索引（从 0 开始）；默认入口模式下为目标方法参数索引，`INVOKE` 模式下为目标调用参数索引
 - `at: At = At()` - 注入位置；默认 `HEAD` 改写入口参数，`at.value = InjectionPoint.INVOKE` 时用 `at.target` 匹配目标调用
 - `ordinal: Int = -1` - 调用点匹配序号；`-1` 表示修改全部匹配调用点，当前仅在 `INVOKE` 模式下生效
-- `slice: Slice = Slice()` - 切片范围
+- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 模式支持用 `INVOKE` 边界缩小查找范围
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中的调用参数后按原顺序恢复并继续执行原调用；handler 不会自动接收目标调用的其他参数，可用 `ordinal` 只选择第 N 个匹配调用点。
+`@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中的调用参数后按原顺序恢复并继续执行原调用；handler 不会自动接收目标调用的其他参数，可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -767,8 +767,9 @@ At(
 
 ### Slice
 
-用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE)` 和普通方法调用 `@Redirect`
-支持 `from` / `to` 为 `InjectionPoint.INVOKE` 的边界切片；其他注解中的 `slice` 仍为预留参数。
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通方法调用 `@Redirect`
+和 `@ModifyArg(at.value = InjectionPoint.INVOKE)` 支持 `from` / `to` 为 `InjectionPoint.INVOKE`
+的边界切片；其他注解中的 `slice` 仍为预留参数。
 
 **参数：**
 

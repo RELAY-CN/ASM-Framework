@@ -200,6 +200,20 @@ object ValidationMixin {
     )
     fun rewriteConcatArgument(input: String, prefix: String, count: Int): String = "$prefix:${input.trim()}#$count"
 
+    @ModifyArg(
+        method = "buildMessage(Ljava/lang/String;I)Ljava/lang/String;",
+        index = 0,
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+        ),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+    )
+    fun rewriteConcatArgumentInTrace(input: String): String = input.trim()
+
     @ModifyArgs(
         method = "join(Ljava/lang/String;I)Ljava/lang/String;",
         at = At(
@@ -477,7 +491,7 @@ object ValidationMixin {
 }
 ```
 
-`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver 并返回兼容的新 receiver；`INVOKE` 会保留原调用参数，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，后续参数可接收目标方法参数前缀。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
+`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `Slice` 限制匹配范围。`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver 并返回兼容的新 receiver；`INVOKE` 会保留原调用参数，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，后续参数可接收目标方法参数前缀。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
 
 `@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；
