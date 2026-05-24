@@ -614,6 +614,7 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度。`INVOKE` 表达式值修改可用
 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被改写，
 `ordinal` 会在切片内重新计数。
+关键表达式值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的表达式值数量计数。
 
 `@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`LOAD` / `STORE` 模式可用 `Slice` 限制读取点或写入点匹配范围；`from` 边界之后、`to` 边界之前的读取或写入才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值，后续参数可继续接收目标方法参数前缀。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 `ordinal` 选择第 N 个同类型匹配项。关键变量补丁可设置 `require` / `allow` / `expect`，`HEAD` 按入口改写计 1 次，`LOAD` / `STORE` 按实际改写的读写点数量计数。`HEAD` 当前不使用 `slice`。
 
@@ -919,7 +920,7 @@ fun onEveryReturn() {
 }
 ```
 
-同样的契约也适用于关键参数修改、关键参数组修改、关键变量修改、关键返回值修改、关键常量修改和关键重定向：
+同样的契约也适用于关键参数修改、关键参数组修改、关键变量修改、关键返回值修改、关键表达式值修改、关键常量修改和关键重定向：
 
 ```kotlin
 @ModifyArg(
@@ -957,6 +958,14 @@ fun normalizeStoredLocal(value: String): String = value.trim()
     allow = 1,
 )
 fun fallbackLookupResult(original: String?): String = original ?: "default"
+
+@ModifyExpressionValue(
+    method = "format(Ljava/lang/String;)Ljava/lang/String;",
+    at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
+    require = 1,
+    allow = 1,
+)
+fun normalizeTrimResult(original: String): String = original.lowercase()
 
 @ModifyConstant(method = "maxPlayers()I", constant = "20", require = 1, allow = 1)
 fun expandLimit(original: Int): Int = original * 2
