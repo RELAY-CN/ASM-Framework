@@ -984,8 +984,17 @@ class TargetClassContext(
             annotation.ordinal,
             annotation.slice,
         )
+        val injectionCount = injector.injectCount(targetMethod)
+        if (annotation.require > 0 || annotation.allow >= 0 || annotation.expect != 1) {
+            return requireModifyArgCount(
+                injectionCount,
+                annotation,
+                method,
+                annotation.method,
+            )
+        }
         return requireInjectorMatched(
-            injector.inject(targetMethod),
+            injectionCount > 0,
             "@ModifyArg",
             method,
             annotation.method,
@@ -1406,6 +1415,37 @@ class TargetClassContext(
         if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
             System.err.println(
                 "Warning: @AsmInject handler ${method.name} expected ${annotation.expect} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        return injectionCount > 0
+    }
+
+    private fun requireModifyArgCount(
+        injectionCount: Int,
+        annotation: ModifyArg,
+        method: Method,
+        targetMethodSignature: String,
+    ): Boolean {
+        val requiredCount = if (annotation.require > 0) annotation.require else 1
+        if (injectionCount < requiredCount) {
+            throw IllegalStateException(
+                "@ModifyArg handler ${method.name} requires at least $requiredCount injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
+            throw IllegalStateException(
+                "@ModifyArg handler ${method.name} allows at most ${annotation.allow} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
+            System.err.println(
+                "Warning: @ModifyArg handler ${method.name} expected ${annotation.expect} injection(s), " +
                     "actual $injectionCount in target method $targetMethodSignature of class $className",
             )
         }
