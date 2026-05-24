@@ -531,6 +531,8 @@ annotation class ModifyConstant(
  * - 字段写入重定向必须返回 `void`
  * - 数组读取重定向参数为数组引用与 `Int` 索引，返回元素值；数组写入重定向参数为数组引用、`Int` 索引与原元素值，返回 `void`
  * - 数组长度重定向参数为数组引用，返回 `Int`
+ * - [require] / [allow] 可约束实际重定向数量，目标字节码漂移时会在转换阶段失败
+ * - [expect] 用于调试期望重定向数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param target 目标调用、构造器或字段签名组件；会与 [At.target] 组合构建最终的匹配签名
@@ -538,6 +540,9 @@ annotation class ModifyConstant(
  * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度读取中生效
  * @param slice 切片范围；当前普通方法调用重定向支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param require 最小命中数；大于 0 时实际重定向数必须不少于该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
+ * @param allow 最大命中数；大于等于 0 时实际重定向数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -550,6 +555,9 @@ annotation class Redirect(
     val at: At = At(),
     val ordinal: Int = -1,
     val slice: Slice = Slice(),
+    val require: Int = 0,
+    val expect: Int = 1,
+    val allow: Int = -1,
     val remap: Boolean = false,
 )
 
