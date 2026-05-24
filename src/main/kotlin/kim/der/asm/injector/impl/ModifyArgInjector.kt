@@ -50,9 +50,20 @@ class ModifyArgInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 修改目标方法参数或匹配调用点参数并返回实际修改数量。
+     *
+     * @param target 目标方法
+     * @return 实际写入参数修改逻辑的数量；入口参数模式最多为 1，INVOKE 模式为匹配调用点数量
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         if (at.value == InjectionPoint.INVOKE) {
-            return modifyCallArgument(target)
+            return modifyCallArgumentCount(target)
         }
 
         val targetParamTypes = Type.getArgumentTypes(target.desc)
@@ -65,16 +76,16 @@ class ModifyArgInjector(
         val paramType = targetParamTypes[argIndex]
 
         // 直接在方法开头修改参数
-        return modifyParameterAtMethodStart(target, paramType, argIndex)
+        return if (modifyParameterAtMethodStart(target, paramType, argIndex)) 1 else 0
     }
 
-    private fun modifyCallArgument(target: MethodNode): Boolean {
+    private fun modifyCallArgumentCount(target: MethodNode): Int {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
         if (targetName == null) {
             throw IllegalArgumentException("@ModifyArg INVOKE requires at.target method signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
@@ -101,10 +112,10 @@ class ModifyArgInjector(
             val targetParamCount = validateHandlerSignature(target, paramType)
             val il = buildCallArgumentModification(target, insn, callParamTypes, paramType, targetParamCount)
             target.instructions.insertBefore(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
