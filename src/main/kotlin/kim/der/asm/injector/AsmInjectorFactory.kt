@@ -44,6 +44,7 @@ object AsmInjectorFactory {
             InjectionPoint.FIELD,
             InjectionPoint.FIELD_ASSIGN,
             InjectionPoint.NEW,
+            InjectionPoint.CAST,
             InjectionPoint.THROW,
             -> InstructionPointInjector(method, asmInfo, injectionPoint)
             InjectionPoint.LOAD -> throw IllegalArgumentException(

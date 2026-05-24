@@ -116,6 +116,13 @@ class InstructionPointInjector(
                         insn.opcode == Opcodes.NEW &&
                         (normalizedTarget.isEmpty() || insn.desc == normalizedTarget)
             }
+            InjectionPoint.CAST -> {
+                val normalizedTarget = target.replace('.', '/')
+                fun(insn: AbstractInsnNode): Boolean =
+                    insn is TypeInsnNode &&
+                        insn.opcode == Opcodes.CHECKCAST &&
+                        (normalizedTarget.isEmpty() || insn.desc == normalizedTarget)
+            }
             InjectionPoint.THROW -> {
                 fun(insn: AbstractInsnNode): Boolean = insn.opcode == Opcodes.ATHROW
             }

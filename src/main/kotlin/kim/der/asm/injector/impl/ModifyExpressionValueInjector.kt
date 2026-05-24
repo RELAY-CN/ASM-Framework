@@ -60,8 +60,9 @@ class ModifyExpressionValueInjector(
                 }
             }
             InjectionPoint.NEW -> injectNewObject(target)
+            InjectionPoint.CAST -> injectCast(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD and NEW",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW and CAST",
             )
         }
     }
@@ -191,6 +192,33 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
             target.instructions.insert(constructorInsn, il)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectCast(target: MethodNode): Boolean {
+        val normalizedTarget = at.target.replace('.', '/')
+        var transformed = false
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.CHECKCAST) {
+                continue
+            }
+            if (normalizedTarget.isNotEmpty() && insn.desc != normalizedTarget) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val expressionType = Type.getObjectType(insn.desc)
+            val targetParamCount = validateHandlerSignature(target, expressionType)
+            val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insert(insn, il)
             transformed = true
         }
 
