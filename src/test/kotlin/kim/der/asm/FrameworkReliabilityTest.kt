@@ -1159,6 +1159,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueExposesCountContractParameters() {
+        val methods = ModifyExpressionValue::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun modifyExpressionValueSliceLimitsInvokeReturnValueMatchesBetweenFromAndTo() {
         AsmRegistry.register(ModifyExpressionValueSliceMixin::class.java)
 
