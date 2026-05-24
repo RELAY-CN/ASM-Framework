@@ -1094,6 +1094,49 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtCastRewritesCheckcastValue() {
+        AsmRegistry.register(ModifyExpressionValueCastMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("cast", Any::class.java).invoke(instance, "raw")
+
+        assertEquals("raw-cast", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtCastCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueCastWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("cast", Any::class.java).invoke(instance, "raw")
+
+        assertEquals("raw-raw", result)
+    }
+
+    @Test
+    fun modifyExpressionValueCastWithMismatchedHandlerParametersFailsDuringTransform() {
+        AsmRegistry.register(MismatchedModifyExpressionValueCastMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform(
+                    "CastInstructionTarget",
+                    castInstructionTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("first parameter must be") == true,
+        )
+    }
+
+    @Test
     fun modifyReceiverAtInvokeReplacesInstanceCallReceiver() {
         AsmRegistry.register(ModifyReceiverConcatMixin::class.java)
 
@@ -2769,6 +2812,26 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun castInjectInsertsHandlerBeforeMatchedCheckcastInstruction() {
+        AsmRegistry.register(CastInstructionInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "cast" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, CastInstructionInjectMixin::class.java, "inject")
+        val castIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.TypeInsnNode &&
+                it.opcode == Opcodes.CHECKCAST &&
+                it.desc == "java/lang/String"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, castIndex >= 0)
+        assertEquals(castIndex - 1, handlerCallIndex)
+    }
+
+    @Test
     fun newInjectAfterShiftFailsDuringTransform() {
         AsmRegistry.register(NewInstructionAfterInjectMixin::class.java)
 
@@ -4007,6 +4070,39 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = original
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object ModifyExpressionValueCastMixin {
+        @ModifyExpressionValue(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-cast"
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object ModifyExpressionValueCastWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            input: Any,
+        ): String = "$original-$input"
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object MismatchedModifyExpressionValueCastMixin {
+        @ModifyExpressionValue(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 1
     }
 
     @AsmMixin("ModifyReceiverTarget")
@@ -5533,6 +5629,18 @@ class FrameworkReliabilityTest {
             method = "create()Ljava/lang/StringBuilder;",
             target = InjectionPoint.NEW,
             at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object CastInstructionInjectMixin {
+        @AsmInject(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            target = InjectionPoint.CAST,
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
         )
         @JvmStatic
         fun inject() {
