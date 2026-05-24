@@ -460,6 +460,20 @@ object ValidationMixin {
     fun rewriteTrimResult(value: String, prefix: String, count: Int): String = "$prefix:${value.lowercase()}#$count"
 
     @ModifyExpressionValue(
+        method = "format(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.trim()Ljava/lang/String;",
+        ),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+    )
+    fun rewriteTrimResultInTrace(value: String, prefix: String, count: Int): String =
+        "$prefix:${value.lowercase()}#$count"
+
+    @ModifyExpressionValue(
         method = "displayName(Ljava/lang/String;)Ljava/lang/String;",
         at = At(
             value = InjectionPoint.FIELD,
@@ -562,7 +576,9 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象或转换后的对象并
 返回同类型新值，后续参数可接收目标方法参数前缀；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，数组读取模式通过 `args = ["array=get"]`
-指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，调用点可用 `ordinal` 精确选择。
+指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度。`INVOKE` 表达式值修改可用
+`Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被改写，
+`ordinal` 会在切片内重新计数。
 
 `@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值，后续参数可继续接收目标方法参数前缀。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 `ordinal` 选择第 N 个同类型匹配项。
 
