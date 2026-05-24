@@ -55,7 +55,18 @@ class ModifyExpressionValueInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 在匹配表达式产生值后改写该值并返回实际修改数量。
+     *
+     * @param target 目标方法
+     * @return 实际写入表达式值修改逻辑的数量
+     * @throws IllegalArgumentException 定位点、目标表达式或 handler 签名不合法时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         return when (at.value) {
             InjectionPoint.INVOKE, InjectionPoint.INVOKE_ASSIGN -> injectMethodCallReturn(target)
             InjectionPoint.FIELD ->
@@ -84,13 +95,13 @@ class ModifyExpressionValueInjector(
         }
     }
 
-    private fun injectMethodCallReturn(target: MethodNode): Boolean {
+    private fun injectMethodCallReturn(target: MethodNode): Int {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
         if (targetName == null || targetDesc == null) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target method signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
@@ -117,19 +128,19 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, callReturnType)
             val il = buildExpressionValueModification(target, callReturnType, targetParamCount)
             target.instructions.insert(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldRead(target: MethodNode): Boolean {
+    private fun injectFieldRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target field signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
@@ -145,13 +156,13 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, fieldType)
             val il = buildExpressionValueModification(target, fieldType, targetParamCount)
             target.instructions.insert(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectArrayRead(target: MethodNode): Boolean {
+    private fun injectArrayRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target array field signature")
@@ -160,7 +171,7 @@ class ModifyExpressionValueInjector(
             throw IllegalArgumentException("@ModifyExpressionValue array target must be an array field: ${at.target}")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn.opcode !in ARRAY_READ_OPS) {
@@ -177,13 +188,13 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
             target.instructions.insert(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectArrayLength(target: MethodNode): Boolean {
+    private fun injectArrayLength(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target array field signature")
@@ -192,7 +203,7 @@ class ModifyExpressionValueInjector(
             throw IllegalArgumentException("@ModifyExpressionValue array target must be an array field: ${at.target}")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn.opcode != Opcodes.ARRAYLENGTH) {
@@ -208,15 +219,15 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, Type.INT_TYPE)
             val il = buildExpressionValueModification(target, Type.INT_TYPE, targetParamCount)
             target.instructions.insert(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectNewObject(target: MethodNode): Boolean {
+    private fun injectNewObject(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is TypeInsnNode || insn.opcode != Opcodes.NEW) {
@@ -236,15 +247,15 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
             target.instructions.insert(constructorInsn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectCast(target: MethodNode): Boolean {
+    private fun injectCast(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is TypeInsnNode || insn.opcode != Opcodes.CHECKCAST) {
@@ -263,10 +274,10 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
             target.instructions.insert(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun buildExpressionValueModification(
