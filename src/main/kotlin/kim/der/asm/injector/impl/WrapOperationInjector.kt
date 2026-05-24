@@ -12,6 +12,7 @@ import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
+import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
@@ -56,12 +57,37 @@ class WrapOperationInjector(
     override fun inject(target: MethodNode): Boolean =
         when (at.value) {
             InjectionPoint.INVOKE -> injectMethodCall(target)
-            InjectionPoint.FIELD -> injectFieldRead(target)
-            InjectionPoint.FIELD_ASSIGN -> injectFieldAssign(target)
+            InjectionPoint.FIELD -> {
+                when (arrayAccessMode()) {
+                    ArrayAccessMode.GET -> injectArrayAccess(target, ArrayAccessMode.GET)
+                    ArrayAccessMode.SET -> throw IllegalArgumentException(
+                        "@WrapOperation array=set requires FIELD_ASSIGN injection point",
+                    )
+                    null -> injectFieldRead(target)
+                }
+            }
+            InjectionPoint.FIELD_ASSIGN -> {
+                when (arrayAccessMode()) {
+                    ArrayAccessMode.GET -> throw IllegalArgumentException(
+                        "@WrapOperation array=get requires FIELD injection point",
+                    )
+                    ArrayAccessMode.SET -> injectArrayAccess(target, ArrayAccessMode.SET)
+                    null -> injectFieldAssign(target)
+                }
+            }
             else -> throw IllegalArgumentException(
                 "@WrapOperation currently supports only INVOKE, FIELD and FIELD_ASSIGN injection points",
             )
         }
+
+    private fun arrayAccessMode(): ArrayAccessMode? {
+        val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return null
+        return when (arrayArg.substringAfter('=').trim().lowercase()) {
+            "get" -> ArrayAccessMode.GET
+            "set" -> ArrayAccessMode.SET
+            else -> throw IllegalArgumentException("Unsupported @WrapOperation array access mode: $arrayArg")
+        }
+    }
 
     private fun injectMethodCall(target: MethodNode): Boolean {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
@@ -142,6 +168,47 @@ class WrapOperationInjector(
 
             val targetParamCount = validateFieldAssignHandlerSignature(target, insn)
             val il = buildFieldAssignWrapper(target, insn, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            target.instructions.remove(insn)
+            transformed = true
+        }
+
+        return transformed
+    }
+
+    private fun injectArrayAccess(
+        target: MethodNode,
+        mode: ArrayAccessMode,
+    ): Boolean {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@WrapOperation array access requires at.target array field signature")
+        }
+        if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
+            throw IllegalArgumentException("@WrapOperation array access target must be an array field: ${at.target}")
+        }
+
+        var transformed = false
+        var matchedOrdinal = 0
+        val targetOpcodes =
+            when (mode) {
+                ArrayAccessMode.GET -> ARRAY_READ_OPS
+                ArrayAccessMode.SET -> ARRAY_WRITE_OPS
+            }
+
+        for (insn in target.instructions.toArray()) {
+            if (insn.opcode !in targetOpcodes) {
+                continue
+            }
+
+            val fieldInsn = findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateArrayAccessHandlerSignature(target, fieldInsn, mode)
+            val il = buildArrayAccessWrapper(target, fieldInsn, mode, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
             transformed = true
@@ -304,6 +371,63 @@ class WrapOperationInjector(
         return il
     }
 
+    private fun buildArrayAccessWrapper(
+        target: MethodNode,
+        fieldInsn: FieldInsnNode,
+        mode: ArrayAccessMode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val arrayType = Type.getType(fieldInsn.desc)
+        val elementType = arrayType.elementType
+        var nextTempIndex = nextLocalIndex(target)
+        val arrayIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val indexIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val valueIndex =
+            if (mode == ArrayAccessMode.SET) {
+                nextTempIndex.also { nextTempIndex += elementType.size }
+            } else {
+                null
+            }
+        val operationIndex = nextTempIndex
+
+        if (valueIndex != null) {
+            storeStackValue(il, elementType, valueIndex)
+        }
+        storeStackValue(il, Type.INT_TYPE, indexIndex)
+        storeStackValue(il, arrayType, arrayIndex)
+
+        createArrayOperation(il, arrayType, mode)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        loadFromVariable(il, arrayType, arrayIndex)
+        loadFromVariable(il, Type.INT_TYPE, indexIndex)
+        if (valueIndex != null) {
+            loadFromVariable(il, elementType, valueIndex)
+        }
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        if (mode == ArrayAccessMode.GET) {
+            val handlerReturnType = Type.getReturnType(asmMethod)
+            if (elementType != handlerReturnType && elementType.sort >= Type.ARRAY) {
+                il.add(TypeInsnNode(Opcodes.CHECKCAST, elementType.internalName))
+            }
+        }
+
+        return il
+    }
+
     private fun createMethodOperation(
         il: InsnList,
         callInsn: MethodInsnNode,
@@ -375,6 +499,27 @@ class WrapOperationInjector(
                 operationType.internalName,
                 "<init>",
                 "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;ZZ)V",
+                false,
+            ),
+        )
+    }
+
+    private fun createArrayOperation(
+        il: InsnList,
+        arrayType: Type,
+        mode: ArrayAccessMode,
+    ) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(LdcInsnNode(arrayType))
+        il.add(InsnNode(if (mode == ArrayAccessMode.SET) Opcodes.ICONST_1 else Opcodes.ICONST_0))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Z)V",
                 false,
             ),
         )
@@ -490,6 +635,51 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    private fun validateArrayAccessHandlerSignature(
+        target: MethodNode,
+        fieldInsn: FieldInsnNode,
+        mode: ArrayAccessMode,
+    ): Int {
+        val expectedStackParams = buildExpectedArrayAccessStackParams(fieldInsn, mode)
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (mode == ArrayAccessMode.GET) {
+            val elementType = Type.getType(fieldInsn.desc).elementType
+            if (!isReturnCompatible(elementType, handlerReturnType)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                        "original $elementType, handler $handlerReturnType",
+                )
+            }
+        } else if (!isReturnCompatible(Type.VOID_TYPE, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original ${Type.VOID_TYPE}, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
     private fun buildExpectedStackParams(callInsn: MethodInsnNode): Array<Type> {
         val callParams = Type.getArgumentTypes(callInsn.desc).toList()
         return if (callInsn.opcode == Opcodes.INVOKESTATIC) {
@@ -513,6 +703,45 @@ class WrapOperationInjector(
         } else {
             arrayOf(Type.getObjectType(fieldInsn.owner), fieldType)
         }
+    }
+
+    private fun buildExpectedArrayAccessStackParams(
+        fieldInsn: FieldInsnNode,
+        mode: ArrayAccessMode,
+    ): Array<Type> {
+        val arrayType = Type.getType(fieldInsn.desc)
+        return if (mode == ArrayAccessMode.GET) {
+            arrayOf(arrayType, Type.INT_TYPE)
+        } else {
+            arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
+        }
+    }
+
+    private fun findArrayFieldProducer(
+        arrayInsn: AbstractInsnNode,
+        target: FieldTarget,
+    ): FieldInsnNode? {
+        var cursor = arrayInsn.previous
+        while (cursor != null) {
+            if (cursor is FieldInsnNode) {
+                if (cursor.opcode in FIELD_READ_OPS && matchesTargetField(cursor, target)) {
+                    val fieldType = Type.getType(cursor.desc)
+                    if (fieldType.sort != Type.ARRAY) {
+                        throw IllegalArgumentException(
+                            "@WrapOperation array access target must be an array field: " +
+                                "${cursor.owner}.${cursor.name}:${cursor.desc}",
+                        )
+                    }
+                    return cursor
+                }
+                return null
+            }
+            if (cursor is MethodInsnNode || cursor.opcode in ARRAY_READ_OPS || cursor.opcode in ARRAY_WRITE_OPS) {
+                return null
+            }
+            cursor = cursor.previous
+        }
+        return null
     }
 
     private fun validateTargetMethodParameters(
@@ -750,8 +979,35 @@ class WrapOperationInjector(
         val desc: String?,
     )
 
+    private enum class ArrayAccessMode {
+        GET,
+        SET,
+    }
+
     private companion object {
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+        private val ARRAY_READ_OPS =
+            setOf(
+                Opcodes.IALOAD,
+                Opcodes.LALOAD,
+                Opcodes.FALOAD,
+                Opcodes.DALOAD,
+                Opcodes.AALOAD,
+                Opcodes.BALOAD,
+                Opcodes.CALOAD,
+                Opcodes.SALOAD,
+            )
+        private val ARRAY_WRITE_OPS =
+            setOf(
+                Opcodes.IASTORE,
+                Opcodes.LASTORE,
+                Opcodes.FASTORE,
+                Opcodes.DASTORE,
+                Opcodes.AASTORE,
+                Opcodes.BASTORE,
+                Opcodes.CASTORE,
+                Opcodes.SASTORE,
+            )
     }
 }
