@@ -122,6 +122,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectExposesCountContractParameters() {
+        val methods = Redirect::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun overwriteWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleOverwriteMixin::class.java)
 
