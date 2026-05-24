@@ -2749,6 +2749,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyVariableMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("StoreOrdinalVariableTarget", storeOrdinalVariableTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyVariableAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyVariableMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("StoreOrdinalVariableTarget", storeOrdinalVariableTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyVariableExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyVariableMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("StoreOrdinalVariableTarget", storeOrdinalVariableTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun modifyVariableAtStoreCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyVariableStoreTargetParamsMixin::class.java)
 
@@ -6363,6 +6414,39 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("StoreOrdinalVariableTarget")
+    object RequireThreeModifyVariableMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            require = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("StoreOrdinalVariableTarget")
+    object AllowOneModifyVariableMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("StoreOrdinalVariableTarget")
+    object ExpectThreeModifyVariableMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            expect = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
     }
 
     @AsmMixin("StoreVariableParamTarget")
