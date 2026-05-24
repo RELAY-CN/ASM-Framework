@@ -2542,6 +2542,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableStoreSliceLimitsLocalStoresBetweenFromAndTo() {
+        AsmRegistry.register(ModifyVariableStoreSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceStoreVariableTarget", sliceStoreVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceStoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre:stored-inside:outside", result)
+    }
+
+    @Test
     fun modifyVariableAtLoadRewritesLoadedLocalVariableByIndex() {
         AsmRegistry.register(ModifyVariableLoadMixin::class.java)
 
@@ -5968,6 +5981,21 @@ class FrameworkReliabilityTest {
         ): String = "stored-$original-$suffix$count"
     }
 
+    @AsmMixin("SliceStoreVariableTarget")
+    object ModifyVariableStoreSliceMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            index = 1,
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "stored-$original"
+    }
+
     @AsmMixin("LoadVariableTarget")
     object ModifyVariableLoadMixin {
         @ModifyVariable(
@@ -6973,6 +7001,47 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceStoreVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceStoreVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 5)
             visitEnd()
         }
         cw.visitEnd()
