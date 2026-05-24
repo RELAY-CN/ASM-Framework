@@ -298,6 +298,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueExposesCountContractParameters() {
+        val methods = ModifyReturnValue::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun asmInjectRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeReturnInjectMixin::class.java)
 
