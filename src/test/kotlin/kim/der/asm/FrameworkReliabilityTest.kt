@@ -35,6 +35,7 @@ import kim.der.asm.api.annotation.RemoveSynchronized
 import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.api.annotation.Shift
 import kim.der.asm.api.annotation.Slice
+import kim.der.asm.api.annotation.Unique
 import kim.der.asm.api.annotation.WrapMethod
 import kim.der.asm.api.annotation.WrapOperation
 import kim.der.asm.api.annotation.WrapWithCondition
@@ -2746,6 +2747,34 @@ class FrameworkReliabilityTest {
         val classNode = readClass(transformed)
 
         assertEquals(1, classNode.fields.count { it.name == "name" })
+    }
+
+    @Test
+    fun uniqueAnnotationIsAvailableForMemberConflictAvoidance() {
+        val annotationClass = Class.forName("kim.der.asm.api.annotation.Unique")
+
+        assertEquals(0, annotationClass.declaredMethods.size)
+    }
+
+    @Test
+    fun uniqueCopyRenamesConflictingMethodAndRewritesCalls() {
+        AsmRegistry.register(UniqueCopyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("UniqueCopyTarget", uniqueCopyTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val uniqueMethod =
+            classNode.methods.single {
+                it.desc == "()Ljava/lang/String;" &&
+                    it.name.startsWith("helper\$") &&
+                    (it.access and Opcodes.ACC_SYNTHETIC) != 0
+            }
+        val clazz = loadClass("UniqueCopyTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("entry").invoke(instance)
+
+        assertEquals("unique", result)
+        assertEquals(true, (uniqueMethod.access and Opcodes.ACC_PRIVATE) != 0)
+        assertEquals(1, classNode.methods.count { it.name == "helper" && it.desc == "()Ljava/lang/String;" })
     }
 
     @Test
@@ -6813,6 +6842,18 @@ class FrameworkReliabilityTest {
         private var duplicateName: String? = null
     }
 
+    @AsmMixin("UniqueCopyTarget")
+    object UniqueCopyMixin {
+        @Copy("entry()Ljava/lang/String;")
+        @JvmStatic
+        fun entry(): String = helper()
+
+        @Copy("helper()Ljava/lang/String;")
+        @Unique
+        @JvmStatic
+        fun helper(): String = "unique"
+    }
+
     @AsmMixin("InterfaceTarget")
     @AddInterface("java/io/Closeable")
     object AddCloseableInterfaceMixin
@@ -9359,6 +9400,21 @@ class FrameworkReliabilityTest {
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldTarget", null, "java/lang/Object", null)
         cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
         addDefaultConstructor(cw)
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun uniqueCopyTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "UniqueCopyTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "helper", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
         cw.visitEnd()
         return cw.toByteArray()
     }
