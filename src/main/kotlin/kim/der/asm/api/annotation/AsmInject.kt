@@ -30,11 +30,12 @@ package kim.der.asm.api.annotation
  * - [expect] 设置为非默认值时作为期望命中数；不一致时输出警告，但不阻断转换。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
- * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST/THROW，
+ * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/THROW，
  * INSTANCEOF 当前仅用于 [ModifyExpressionValue]
  * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
- * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
+ * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST 时用于描述具体指令点；
+ * 核心字段为 [At.target] 与 [At.shift]，其中 LOAD/STORE 当前只使用 [At.shift]
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] 注入支持用 [Slice.from] / [Slice.to]
  * 的 [InjectionPoint.INVOKE] 边界缩小查找范围
@@ -64,11 +65,10 @@ annotation class AsmInject(
  * 注入点枚举。
  *
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[FIELD]、
- * [FIELD_ASSIGN]、[NEW]、[CAST] 与 [THROW]；[LOAD] 与 [STORE] 当前用于
- * [kim.der.asm.api.annotation.ModifyVariable]，[INSTANCEOF] 当前用于
+ * [FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST] 与 [THROW]；[INSTANCEOF] 当前用于
  * [kim.der.asm.api.annotation.ModifyExpressionValue]。
  * 其中指令点注入会在匹配指令前后插入 handler，
- * 不会替换原始指令或自动传递栈顶操作数。
+ * 不会替换原始指令、自动传递栈顶操作数或局部变量值。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24

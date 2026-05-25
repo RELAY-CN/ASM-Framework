@@ -829,8 +829,8 @@ val callback = CallbackInfo.returnable("value")
 - `INVOKE_ASSIGN` - 方法调用后
 - `FIELD` - 字段访问前
 - `FIELD_ASSIGN` - 字段赋值前
-- `LOAD` - 局部变量读取前（当前用于 `@ModifyVariable`）
-- `STORE` - 局部变量写入后（当前用于 `@ModifyVariable`）
+- `LOAD` - 局部变量读取前
+- `STORE` - 局部变量写入后
 - `NEW` - NEW 操作前
 - `CAST` - 类型转换后
 - `INSTANCEOF` - instanceof 判断后（当前用于 `@ModifyExpressionValue`）
@@ -846,10 +846,11 @@ val callback = CallbackInfo.returnable("value")
 handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值、数组元素值或数组长度的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
-解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/CAST/THROW)`
+解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持
-`Shift.BEFORE` 与 `Shift.REPLACE`。`LOAD`、`STORE` 与 `INSTANCEOF` 不支持普通 `@AsmInject`，当前分别用于 `@ModifyVariable` 与 `@ModifyExpressionValue`
-的局部变量读取点或写入点改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
+`Shift.BEFORE` 与 `Shift.REPLACE`。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
+不会把局部变量值传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。`INSTANCEOF` 不支持普通
+`@AsmInject`，当前用于 `@ModifyExpressionValue` 的类型判断结果改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
 
 ### At
 
