@@ -357,6 +357,38 @@ annotation class WrapOperation(
 )
 
 /**
+ * 包裹目标方法注解。
+ *
+ * 用于把整个目标方法体替换为 handler 调用（语义参考 Mixin Extras 的 `@WrapMethod`）。
+ * handler 会接收目标方法参数与 [Operation]，可选择调用原方法、跳过原方法或多次调用原方法。
+ *
+ * ASM 方法要求：
+ *
+ * - handler 参数先按目标方法声明顺序接收原方法参数
+ * - 下一参数必须是 [Operation]，用于执行被包裹的原目标方法
+ * - handler 返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 必须返回 `void`
+ * - [require] / [allow] 可约束实际整方法包裹数量，目标方法漂移时会在转换阶段失败
+ * - [expect] 用于调试期望整方法包裹数量，不一致时只输出警告，不阻断转换
+ *
+ * @param method 目标方法签名
+ * @param require 最小命中数；大于 0 时实际整方法包裹数必须不少于该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
+ * @param allow 最大命中数；大于等于 0 时实际整方法包裹数不能超过该值
+ * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
+ * @author Dr (dr@der.kim)
+ * @date 2025-11-24
+ */
+@Target(AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class WrapMethod(
+    val method: String = "",
+    val require: Int = 0,
+    val expect: Int = 1,
+    val allow: Int = -1,
+    val remap: Boolean = false,
+)
+
+/**
  * 条件包裹注解。
  *
  * 用于在目标方法内匹配 `void` 方法调用、字段写入或简单数组元素写入前插入条件判断（语义参考
