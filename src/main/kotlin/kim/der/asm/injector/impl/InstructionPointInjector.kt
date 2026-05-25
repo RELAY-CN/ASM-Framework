@@ -24,7 +24,7 @@ import java.lang.reflect.Method
 /**
  * 指令点注入器。
  *
- * 用于处理字段访问、字段赋值、对象创建、类型转换与抛异常等单条字节码指令附近的普通 `@AsmInject`。
+ * 用于处理字段访问、字段赋值、局部变量读写、对象创建、类型转换与抛异常等单条字节码指令附近的普通 `@AsmInject`。
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
  * 由于 JVM verifier 不允许在未初始化对象仍位于栈顶时插入普通方法调用，[InjectionPoint.NEW] 不支持 [Shift.AFTER]。
  *
@@ -124,6 +124,16 @@ class InstructionPointInjector(
                     insn is TypeInsnNode &&
                         insn.opcode == Opcodes.CHECKCAST &&
                         (normalizedTarget.isEmpty() || insn.desc == normalizedTarget)
+            }
+            InjectionPoint.LOAD -> {
+                fun(insn: AbstractInsnNode): Boolean =
+                    insn is VarInsnNode &&
+                        insn.opcode in LOAD_OPS
+            }
+            InjectionPoint.STORE -> {
+                fun(insn: AbstractInsnNode): Boolean =
+                    insn is VarInsnNode &&
+                        insn.opcode in STORE_OPS
             }
             InjectionPoint.THROW -> {
                 fun(insn: AbstractInsnNode): Boolean = insn.opcode == Opcodes.ATHROW
@@ -232,5 +242,7 @@ class InstructionPointInjector(
     private companion object {
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+        private val LOAD_OPS = setOf(Opcodes.ILOAD, Opcodes.LLOAD, Opcodes.FLOAD, Opcodes.DLOAD, Opcodes.ALOAD)
+        private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
     }
 }
