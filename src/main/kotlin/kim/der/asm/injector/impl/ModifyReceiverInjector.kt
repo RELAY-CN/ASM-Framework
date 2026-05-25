@@ -51,7 +51,18 @@ class ModifyReceiverInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean =
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 在匹配实例调用点或字段访问点前改写 receiver，并返回实际改写数量。
+     *
+     * @param target 目标方法
+     * @return 实际改写的 receiver 数量
+     * @throws IllegalArgumentException 调用点、目标调用或 handler 签名不合法时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int =
         when (at.value) {
             InjectionPoint.INVOKE -> injectMethodCall(target)
             InjectionPoint.FIELD -> injectFieldRead(target)
@@ -61,13 +72,13 @@ class ModifyReceiverInjector(
             )
         }
 
-    private fun injectMethodCall(target: MethodNode): Boolean {
+    private fun injectMethodCall(target: MethodNode): Int {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
         if (targetName == null || targetDesc == null) {
             throw IllegalArgumentException("@ModifyReceiver INVOKE requires at.target method signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
@@ -94,19 +105,19 @@ class ModifyReceiverInjector(
             val targetParamCount = validateHandlerSignature(target, receiverType)
             val il = buildCallReceiverModification(target, insn, receiverType, targetParamCount)
             target.instructions.insertBefore(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldRead(target: MethodNode): Boolean {
+    private fun injectFieldRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyReceiver FIELD requires at.target field signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
@@ -128,19 +139,19 @@ class ModifyReceiverInjector(
             val targetParamCount = validateHandlerSignature(target, receiverType)
             val il = buildFieldReadReceiverModification(target, receiverType, targetParamCount)
             target.instructions.insertBefore(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldAssign(target: MethodNode): Boolean {
+    private fun injectFieldAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyReceiver FIELD_ASSIGN requires at.target field signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
@@ -163,10 +174,10 @@ class ModifyReceiverInjector(
             val targetParamCount = validateHandlerSignature(target, receiverType)
             val il = buildFieldAssignReceiverModification(target, receiverType, fieldType, targetParamCount)
             target.instructions.insertBefore(insn, il)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun buildCallReceiverModification(
