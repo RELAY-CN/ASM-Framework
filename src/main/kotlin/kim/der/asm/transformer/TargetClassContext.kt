@@ -93,6 +93,7 @@ class TargetClassContext(
         // 收集所有需要处理的方法，按注入点类型分组
         // 注意：必须按照特定的顺序处理注入，以确保行为一致
         val methodsToProcess = asmInfo.asmClass.declaredMethods.toList()
+        val copyMethodNames = buildCopyMethodNames(methodsToProcess)
 
         // 第一轮：处理 RETURN 和 TAIL 注入（必须在 HEAD 注入之前）
         //
@@ -200,12 +201,12 @@ class TargetClassContext(
                     }
                 }
                 overwriteAnnotation != null -> {
-                    if (applyOverwrite(method, overwriteAnnotation)) {
+                    if (applyOverwrite(method, overwriteAnnotation, copyMethodNames)) {
                         transformed = true
                     }
                 }
                 copyAnnotation != null -> {
-                    if (applyCopy(method, copyAnnotation)) {
+                    if (applyCopy(method, copyAnnotation, copyMethodNames)) {
                         transformed = true
                     }
                 }
@@ -1350,6 +1351,7 @@ class TargetClassContext(
     private fun applyOverwrite(
         method: Method,
         annotation: Overwrite,
+        copyMethodNames: Map<String, String>,
     ): Boolean {
         val targetMethod = findTargetMethod(annotation.method)
         if (targetMethod == null) {
@@ -1358,7 +1360,7 @@ class TargetClassContext(
 
         // 覆写方法：清空原方法体并替换为 asm 方法的内容
         // 这允许后续的 @Overwrite 再次覆写这个方法
-        val injector = AsmInjectorFactory.createOverwriteInjector(method, asmInfo)
+        val injector = AsmInjectorFactory.createOverwriteInjector(method, asmInfo, copyMethodNames)
         return injector.inject(targetMethod)
     }
 
@@ -1370,6 +1372,7 @@ class TargetClassContext(
     private fun applyCopy(
         method: Method,
         annotation: Copy,
+        copyMethodNames: Map<String, String>,
     ): Boolean {
         // 确定目标方法签名
         val methodSignature =
@@ -1381,10 +1384,11 @@ class TargetClassContext(
             }
 
         val (methodName, methodDesc) = parseMethodSignature(methodSignature)
+        val copiedMethodName = copyMethodNames[copyMethodKey(method)] ?: methodName
 
         // 检查目标方法是否已存在
         val existingMethod = classNode.methods.find { it.name == methodName && it.desc == methodDesc }
-        if (existingMethod != null) {
+        if (existingMethod != null && copiedMethodName == methodName) {
             System.err.println(
                 "Warning: Method $methodSignature already exists in class $className. " +
                     "Cannot copy method from ${asmInfo.asmClass.name}. Use @Overwrite to replace it.",
@@ -1395,21 +1399,83 @@ class TargetClassContext(
         // 创建目标方法节点（使用目标方法的签名）
         val targetMethod =
             MethodNode(
-                Opcodes.ACC_PUBLIC, // 默认 public，可以根据需要调整
-                methodName,
+                copyMethodAccess(method, copiedMethodName != methodName),
+                copiedMethodName,
                 methodDesc,
                 null,
                 null,
             )
 
         // 使用 CopyInjector 创建新方法
-        val injector = AsmInjectorFactory.createCopyInjector(method, asmInfo)
+        val injector = AsmInjectorFactory.createCopyInjector(method, asmInfo, copyMethodNames)
         val newMethod = injector.createMethod(targetMethod)
 
         // 将新方法添加到目标类
         classNode.methods.add(newMethod)
 
         return true
+    }
+
+    private fun buildCopyMethodNames(methods: List<Method>): Map<String, String> {
+        val copyMethodNames = mutableMapOf<String, String>()
+        val reservedMethodSignatures = classNode.methods.mapTo(mutableSetOf()) { "${it.name}${it.desc}" }
+
+        for (method in methods) {
+            val copyAnnotation = method.getAnnotation(Copy::class.java) ?: continue
+            val methodSignature =
+                if (copyAnnotation.method.isEmpty()) {
+                    buildMethodSignature(method)
+                } else {
+                    copyAnnotation.method
+                }
+            val (methodName, methodDesc) = parseMethodSignature(methodSignature)
+            val copiedMethodName =
+                if (method.isAnnotationPresent(Unique::class.java) &&
+                    reservedMethodSignatures.contains("$methodName$methodDesc")
+                ) {
+                    nextUniqueCopyMethodName(methodName, methodDesc, reservedMethodSignatures)
+                } else {
+                    methodName
+                }
+
+            copyMethodNames[copyMethodKey(method)] = copiedMethodName
+            reservedMethodSignatures.add("$copiedMethodName$methodDesc")
+        }
+
+        return copyMethodNames
+    }
+
+    private fun nextUniqueCopyMethodName(
+        methodName: String,
+        methodDesc: String,
+        reservedMethodSignatures: Set<String>,
+    ): String {
+        val baseName = "$methodName\$asm\$unique"
+        var candidate = baseName
+        var index = 0
+        while (reservedMethodSignatures.contains("$candidate$methodDesc")) {
+            index++
+            candidate = "$baseName\$$index"
+        }
+        return candidate
+    }
+
+    private fun copyMethodKey(method: Method): String =
+        "${method.name}${Type.getMethodDescriptor(method)}"
+
+    private fun copyMethodAccess(
+        method: Method,
+        unique: Boolean,
+    ): Int {
+        if (!unique) {
+            return Opcodes.ACC_PUBLIC
+        }
+
+        var access = Opcodes.ACC_PRIVATE or Opcodes.ACC_SYNTHETIC
+        if (Modifier.isStatic(method.modifiers)) {
+            access = access or Opcodes.ACC_STATIC
+        }
+        return access
     }
 
     /**

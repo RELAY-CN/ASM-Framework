@@ -25,6 +25,7 @@ import java.lang.reflect.Method
 class CopyInjector(
     method: Method,
     asmInfo: AsmInfo,
+    private val copyMethodNames: Map<String, String> = emptyMap(),
 ) : AbstractAsmInjector(method, asmInfo) {
     private var createdMethod: MethodNode? = null
 
@@ -689,14 +690,15 @@ class CopyInjector(
 
                 // 确定目标方法名
                 val targetMethodName =
-                    if (copyAnnotation.method.isEmpty()) {
-                        // 如果 method 为空，使用 ASM 方法名
-                        methodName
-                    } else {
-                        // 解析方法签名
-                        val (name, _) = parseMethodSignature(copyAnnotation.method)
-                        name
-                    }
+                    copyMethodNames["$methodName$methodDesc"]
+                        ?: if (copyAnnotation.method.isEmpty()) {
+                            // 如果 method 为空，使用 ASM 方法名
+                            methodName
+                        } else {
+                            // 解析方法签名
+                            val (name, _) = parseMethodSignature(copyAnnotation.method)
+                            name
+                        }
 
                 // 使用方法名和描述符作为键，确保唯一性
                 copyMethodMap["$methodName$methodDesc"] = targetMethodName
