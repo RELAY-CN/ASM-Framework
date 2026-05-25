@@ -430,15 +430,7 @@ class TargetClassContext(
         annotation: Shadow,
     ): Boolean {
         val fieldName = field.name
-        val method = annotation.method
-
-        // 如果注解以 [Shadow.prefix] 开头，需要去掉 prefix
-        val targetFieldName =
-            if (method.startsWith(Shadow.prefix)) {
-                method.substring(Shadow.prefix.length)
-            } else {
-                fieldName
-            }
+        val targetFieldName = resolveShadowTargetName(annotation.method, fieldName)
 
         // 查找目标字段
         val targetField = classNode.fields.find { it.name == targetFieldName }
@@ -470,15 +462,7 @@ class TargetClassContext(
         annotation: Shadow,
     ) {
         val methodName = method.name
-        val prefix = annotation.method
-
-        // 如果注解以 [Shadow.prefix] 开头，需要去掉 prefix
-        val targetMethodName =
-            if (prefix.startsWith(Shadow.prefix)) {
-                prefix.substring(Shadow.prefix.length)
-            } else {
-                methodName
-            }
+        val targetMethodName = resolveShadowTargetName(annotation.method, methodName)
 
         // 验证目标方法是否存在（Shadow 方法只是引用，不需要转换）
         val targetMethod = findTargetMethod("$targetMethodName${Type.getMethodDescriptor(method)}")
@@ -486,6 +470,16 @@ class TargetClassContext(
             throw IllegalStateException("Shadow method $targetMethodName${Type.getMethodDescriptor(method)} not found in $className")
         }
     }
+
+    private fun resolveShadowTargetName(
+        declaredName: String,
+        memberName: String,
+    ): String =
+        when {
+            declaredName.isEmpty() -> memberName
+            declaredName.startsWith(Shadow.prefix) -> declaredName.substring(Shadow.prefix.length)
+            else -> declaredName
+        }
 
     /**
      * 应用字段修饰符

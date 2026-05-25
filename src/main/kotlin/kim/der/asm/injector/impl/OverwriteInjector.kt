@@ -792,15 +792,7 @@ class OverwriteInjector(
             val shadowAnnotation = field.getAnnotation(Shadow::class.java)
             if (shadowAnnotation != null) {
                 val fieldName = field.name
-                val method = shadowAnnotation.method
-
-                // 如果注解以 [Shadow.prefix] 开头，需要去掉 prefix
-                val targetFieldName =
-                    if (method.startsWith(Shadow.prefix)) {
-                        method.substring(Shadow.prefix.length)
-                    } else {
-                        fieldName
-                    }
+                val targetFieldName = resolveShadowTargetName(shadowAnnotation.method, fieldName)
 
                 shadowFieldMap[fieldName] = targetFieldName
             }
@@ -817,15 +809,7 @@ class OverwriteInjector(
             if (shadowAnnotation != null) {
                 val methodName = method.name
                 val methodDesc = Type.getMethodDescriptor(method)
-                val prefix = shadowAnnotation.method
-
-                // 如果注解以 [Shadow.prefix] 开头，需要去掉 prefix
-                val targetMethodName =
-                    if (prefix.startsWith(Shadow.prefix)) {
-                        prefix.substring(Shadow.prefix.length)
-                    } else {
-                        methodName
-                    }
+                val targetMethodName = resolveShadowTargetName(shadowAnnotation.method, methodName)
 
                 shadowMethodMap["$methodName$methodDesc"] = targetMethodName
                 shadowMethodNames.add(methodName)
@@ -896,6 +880,16 @@ class OverwriteInjector(
             }
         }
     }
+
+    private fun resolveShadowTargetName(
+        declaredName: String,
+        memberName: String,
+    ): String =
+        when {
+            declaredName.isEmpty() -> memberName
+            declaredName.startsWith(Shadow.prefix) -> declaredName.substring(Shadow.prefix.length)
+            else -> declaredName
+        }
 
     /**
      * 解析方法签名
