@@ -586,7 +586,7 @@ object ValidationMixin {
 }
 ```
 
-`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `Slice` 限制匹配范围。关键参数补丁可设置 `require` / `allow` 约束实际修改数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀，也支持用 `Slice` 限制匹配范围。关键参数组补丁同样可设置 `require` / `allow` / `expect`，按实际改写的调用点数量校验命中契约。`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver 并返回兼容的新 receiver；`INVOKE` 会保留原调用参数，也可用 `Slice` 限制 receiver 改写范围，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，后续参数可接收目标方法参数前缀。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
+`@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值，后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `Slice` 限制匹配范围。关键参数补丁可设置 `require` / `allow` 约束实际修改数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀，也支持用 `Slice` 限制匹配范围。关键参数组补丁同样可设置 `require` / `allow` / `expect`，按实际改写的调用点数量校验命中契约。`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver 并返回兼容的新 receiver；`INVOKE` 会保留原调用参数，也可用 `Slice` 限制 receiver 改写范围，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，后续参数可接收目标方法参数前缀。关键 receiver 补丁同样可设置 `require` / `allow` / `expect`，按实际改写的 receiver 数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
 
 `@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；
@@ -920,7 +920,7 @@ fun onEveryReturn() {
 }
 ```
 
-同样的契约也适用于关键参数修改、关键参数组修改、关键变量修改、关键返回值修改、关键表达式值修改、关键常量修改和关键重定向：
+同样的契约也适用于关键参数修改、关键参数组修改、关键 receiver 修改、关键变量修改、关键返回值修改、关键表达式值修改、关键常量修改和关键重定向：
 
 ```kotlin
 @ModifyArg(
@@ -941,6 +941,14 @@ fun normalizeArgument(original: String): String = original.trim()
 fun normalizeArguments(args: Args) {
     args.set(1, args.get<String>(1).trim())
 }
+
+@ModifyReceiver(
+    method = "render(Ljava/lang/String;)Ljava/lang/String;",
+    at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;"),
+    require = 1,
+    allow = 1,
+)
+fun replaceReceiver(original: String): String = original.trim()
 
 @ModifyVariable(
     method = "normalize(Ljava/lang/String;)Ljava/lang/String;",
