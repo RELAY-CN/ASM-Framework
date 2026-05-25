@@ -107,6 +107,7 @@ val transformedBytes = processor.transform(
 - **@ModifyArgs** - 修改方法调用参数组
 - **@ModifyReceiver** - 修改实例方法调用或实例字段访问 receiver
 - **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取
+- **@WrapMethod** - 用可调用原方法的 handler 包裹整个目标方法体
 - **@WrapWithCondition** - 按条件跳过 `void` 调用、字段写入或数组元素写入
 - **@ModifyExpressionValue** - 修改表达式值
 - **@ModifyVariable** - 修改方法参数或局部变量
@@ -410,6 +411,13 @@ object ValidationMixin {
         prefix: String,
     ): StringBuilder = operation.call("$prefix:$value")
 
+    @WrapMethod(method = "decorateWhole(Ljava/lang/String;I)Ljava/lang/String;")
+    fun wrapDecorateWhole(
+        prefix: String,
+        count: Int,
+        operation: Operation<String>,
+    ): String = operation.call(prefix.trim(), count + 1).uppercase()
+
     @WrapWithCondition(
         method = "notify(Ljava/lang/String;I)V",
         at = At(
@@ -610,6 +618,13 @@ object ValidationMixin {
 参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`
 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
+
+`@WrapMethod` 用于包裹整个目标方法，而不是某一个调用点或字段访问点。handler 先按目标方法声明顺序接收原方法参数，
+下一参数必须是 `Operation<R>`，返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 返回 `Unit` / `void`。
+静态目标方法的 `operation.call(...)` 只传目标方法参数；实例目标方法的 `Operation` 已绑定当前 `this`，
+handler 不接收 receiver，`operation.call(...)` 同样只传目标方法参数。该注解会把原方法体迁移到私有 synthetic 方法，
+再用原方法名与原描述符生成 wrapper，因此不支持构造器、类初始化器、abstract 方法或 native 方法。
+关键整方法包裹可设置 `require` / `allow` / `expect`，实际命中数按目标方法计数。
 
 `@WrapWithCondition` 用于保留原 `void` 调用、字段写入或数组元素写入但按条件跳过副作用的场景。
 handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用
@@ -1210,7 +1225,7 @@ fun staticMethod() { }
 完整的示例代码请参考 `src/test/kotlin/kim/der/asm/` 目录下的测试用例：
 
 - `TestMixin.kt` - 基础注入、覆盖、访问器、调用器和 Shadow 示例
-- `FrameworkReliabilityTest.kt` - `@ModifyVariable`、`@WrapOperation`、`@WrapWithCondition`、
+- `FrameworkReliabilityTest.kt` - `@ModifyVariable`、`@WrapOperation`、`@WrapMethod`、`@WrapWithCondition`、
   构造器调用器等可靠性测试
 - `AsmScannerTest.kt` - 扫描和注册示例
 
