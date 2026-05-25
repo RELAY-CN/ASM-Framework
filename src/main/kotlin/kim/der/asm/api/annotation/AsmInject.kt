@@ -30,7 +30,8 @@ package kim.der.asm.api.annotation
  * - [expect] 设置为非默认值时作为期望命中数；不一致时输出警告，但不阻断转换。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
- * @param target 注入点类型；当前实现支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST/THROW
+ * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST/THROW，
+ * INSTANCEOF 当前仅用于 [ModifyExpressionValue]
  * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/NEW/CAST 时用于描述具体指令点；核心字段为 [At.target] 与 [At.shift]
@@ -139,7 +140,7 @@ enum class InjectionPoint {
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
- * @param target 目标方法调用、构造器调用、字段、NEW 类型或 CHECKCAST 类型签名
+ * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型或 INSTANCEOF 类型签名
  * @param shift 注入偏移策略
  * @param by 预留参数，当前实现未实现按字节码偏移移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set` 与 `array=length`，
