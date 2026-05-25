@@ -54,7 +54,18 @@ class WrapWithConditionInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean {
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 在匹配的 `void` 方法调用、字段写入或数组元素写入前插入条件包裹逻辑，并返回实际包裹数量。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的调用点、字段写入点或数组元素写入点数量
+     * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int {
         return when (at.value) {
             InjectionPoint.INVOKE -> injectMethodCall(target)
             InjectionPoint.FIELD_ASSIGN ->
@@ -78,13 +89,13 @@ class WrapWithConditionInjector(
         }
     }
 
-    private fun injectMethodCall(target: MethodNode): Boolean {
+    private fun injectMethodCall(target: MethodNode): Int {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
         if (targetName == null || targetDesc == null) {
             throw IllegalArgumentException("@WrapWithCondition INVOKE requires at.target method signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
@@ -112,19 +123,19 @@ class WrapWithConditionInjector(
             val il = buildConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
             target.instructions.insertBefore(insn, il)
             target.instructions.insert(insn, skipOriginalLabel)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldAssign(target: MethodNode): Boolean {
+    private fun injectFieldAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapWithCondition FIELD_ASSIGN requires at.target field signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
@@ -141,13 +152,13 @@ class WrapWithConditionInjector(
             val il = buildFieldAssignConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
             target.instructions.insertBefore(insn, il)
             target.instructions.insert(insn, skipOriginalLabel)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectArrayAssign(target: MethodNode): Boolean {
+    private fun injectArrayAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapWithCondition array write requires at.target array field signature")
@@ -156,7 +167,7 @@ class WrapWithConditionInjector(
             throw IllegalArgumentException("@WrapWithCondition array write target must be an array field: ${at.target}")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn.opcode !in ARRAY_WRITE_OPS) {
@@ -174,10 +185,10 @@ class WrapWithConditionInjector(
             val il = buildArrayAssignConditionWrapper(target, fieldInsn, targetParamCount, skipOriginalLabel)
             target.instructions.insertBefore(insn, il)
             target.instructions.insert(insn, skipOriginalLabel)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun buildConditionWrapper(
