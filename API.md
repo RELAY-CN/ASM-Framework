@@ -155,7 +155,7 @@ object RemoveInterfacesMixin
 - `target: InjectionPoint = InjectionPoint.HEAD` - 注入点位置
 - `cancellable: Boolean = false` - 是否可取消方法执行
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
-- `at: At = At()` - 精确注入位置
+- `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
 - `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` 注入与普通 `LOAD` / `STORE` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
@@ -176,7 +176,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 结束边界之前查找目标调用或局部变量读写指令；边界调用本身不会作为候选注入点，`ordinal`
 也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
-`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `LOAD` / `STORE` 只作为观察 hook；需要读取并写回变量值时使用 `@ModifyVariable`。`FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW` 当前不使用 `slice`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；需要读取并写回变量值时使用 `@ModifyVariable`。`FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW` 当前不使用 `slice`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -850,7 +850,8 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持
 `Shift.BEFORE` 与 `Shift.REPLACE`。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
-不会把局部变量值传给 handler，但可以用 `Slice` 把候选读写指令限制在一段 `INVOKE` 边界内；需要读取并写回变量值时使用 `@ModifyVariable`。`INSTANCEOF` 不支持普通
+不会把局部变量值传给 handler，但可以用 `Slice` 把候选读写指令限制在一段 `INVOKE` 边界内，也可以用
+`at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；需要读取并写回变量值时使用 `@ModifyVariable`。`INSTANCEOF` 不支持普通
 `@AsmInject`，当前用于 `@ModifyExpressionValue` 的类型判断结果改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
 
 ### At
@@ -865,7 +866,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `by: Int = 0` - 偏移量
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`
   与 `array=length`，`@WrapOperation` 当前支持 `array=get`、`array=set` 与 `array=length`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
-  与 `array=length`
+  与 `array=length`，普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N` 与 `var=N`
 
 **`target` 格式：**
 
@@ -881,6 +882,8 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取、数组元素写入或 `ARRAYLENGTH`。`@WrapOperation`
 可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入，使用 `FIELD + array=length` 包裹数组长度读取。
 `@ModifyExpressionValue` 可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；也可使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。
+普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
+的 `xLOAD` / `xSTORE` 指令附近插入 handler；这不会把槽位值传入 handler，也不会写回槽位。
 
 **示例：**
 

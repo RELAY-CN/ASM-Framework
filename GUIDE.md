@@ -648,7 +648,9 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 
 普通 `@AsmInject` 也可以使用 `InjectionPoint.LOAD` 或 `InjectionPoint.STORE` 在局部变量读取前或写入后插入
 无参 handler，适合记录日志、打点或触发旁路逻辑。普通注入不会把局部变量值传给 handler，也不会写回变量；
-可以用 `Slice` 把候选读写指令限制在一段 `INVOKE` 边界内。需要基于变量值计算新值时，应使用 `@ModifyVariable`。
+可以用 `Slice` 把候选读写指令限制在一段 `INVOKE` 边界内，也可以用
+`at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位。需要基于变量值计算新值时，
+应使用 `@ModifyVariable`。
 
 ### 场景 3: 修改返回值
 
@@ -964,7 +966,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `LOAD` / `STORE` 可用 `Slice` 缩小候选读写指令范围；字段、对象创建、类型转换与抛异常指令点当前不使用 `slice`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。`INSTANCEOF` 当前不作为普通 `@AsmInject` 指令点使用；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `LOAD` / `STORE` 可用 `Slice` 缩小候选读写指令范围，也可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；字段、对象创建、类型转换与抛异常指令点当前不使用 `slice`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。`INSTANCEOF` 当前不作为普通 `@AsmInject` 指令点使用；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
