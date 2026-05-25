@@ -240,6 +240,7 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
+     * @param copyMethodNames ASM 方法签名到实际复制目标方法名的映射
      * @return Overwrite 注入器
      *
      * @author Dr (dr@der.kim)
@@ -248,13 +249,15 @@ object AsmInjectorFactory {
     fun createOverwriteInjector(
         method: Method,
         asmInfo: AsmInfo,
-    ): AsmInjector = OverwriteInjector(method, asmInfo)
+        copyMethodNames: Map<String, String> = emptyMap(),
+    ): AsmInjector = OverwriteInjector(method, asmInfo, copyMethodNames)
 
     /**
      * 创建 Copy 注入器。
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
+     * @param copyMethodNames ASM 方法签名到实际复制目标方法名的映射
      * @return Copy 注入器
      *
      * @author Dr (dr@der.kim)
@@ -263,7 +266,8 @@ object AsmInjectorFactory {
     fun createCopyInjector(
         method: Method,
         asmInfo: AsmInfo,
-    ): CopyInjector = CopyInjector(method, asmInfo)
+        copyMethodNames: Map<String, String> = emptyMap(),
+    ): CopyInjector = CopyInjector(method, asmInfo, copyMethodNames)
 
     /**
      * 创建 ModifyReturnValue 注入器。

@@ -178,6 +178,20 @@ annotation class Copy(
 )
 
 /**
+ * 唯一成员标记注解。
+ *
+ * 用于标记 ASM 成员在复制到目标类时避免与目标类已有成员冲突（语义参考 Mixin 的 `@Unique`）。
+ * 当前实现支持与 [Copy] 配合使用：当目标类已存在同名同描述符方法时，会把被复制方法重命名为私有 synthetic 方法，
+ * 并同步改写同一个 ASM 类中对该 [Copy] 方法的调用。
+ *
+ * @author Dr (dr@der.kim)
+ * @date 2025-11-24
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.FUNCTION)
+@Retention(AnnotationRetention.RUNTIME)
+annotation class Unique
+
+/**
  * 修改参数注解。
  *
  * 用于修改目标方法参数或目标方法内某次方法调用的参数值（语义参考 Mixin 的 `@ModifyArg`）。
