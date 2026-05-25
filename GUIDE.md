@@ -704,13 +704,21 @@ class AccessMixin {
 }
 ```
 
-### 场景 6: 调用私有方法
+`@Accessor` 可按方法形态生成 getter 或 setter。getter 必须无参数并返回字段类型，
+setter 必须接收一个字段类型参数并返回 `void`。
+访问静态字段时，访问器方法也必须是静态方法；Kotlin `object` 中通常需要添加 `@JvmStatic`。
+
+### 场景 7: 调用私有方法或构造器
 
 ```kotlin
 @AsmMixin("com/example/PrivateClass")
 object InvokerMixin {
-    @Invoker("privateMethod(Ljava/lang/String;)V")
-    fun invokePrivateMethod(param: String) = throw UnsupportedOperationException()
+    @Invoker("privateMethod")
+    fun invokePrivateMethod(param: String): String = throw UnsupportedOperationException()
+
+    @Invoker("<init>")
+    @JvmStatic
+    fun create(param: String): Any = throw UnsupportedOperationException()
     
     @AsmInject(method = "publicMethod()V", target = InjectionPoint.HEAD)
     fun inject(callback: CallbackInfo) {
@@ -719,7 +727,11 @@ object InvokerMixin {
 }
 ```
 
-### 场景 7: 重定向方法调用与字段访问
+普通 `@Invoker` 的参数和返回值必须与目标方法一致；静态性也必须一致。
+`@Invoker("<init>")` 会生成静态工厂方法，参数用于匹配目标构造器，返回类型使用目标类或
+`Any` / `java.lang.Object`。
+
+### 场景 8: 重定向方法调用与字段访问
 
 ```kotlin
 @AsmMixin("com/example/NetworkClient")
@@ -810,7 +822,7 @@ object RedirectMixin {
 方法调用、构造器调用、字段读取、字段写入、简单数组元素访问与数组长度重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、构造器、字段访问、数组元素访问或数组长度需要的栈参数，后续可按顺序接收目标方法参数前缀。构造器重定向使用 `INVOKE + <init>` 目标，handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`。
 普通方法调用重定向可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。构造器、字段、数组元素与数组长度重定向当前不使用 `slice`。关键重定向可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
 
-### 场景 8: 条件取消执行
+### 场景 9: 条件取消执行
 
 ```kotlin
 @AsmMixin("com/example/Service")
@@ -829,7 +841,7 @@ object ConditionalMixin {
 `PUTSTATIC` handler 参数只包含待写入值，后续仍可追加目标方法参数前缀。数组元素写入使用
 `args = ["array=set"]`，handler 参数为数组引用、`Int` 索引与待写入元素值，返回 `false` 时跳过原 `xASTORE`。
 
-### 场景 9: 修改返回值
+### 场景 10: 修改返回值
 
 ```kotlin
 @AsmMixin("com/example/Calculator")
@@ -842,7 +854,7 @@ object CalculatorMixin {
 }
 ```
 
-### 场景 10: 多个注入点
+### 场景 11: 多个注入点
 
 ```kotlin
 @AsmMixin("com/example/Service")
@@ -855,7 +867,7 @@ object MultiInjectMixin {
 }
 ```
 
-### 场景 11: 指令点注入
+### 场景 12: 指令点注入
 
 `FIELD`、`FIELD_ASSIGN`、`CAST`、`THROW` 可以把 handler 插入到具体字节码指令前后，`NEW` 可以插入到对象创建指令之前，适合观察字段访问、字段写入、类型转换、对象创建或异常抛出位置。
 
@@ -1170,15 +1182,10 @@ fun staticMethod() { }
 
 完整的示例代码请参考 `src/test/kotlin/kim/der/asm/` 目录下的测试用例：
 
-- `InjectMixin.kt` - 注入示例
-- `OverwriteMixin.kt` - 覆盖示例
-- `ModifyArgMixin.kt` - 修改参数示例
-- `FrameworkReliabilityTest.kt` - `@ModifyVariable` 等可靠性测试
-- `ModifyReturnValueMixin.kt` - 修改返回值示例
-- `RedirectMixin.kt` - 重定向示例
-- `AccessorMixin.kt` - 访问器示例
-- `InvokerMixin.kt` - 调用器示例
-- `ShadowMixin.kt` - Shadow 示例
+- `TestMixin.kt` - 基础注入、覆盖、访问器、调用器和 Shadow 示例
+- `FrameworkReliabilityTest.kt` - `@ModifyVariable`、`@WrapOperation`、`@WrapWithCondition`、
+  构造器调用器等可靠性测试
+- `AsmScannerTest.kt` - 扫描和注册示例
 
 ## 更多资源
 
