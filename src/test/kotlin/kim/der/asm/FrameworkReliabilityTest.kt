@@ -1574,6 +1574,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeModifyReceiverMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverContractTarget", modifyReceiverContractTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyReceiverAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneModifyReceiverMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverContractTarget", modifyReceiverContractTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun modifyReceiverExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeModifyReceiverMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("ModifyReceiverContractTarget", modifyReceiverContractTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun modifyReceiverSliceLimitsInvokeReceiverMatchesBetweenFromAndTo() {
         AsmRegistry.register(ModifyReceiverSliceMixin::class.java)
 
@@ -5442,6 +5493,48 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("ModifyReceiverContractTarget")
+    object RequireThreeModifyReceiverMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            require = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ModifyReceiverContractTarget")
+    object AllowOneModifyReceiverMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ModifyReceiverContractTarget")
+    object ExpectThreeModifyReceiverMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            expect = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
     @AsmMixin("SliceModifyReceiverTarget")
     object ModifyReceiverSliceMixin {
         @ModifyReceiver(
@@ -8662,6 +8755,27 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun modifyReceiverContractTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyReceiverContractTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first")
+            visitLdcInsn("-a")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("second")
+            visitLdcInsn("-b")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
             visitEnd()
         }
         cw.visitEnd()
