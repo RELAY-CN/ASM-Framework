@@ -1571,7 +1571,9 @@ class TargetClassContext(
         il.add(LdcInsnNode(Type.getObjectType(className)))
         il.add(LdcInsnNode(methodName))
         il.add(LdcInsnNode(methodDesc))
-        il.add(InsnNode(if (isStaticTarget) Opcodes.ICONST_1 else Opcodes.ICONST_0))
+        if (isStaticTarget) {
+            il.add(InsnNode(Opcodes.ICONST_1))
+        }
         il.add(LdcInsnNode(targetParamTypes.size))
         il.add(TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Class"))
         for (index in targetParamTypes.indices) {
@@ -1580,15 +1582,28 @@ class TargetClassContext(
             il.add(InstructionUtil.loadType(targetParamTypes[index]))
             il.add(InsnNode(Opcodes.AASTORE))
         }
-        il.add(
-            MethodInsnNode(
-                Opcodes.INVOKESPECIAL,
-                operationType.internalName,
-                "<init>",
-                "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/Class;)V",
-                false,
-            ),
-        )
+        if (isStaticTarget) {
+            il.add(
+                MethodInsnNode(
+                    Opcodes.INVOKESPECIAL,
+                    operationType.internalName,
+                    "<init>",
+                    "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/Class;)V",
+                    false,
+                ),
+            )
+        } else {
+            il.add(VarInsnNode(Opcodes.ALOAD, 0))
+            il.add(
+                MethodInsnNode(
+                    Opcodes.INVOKESPECIAL,
+                    operationType.internalName,
+                    "<init>",
+                    "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Class;Ljava/lang/Object;)V",
+                    false,
+                ),
+            )
+        }
     }
 
     private fun addWrapMethodHandlerOwner(

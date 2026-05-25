@@ -37,6 +37,8 @@ class Operation<T> private constructor(
     private val staticCall: Boolean,
     private val parameterTypes: Array<Class<*>>,
     private val kind: OperationKind,
+    private val boundReceiver: Any? = null,
+    private val receiverBound: Boolean = false,
 ) {
     /**
      * 创建方法调用操作句柄。
@@ -56,6 +58,28 @@ class Operation<T> private constructor(
         staticCall: Boolean,
         parameterTypes: Array<Class<*>>,
     ) : this(ownerClass, name, desc, staticCall, parameterTypes, OperationKind.METHOD_CALL)
+
+    /**
+     * 创建已绑定 receiver 的实例方法调用操作句柄。
+     *
+     * [WrapMethod] 包裹实例方法时使用该构造器，使 handler 调用 [call] 时只需传入目标方法参数，
+     * 不需要也不能额外传入 `this` receiver。
+     *
+     * @param ownerClass 原调用 owner 类
+     * @param name 原调用方法名
+     * @param desc 原调用方法描述符
+     * @param parameterTypes 原调用参数类型
+     * @param receiver 已绑定的目标实例
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    constructor(
+        ownerClass: Class<*>,
+        name: String,
+        desc: String,
+        parameterTypes: Array<Class<*>>,
+        receiver: Any?,
+    ) : this(ownerClass, name, desc, false, parameterTypes, OperationKind.METHOD_CALL, receiver, true)
 
     /**
      * 创建构造器调用操作句柄。
@@ -198,14 +222,20 @@ class Operation<T> private constructor(
             return construct(args) as T
         }
 
-        val expectedArgumentCount = parameterTypes.size + if (staticCall) 0 else 1
+        val usesBoundReceiver = receiverBound && !staticCall
+        val expectedArgumentCount = parameterTypes.size + if (staticCall || usesBoundReceiver) 0 else 1
         require(args.size == expectedArgumentCount) {
             "Operation ${ownerClass.name}.$name$desc expects $expectedArgumentCount argument(s), actual ${args.size}"
         }
 
-        val receiver = if (staticCall) null else args[0]
+        val receiver =
+            when {
+                staticCall -> null
+                usesBoundReceiver -> boundReceiver
+                else -> args[0]
+            }
         val methodArgs =
-            if (staticCall) {
+            if (staticCall || usesBoundReceiver) {
                 args
             } else {
                 args.copyOfRange(1, args.size)
