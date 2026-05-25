@@ -672,6 +672,20 @@ object ModernizeMixin {
 }
 ```
 
+`@Overwrite` 会把 handler 方法体复制到目标方法中，目标方法不存在或签名无法适配时会在转换阶段失败。
+如果需要先为整类建立默认实现，再保留少量关键方法，可以把 `@ReplaceAllMethods` 放在同一个 Mixin 类上，
+再用 `@Overwrite` 覆盖指定方法：
+
+```kotlin
+@ReplaceAllMethods
+@AsmMixin("com/example/LegacyClass")
+object SafeDefaultMixin {
+    @Overwrite(method = "healthCheck()Ljava/lang/String;")
+    @JvmStatic
+    fun healthCheck(): String = "ok"
+}
+```
+
 ### 场景 6: 访问私有字段
 
 ```kotlin

@@ -183,6 +183,12 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 完全覆盖目标方法的实现。
 
+`@Overwrite` 会复制 ASM 方法体到目标方法，并保留目标方法自己的签名。目标方法不存在、方法体无法提取，
+或返回值/参数槽位无法适配时，转换会失败，不会静默跳过。
+
+当同一个 Mixin 同时使用 `@ReplaceAllMethods` 时，类级全方法替换会先执行，随后方法级 `@Overwrite`
+可以定点覆盖某个关键方法。
+
 **参数：**
 
 - `method: String = ""` - 目标方法签名
@@ -608,6 +614,9 @@ fun removeSync() {}
 ### @ReplaceAllMethods
 
 替换目标类中的所有方法。
+
+该注解会在方法级注解处理前运行，把目标类的方法体替换成框架默认返回或 `RedirectionReplaceApi.invokeIgnore`
+调用。它适合为整类建立默认实现，再通过同一个 Mixin 中的 `@Overwrite` 恢复少量需要保留逻辑的方法。
 
 **参数：**
 

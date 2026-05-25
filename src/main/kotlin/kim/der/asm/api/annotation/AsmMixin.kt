@@ -83,7 +83,15 @@ annotation class RemoveInterface(
  * 全方法替换注解。
  *
  * 用于将目标类的所有方法体替换为调用 [RedirectionReplaceApi] 的兼容实现。
- * 该注解作用于类级别，并会遍历目标类的方法列表逐一替换。
+ * 该注解作用于类级别，并会在方法级注解处理前遍历目标类的方法列表逐一替换。
+ * 后续同一个 Mixin 中的 [Overwrite] 仍可定点覆盖某个方法，用于在全局默认替换后恢复关键方法实现。
+ *
+ * ## 使用边界
+ *
+ * - 会移除目标类非接口场景下的 `abstract` 类标志。
+ * - 会移除目标方法的 `abstract` / `native` 标志，并清空原方法体、异常处理块、局部变量表和参数信息。
+ * - 非静态字段会被置为非 `final`，以便替换后的方法可按默认运行期策略构造对象状态。
+ * - 基本类型、`String` 与 `CharSequence` 返回值优先写入框架默认值；其他非 void 返回值会调用 [RedirectionReplaceApi.invokeIgnore]。
  *
  * @param removeSync 是否同时移除方法的 `synchronized` 语义（移除标志与相关指令）
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
@@ -129,7 +137,14 @@ annotation class RedirectAllMethods(
  * 覆盖方法注解。
  *
  * 用于完全替换目标方法的实现（类似 Mixin 的 `@Overwrite`）。
- * 若无法定位目标方法，会记录 warning 并跳过本次覆写。
+ * 该注解会复制 ASM 方法体、异常处理块和局部变量信息到目标方法，并保留目标方法的签名。
+ * 若无法定位目标方法，或 ASM 方法体无法适配目标方法签名，转换会失败而不是静默跳过。
+ *
+ * ## 使用边界
+ *
+ * - 覆写会清空目标方法原有方法体，并移除目标方法的 `abstract` / `native` 标志。
+ * - 目标方法签名以 [method] 指定；为空时按 ASM 方法名与描述符匹配。
+ * - 当同一个 Mixin 同时使用 [ReplaceAllMethods] 时，类级全方法替换先执行，[Overwrite] 后执行，可覆盖全替换后的方法体。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
