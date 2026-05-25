@@ -1834,6 +1834,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverContractTarget", modifyReceiverContractTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun wrapOperationAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneWrapOperationMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverContractTarget", modifyReceiverContractTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun wrapOperationExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeWrapOperationMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("ModifyReceiverContractTarget", modifyReceiverContractTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun wrapOperationSliceLimitsInvokeCallMatchesBetweenFromAndTo() {
         AsmRegistry.register(WrapOperationSliceMixin::class.java)
 
@@ -5766,6 +5817,60 @@ class FrameworkReliabilityTest {
             target.length
             return operation.call("wrapped", value)
         }
+    }
+
+    @AsmMixin("ModifyReceiverContractTarget")
+    object RequireThreeWrapOperationMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            require = 3,
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String = operation.call(target, value)
+    }
+
+    @AsmMixin("ModifyReceiverContractTarget")
+    object AllowOneWrapOperationMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String = operation.call(target, value)
+    }
+
+    @AsmMixin("ModifyReceiverContractTarget")
+    object ExpectThreeWrapOperationMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            expect = 3,
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String = operation.call(target, value)
     }
 
     @AsmMixin("SliceWrapOperationTarget")
