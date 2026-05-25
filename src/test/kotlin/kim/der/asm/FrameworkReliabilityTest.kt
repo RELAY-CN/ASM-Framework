@@ -2525,6 +2525,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun shadowCanUseExplicitTargetNamesForOverwriteReferences() {
+        AsmRegistry.register(ShadowAliasOverwriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ShadowAliasTarget", shadowAliasTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ShadowAliasTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("actual:seed", result)
+    }
+
+    @Test
     fun shadowWithMissingFieldFailsDuringTransform() {
         AsmRegistry.register(MissingShadowFieldMixin::class.java)
 
@@ -6577,6 +6589,18 @@ class FrameworkReliabilityTest {
         private val missing: String? = null
     }
 
+    @AsmMixin("ShadowAliasTarget")
+    class ShadowAliasOverwriteMixin {
+        @Shadow("actualName")
+        private val aliasName: String? = null
+
+        @Shadow("actualLookup")
+        private fun aliasLookup(value: String): String = throw UnsupportedOperationException()
+
+        @Overwrite("value()Ljava/lang/String;")
+        fun value(): String = aliasLookup(aliasName ?: "missing")
+    }
+
     @AsmMixin("FieldTarget")
     class MismatchedShadowFieldMixin {
         @Shadow
@@ -9765,6 +9789,41 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun shadowAliasTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ShadowAliasTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "actualName", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("seed")
+            visitFieldInsn(Opcodes.PUTFIELD, "ShadowAliasTarget", "actualName", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("original")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PRIVATE, "actualLookup", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("actual:")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
             visitEnd()
         }
         cw.visitEnd()
