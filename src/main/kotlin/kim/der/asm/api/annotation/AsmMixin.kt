@@ -361,12 +361,15 @@ annotation class WrapOperation(
  *
  * 用于把整个目标方法体替换为 handler 调用（语义参考 Mixin Extras 的 `@WrapMethod`）。
  * handler 会接收目标方法参数与 [Operation]，可选择调用原方法、跳过原方法或多次调用原方法。
+ * 转换时，原方法体会被迁移到私有 synthetic 方法，原方法名与原描述符会保留给新的 wrapper。
  *
  * ASM 方法要求：
  *
  * - handler 参数先按目标方法声明顺序接收原方法参数
  * - 下一参数必须是 [Operation]，用于执行被包裹的原目标方法
- * - handler 返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 必须返回 `void`
+ * - 实例目标方法不会把 `this` 作为 handler 参数；[Operation] 已绑定当前 receiver，[Operation.call] 只传目标方法参数
+ * - handler 返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 必须返回 `Unit` / `void`
+ * - 不支持构造器 `<init>`、类初始化器 `<clinit>`、`abstract` 方法或 `native` 方法
  * - [require] / [allow] 可约束实际整方法包裹数量，目标方法漂移时会在转换阶段失败
  * - [expect] 用于调试期望整方法包裹数量，不一致时只输出警告，不阻断转换
  *
