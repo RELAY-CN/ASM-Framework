@@ -35,6 +35,7 @@ import kim.der.asm.api.annotation.RemoveSynchronized
 import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.api.annotation.Shift
 import kim.der.asm.api.annotation.Slice
+import kim.der.asm.api.annotation.WrapMethod
 import kim.der.asm.api.annotation.WrapOperation
 import kim.der.asm.api.annotation.WrapWithCondition
 import kim.der.asm.transformer.AsmProcessor
@@ -1922,6 +1923,19 @@ class FrameworkReliabilityTest {
         assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
         assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
         assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
+    fun wrapMethodCanCallOriginalStaticMethodWithChangedArguments() {
+        AsmRegistry.register(WrapMethodStaticTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapMethodStaticTarget", wrapMethodStaticTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapMethodStaticTarget", transformed)
+        val result =
+            clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType)
+                .invoke(null, "raw", 7)
+
+        assertEquals("RAW8-wrapped", result)
     }
 
     @Test
@@ -5971,6 +5985,17 @@ class FrameworkReliabilityTest {
         ): String = "wrapped-${operation.call(value + 1)}"
     }
 
+    @AsmMixin("WrapMethodStaticTarget")
+    object WrapMethodStaticTargetMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;I)Ljava/lang/String;")
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            count: Int,
+            operation: Operation<String>,
+        ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
+    }
+
     @AsmMixin("ModifyReceiverParamTarget")
     object WrapOperationWithTargetParamsMixin {
         @WrapOperation(
@@ -8400,6 +8425,40 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wrapMethodStaticTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapMethodStaticTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "value",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                false,
+            )
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(I)Ljava/lang/StringBuilder;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
             visitEnd()
         }
         cw.visitEnd()
