@@ -1825,6 +1825,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationExposesCountContractParameters() {
+        val methods = WrapOperation::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun wrapOperationSliceLimitsInvokeCallMatchesBetweenFromAndTo() {
         AsmRegistry.register(WrapOperationSliceMixin::class.java)
 
