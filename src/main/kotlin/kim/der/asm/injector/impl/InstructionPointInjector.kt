@@ -61,7 +61,12 @@ class InstructionPointInjector(
         val matcher = buildMatcher(injectAnnotation.at.target)
         val instructions = target.instructions
         val insns = instructions.toArray()
-        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns, injectAnnotation.slice)
+        val (sliceStartIndex, sliceEndIndex) =
+            if (usesSliceRange()) {
+                resolveSliceRange(insns, injectAnnotation.slice)
+            } else {
+                0 to insns.size
+            }
         var injectionCount = 0
         var matchedOrdinal = 0
 
@@ -88,6 +93,8 @@ class InstructionPointInjector(
 
         return injectionCount
     }
+
+    private fun usesSliceRange(): Boolean = point == InjectionPoint.LOAD || point == InjectionPoint.STORE
 
     private fun matchesOrdinal(
         currentOrdinal: Int,
