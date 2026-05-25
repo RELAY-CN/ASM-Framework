@@ -3326,33 +3326,31 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun asmInjectLoadFailsWithUnsupportedInjectionPoint() {
-        AsmRegistry.register(UnsupportedLoadInjectMixin::class.java)
+    fun asmInjectCanRunBeforeLocalVariableLoad() {
+        AsmRegistry.register(LoadInjectMixin::class.java)
+        LoadInjectMixin.injectCount = 0
 
-        val exception =
-            assertThrows(AsmTransformException::class.java) {
-                AsmProcessor().transform("LoadVariableTarget", loadVariableTargetBytes(), javaClass.classLoader)
-            }
+        val transformed = AsmProcessor().transform("LoadVariableTarget", loadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
 
-        assertEquals(
-            true,
-            exception.cause?.message?.contains("InjectionPoint.LOAD is supported only by @ModifyVariable") == true,
-        )
+        assertEquals("local", result)
+        assertEquals(1, LoadInjectMixin.injectCount)
     }
 
     @Test
-    fun asmInjectStoreFailsWithUnsupportedInjectionPoint() {
-        AsmRegistry.register(UnsupportedStoreInjectMixin::class.java)
+    fun asmInjectCanRunAfterLocalVariableStore() {
+        AsmRegistry.register(StoreInjectMixin::class.java)
+        StoreInjectMixin.injectCount = 0
 
-        val exception =
-            assertThrows(AsmTransformException::class.java) {
-                AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
-            }
+        val transformed = AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
 
-        assertEquals(
-            true,
-            exception.cause?.message?.contains("InjectionPoint.STORE is supported only by @ModifyVariable") == true,
-        )
+        assertEquals("local", result)
+        assertEquals(1, StoreInjectMixin.injectCount)
     }
 
     @Test
@@ -7304,18 +7302,34 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("LoadVariableTarget")
-    object UnsupportedLoadInjectMixin {
-        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.LOAD)
+    object LoadInjectMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.LOAD,
+            at = At(value = InjectionPoint.LOAD, shift = Shift.BEFORE),
+            ordinal = 0,
+        )
         @JvmStatic
         fun inject() {
+            injectCount++
         }
     }
 
     @AsmMixin("StoreVariableTarget")
-    object UnsupportedStoreInjectMixin {
-        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.STORE)
+    object StoreInjectMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.STORE,
+            at = At(value = InjectionPoint.STORE, shift = Shift.AFTER),
+            ordinal = 0,
+        )
         @JvmStatic
         fun inject() {
+            injectCount++
         }
     }
 
