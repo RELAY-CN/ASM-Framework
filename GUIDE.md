@@ -118,6 +118,7 @@ val transformedBytes = processor.transform(
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
 - **@Copy** - 复制方法到目标类
+- **@Unique** - 避免复制辅助方法与目标类已有方法冲突
 - **@AddField** - 添加字段
 - **@RemoveField** - 移除字段
 - **@RemoveMethod** - 移除方法
@@ -694,6 +695,15 @@ object ModernizeMixin {
     @Overwrite(method = "oldMethod()V")
     @JvmStatic
     fun oldMethod() = println("Modern implementation")
+
+    @Overwrite(method = "displayName()Ljava/lang/String;")
+    @JvmStatic
+    fun displayName(): String = normalizeName()
+
+    @Copy("normalizeName()Ljava/lang/String;")
+    @Unique
+    @JvmStatic
+    fun normalizeName(): String = "modern"
 }
 ```
 
@@ -710,6 +720,12 @@ object SafeDefaultMixin {
     fun healthCheck(): String = "ok"
 }
 ```
+
+`@Copy` 可把 Mixin 中的辅助方法复制到目标类中，供 `@Overwrite` 或其他被复制方法调用。默认情况下，
+目标类已存在同名同描述符方法时 `@Copy` 会跳过，避免覆盖目标类逻辑；如果该辅助方法只服务于当前 Mixin，
+可以同时标记 `@Unique`。当发生同签名冲突时，框架会把该辅助方法复制为私有 synthetic 唯一方法，
+并改写同一个 Mixin 内 `@Overwrite` / `@Copy` 方法体中对该辅助方法的调用。当前 `@Unique` 支持的是
+`@Copy` 方法冲突重命名，不会处理字段唯一化。
 
 ### 场景 6: 访问私有字段
 
