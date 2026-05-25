@@ -27,6 +27,7 @@ import kim.der.asm.api.annotation.Redirect
 import kim.der.asm.api.annotation.RedirectAllMethods
 import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Overwrite
+import kim.der.asm.api.annotation.ReplaceAllMethods
 import kim.der.asm.api.annotation.RemoveField
 import kim.der.asm.api.annotation.RemoveInterface
 import kim.der.asm.api.annotation.RemoveMethod
@@ -2568,6 +2569,18 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun overwriteCanReplaceMethodAfterReplaceAllMethodsInSameMixin() {
+        AsmRegistry.register(ReplaceAllThenOverwriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("overwritten", result)
     }
 
     @Test
@@ -6576,6 +6589,14 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun missing() {
         }
+    }
+
+    @ReplaceAllMethods
+    @AsmMixin("ReturnTarget")
+    object ReplaceAllThenOverwriteMixin {
+        @Overwrite("value()Ljava/lang/String;")
+        @JvmStatic
+        fun value(): String = "overwritten"
     }
 
     @AsmMixin("StrictTarget")
