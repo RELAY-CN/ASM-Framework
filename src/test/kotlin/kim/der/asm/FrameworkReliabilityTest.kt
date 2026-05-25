@@ -132,6 +132,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun injectionPointExposesInstanceofExpressionPoint() {
+        val names = InjectionPoint.entries.map { it.name }
+
+        assertEquals(true, "INSTANCEOF" in names)
+    }
+
+    @Test
     fun overwriteWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleOverwriteMixin::class.java)
 
