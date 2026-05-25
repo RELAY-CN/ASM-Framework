@@ -3594,6 +3594,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun asmInjectFieldSliceLimitsFieldReadsBetweenFromAndTo() {
+        AsmRegistry.register(FieldReadSliceMixin::class.java)
+        FieldReadSliceMixin.injectCount = 0
+
+        val transformed = AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("raw", result)
+        assertEquals(1, FieldReadSliceMixin.injectCount)
+    }
+
+    @Test
     fun fieldInjectWithMissingTargetFailsDuringTransform() {
         AsmRegistry.register(MissingFieldReadInjectMixin::class.java)
 
@@ -3612,6 +3628,22 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("readName").invoke(instance)
 
         assertEquals(null, result)
+    }
+
+    @Test
+    fun asmInjectFieldAssignSliceLimitsFieldWritesBetweenFromAndTo() {
+        AsmRegistry.register(FieldAssignSliceMixin::class.java)
+        FieldAssignSliceMixin.injectCount = 0
+
+        val transformed =
+            AsmProcessor().transform("SliceFieldAssignTarget", sliceFieldAssignTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldAssignTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeSelected", String::class.java, String::class.java).invoke(instance, "outside", "inside")
+
+        assertEquals("inside", clazz.getField("name").get(instance))
+        assertEquals(1, FieldAssignSliceMixin.injectCount)
     }
 
     @Test
@@ -7555,6 +7587,27 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceFieldReadTarget")
+    object FieldReadSliceMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "readSelected()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
     @AsmMixin("FieldPointTarget")
     object MissingFieldReadInjectMixin {
         @AsmInject(
@@ -8027,6 +8080,27 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun inject() {
+        }
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object FieldAssignSliceMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            target = InjectionPoint.FIELD_ASSIGN,
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
         }
     }
 
@@ -9736,6 +9810,70 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.PUTFIELD, "FieldPointTarget", "name", "Ljava/lang/String;")
             visitInsn(Opcodes.RETURN)
             visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceFieldReadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceFieldReadTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readSelected", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceFieldReadTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceFieldReadTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeName", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceFieldReadTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceFieldAssignTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceFieldAssignTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PUBLIC, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeSelected", "(Ljava/lang/String;Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceFieldAssignTarget", "name", "Ljava/lang/String;")
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceFieldAssignTarget", "name", "Ljava/lang/String;")
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
