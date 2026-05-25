@@ -1914,6 +1914,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodAnnotationIsAvailableForWholeMethodWrapping() {
+        val annotationClass = Class.forName("kim.der.asm.api.annotation.WrapMethod")
+        val methods = annotationClass.declaredMethods.associateBy { it.name }
+
+        assertEquals(String::class.java, methods["method"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
+        assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
