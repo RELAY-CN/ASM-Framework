@@ -64,7 +64,8 @@ annotation class AsmInject(
  *
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[FIELD]、
  * [FIELD_ASSIGN]、[NEW]、[CAST] 与 [THROW]；[LOAD] 与 [STORE] 当前用于
- * [kim.der.asm.api.annotation.ModifyVariable]。
+ * [kim.der.asm.api.annotation.ModifyVariable]，[INSTANCEOF] 当前用于
+ * [kim.der.asm.api.annotation.ModifyExpressionValue]。
  * 其中指令点注入会在匹配指令前后插入 handler，
  * 不会替换原始指令或自动传递栈顶操作数。
  *
@@ -105,6 +106,9 @@ enum class InjectionPoint {
     /** 类型转换后 */
     CAST,
 
+    /** instanceof 判断后 */
+    INSTANCEOF,
+
     /** 抛出异常前 */
     THROW,
 }
@@ -113,7 +117,8 @@ enum class InjectionPoint {
  * 调用点定位信息。
  *
  * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.NEW] 与 [InjectionPoint.CAST] 的匹配目标，并通过 [shift] 指定在匹配指令前/后插入 handler。
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF] 的匹配目标，
+ * 并通过 [shift] 指定在匹配指令前/后插入 handler。
  *
  * 注意：
  *
@@ -122,6 +127,7 @@ enum class InjectionPoint {
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 只支持 BEFORE 或 REPLACE；AFTER 会在未初始化对象仍位于栈顶时插入调用，当前实现会拒绝该配置。
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
+ * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
  * - [Redirect] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取。
