@@ -1595,6 +1595,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInstanceofRewritesBooleanResult() {
+        AsmRegistry.register(ModifyExpressionValueInstanceofMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InstanceofTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        assertEquals(false, clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType).invoke(instance, 42, false))
+        assertEquals(true, clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType).invoke(instance, 42, true))
+    }
+
+    @Test
     fun modifyReceiverAtInvokeReplacesInstanceCallReceiver() {
         AsmRegistry.register(ModifyReceiverConcatMixin::class.java)
 
@@ -5654,6 +5666,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object ModifyExpressionValueInstanceofMixin {
+        @ModifyExpressionValue(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun modify(
+            original: Boolean,
+            force: Boolean,
+        ): Boolean = original || force
     }
 
     @AsmMixin("ModifyReceiverTarget")
@@ -9775,6 +9800,22 @@ class FrameworkReliabilityTest {
             visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun instanceofTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InstanceofTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "isString", "(Ljava/lang/Object;Z)Z", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.INSTANCEOF, "java/lang/String")
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 3)
             visitEnd()
         }
         cw.visitEnd()
