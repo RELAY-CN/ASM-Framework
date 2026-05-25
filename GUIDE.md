@@ -693,6 +693,9 @@ object SafeDefaultMixin {
 class AccessMixin {
     @Shadow()
     private val privateField: String? = null
+
+    @Shadow("actualSecret")
+    private val secretAlias: String? = null
     
     @Accessor("privateField")
     fun getPrivateField(): String = throw UnsupportedOperationException()
@@ -703,6 +706,10 @@ class AccessMixin {
     }
 }
 ```
+
+`@Shadow()` 默认按声明名匹配目标字段或方法；如果 ASM 侧需要使用别名，可直接写目标名，例如
+`@Shadow("actualSecret") private val secretAlias: String? = null`。兼容 Mixin 风格的 `shadow_` 前缀：
+`@Shadow("shadow_privateField")` 会匹配目标成员 `privateField`。
 
 `@Accessor` 可按方法形态生成 getter 或 setter。getter 必须无参数并返回字段类型，
 setter 必须接收一个字段类型参数并返回 `void`。
@@ -1074,8 +1081,17 @@ Shadow 字段必须在 `class` 中声明，不能在 `object` 中：
 class MyMixin {  // ✅ 使用 class
     @Shadow()
     private val field: String? = null
+
+    @Shadow("actualName")
+    private val aliasName: String? = null
 }
 ```
+
+Shadow 目标名称解析规则：
+
+- `@Shadow()` 使用声明名匹配目标成员
+- `@Shadow("shadow_name")` 去掉 `shadow_` 前缀后匹配目标成员 `name`
+- `@Shadow("actualName")` 直接匹配显式目标成员 `actualName`
 
 ### 8. 性能考虑
 
@@ -1155,6 +1171,7 @@ A: 目前不支持，建议在注入方法中使用同步代码。
 
 - 将 Mixin 改为 `class` 而不是 `object`
 - 确保字段类型与目标类匹配
+- 若 ASM 字段名与目标字段名不同，使用 `@Shadow("目标字段名")` 或 `shadow_` 前缀声明目标名
 
 ### 静态方法注入失败
 

@@ -642,10 +642,13 @@ annotation class Redirect(
  * 用于在 ASM 类中声明对目标类字段/方法的“引用占位”，以便在转换阶段进行校验或修饰符调整（语义参考 Mixin 的 `@Shadow`）。
  * 当前实现会基于 [method] 与 [prefix] 解析目标名称：
  *
+ * - 当 [method] 为空时，默认使用字段名/方法名
  * - 当 [method] 以 [prefix] 开头时，目标名称为去掉前缀后的部分
- * - 否则默认使用字段名/方法名
+ * - 否则将 [method] 作为显式目标字段名/方法名
  *
- * @param method 目标名称提示；建议使用 `shadow_` 前缀显式指定
+ * `@Overwrite` 等复制方法体的场景会把对 Shadow 成员的引用改写为目标类对应成员。
+ *
+ * @param method 目标名称提示；为空时使用声明名，非空时可直接指定目标名或使用 `shadow_` 前缀
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
