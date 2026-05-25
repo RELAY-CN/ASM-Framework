@@ -370,6 +370,9 @@ annotation class WrapOperation(
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
  * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 模式支持 INVOKE 边界切片
+ * @param require 最小命中数；大于 0 时实际条件包裹数必须不少于该值
+ * @param expect 期望命中数；设置为非默认值时不一致会输出警告
+ * @param allow 最大命中数；大于等于 0 时实际条件包裹数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -381,6 +384,9 @@ annotation class WrapWithCondition(
     val at: At = At(value = InjectionPoint.INVOKE),
     val ordinal: Int = -1,
     val slice: Slice = Slice(),
+    val require: Int = 0,
+    val expect: Int = 1,
+    val allow: Int = -1,
     val remap: Boolean = false,
 )
 
