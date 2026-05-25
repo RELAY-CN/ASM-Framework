@@ -125,6 +125,7 @@ class TargetClassContext(
             val modifyArgsAnnotation = method.getAnnotation(ModifyArgs::class.java)
             val modifyReceiverAnnotation = method.getAnnotation(ModifyReceiver::class.java)
             val wrapOperationAnnotation = method.getAnnotation(WrapOperation::class.java)
+            val wrapMethodAnnotation = method.getAnnotation(WrapMethod::class.java)
             val wrapWithConditionAnnotation = method.getAnnotation(WrapWithCondition::class.java)
             val modifyExpressionValueAnnotation = method.getAnnotation(ModifyExpressionValue::class.java)
             val modifyVariableAnnotation = method.getAnnotation(ModifyVariable::class.java)
@@ -170,6 +171,11 @@ class TargetClassContext(
                 }
                 wrapOperationAnnotation != null -> {
                     if (applyWrapOperation(method, wrapOperationAnnotation)) {
+                        transformed = true
+                    }
+                }
+                wrapMethodAnnotation != null -> {
+                    if (applyWrapMethod(method, wrapMethodAnnotation)) {
                         transformed = true
                     }
                 }
@@ -297,6 +303,7 @@ class TargetClassContext(
                         method.getAnnotation(ModifyArgs::class.java) != null ||
                         method.getAnnotation(ModifyReceiver::class.java) != null ||
                         method.getAnnotation(WrapOperation::class.java) != null ||
+                        method.getAnnotation(WrapMethod::class.java) != null ||
                         method.getAnnotation(WrapWithCondition::class.java) != null ||
                         method.getAnnotation(ModifyExpressionValue::class.java) != null ||
                         method.getAnnotation(ModifyVariable::class.java) != null ||
@@ -1406,6 +1413,298 @@ class TargetClassContext(
     }
 
     /**
+     * 应用 @WrapMethod 包裹整个目标方法。
+     */
+    private fun applyWrapMethod(
+        method: Method,
+        annotation: WrapMethod,
+    ): Boolean {
+        val methodSignature =
+            if (annotation.method.isEmpty()) {
+                buildWrapMethodSignature(method)
+            } else {
+                annotation.method
+            }
+        val targetMethod = requireTargetMethod(methodSignature)
+        wrapMethod(method, targetMethod)
+        return requireWrapMethodCount(1, annotation, method, methodSignature)
+    }
+
+    private fun wrapMethod(
+        handlerMethod: Method,
+        targetMethod: MethodNode,
+    ) {
+        if (targetMethod.name == "<init>" || targetMethod.name == "<clinit>") {
+            throw IllegalStateException("@WrapMethod does not support constructor or class initializer targets")
+        }
+        if ((targetMethod.access and Opcodes.ACC_ABSTRACT) != 0 || (targetMethod.access and Opcodes.ACC_NATIVE) != 0) {
+            throw IllegalStateException("@WrapMethod target ${targetMethod.name}${targetMethod.desc} must have a method body")
+        }
+
+        validateWrapMethodHandlerSignature(handlerMethod, targetMethod)
+
+        val originalName = targetMethod.name
+        val originalAccess = targetMethod.access
+        val originalSignature = targetMethod.signature
+        val originalExceptions = targetMethod.exceptions?.toTypedArray()
+        val wrappedOriginalName = nextWrappedOriginalMethodName(originalName, targetMethod.desc)
+
+        targetMethod.name = wrappedOriginalName
+        targetMethod.access = toWrappedOriginalAccess(originalAccess)
+
+        classNode.methods.add(
+            buildWrapMethodWrapper(
+                handlerMethod,
+                originalName,
+                originalAccess,
+                originalSignature,
+                originalExceptions,
+                targetMethod.desc,
+                wrappedOriginalName,
+            ),
+        )
+    }
+
+    private fun buildWrapMethodWrapper(
+        handlerMethod: Method,
+        originalName: String,
+        originalAccess: Int,
+        originalSignature: String?,
+        originalExceptions: Array<String>?,
+        targetDesc: String,
+        wrappedOriginalName: String,
+    ): MethodNode {
+        val wrapper =
+            MethodNode(
+                originalAccess and Opcodes.ACC_ABSTRACT.inv() and Opcodes.ACC_NATIVE.inv(),
+                originalName,
+                targetDesc,
+                originalSignature,
+                originalExceptions,
+            )
+        val isStaticTarget = (originalAccess and Opcodes.ACC_STATIC) != 0
+        val targetParamTypes = Type.getArgumentTypes(targetDesc)
+        val returnType = Type.getReturnType(targetDesc)
+        val handlerReturnType = Type.getReturnType(handlerMethod)
+        val il = InsnList()
+
+        addWrapMethodHandlerOwner(il, handlerMethod)
+        loadWrapMethodParameters(il, targetDesc, isStaticTarget)
+        createWrapMethodOperation(il, wrappedOriginalName, targetDesc, isStaticTarget, targetParamTypes)
+        il.add(
+            MethodInsnNode(
+                wrapMethodHandlerOpcode(handlerMethod),
+                Type.getType(asmInfo.asmClass).internalName,
+                handlerMethod.name,
+                Type.getMethodDescriptor(handlerMethod),
+                false,
+            ),
+        )
+        if (returnType != Type.VOID_TYPE && returnType != handlerReturnType && returnType.sort >= Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, returnType.internalName))
+        }
+        il.add(InstructionUtil.makeReturn(returnType))
+
+        wrapper.instructions = il
+        wrapper.maxLocals = methodParameterLocalCount(targetDesc, isStaticTarget)
+        wrapper.maxStack = 0
+        return wrapper
+    }
+
+    private fun buildWrapMethodSignature(method: Method): String {
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(method)
+        val operationIndex = actualParams.indexOfFirst { it == operationType }
+        if (operationIndex < 0) {
+            throw IllegalStateException("@WrapMethod handler ${method.name} must declare Operation parameter")
+        }
+        val targetParamTypes = actualParams.take(operationIndex).toTypedArray()
+        return method.name + Type.getMethodDescriptor(Type.getReturnType(method), *targetParamTypes)
+    }
+
+    private fun validateWrapMethodHandlerSignature(
+        handlerMethod: Method,
+        targetMethod: MethodNode,
+    ) {
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        val actualParams = Type.getArgumentTypes(handlerMethod)
+        val operationType = Type.getType(Operation::class.java)
+        val operationIndex = targetParamTypes.size
+
+        if (actualParams.size != operationIndex + 1 || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapMethod handler ${handlerMethod.name} must declare target parameters followed by Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        targetParamTypes.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isWrapMethodParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapMethod handler ${handlerMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetReturnType = Type.getReturnType(targetMethod.desc)
+        val handlerReturnType = Type.getReturnType(handlerMethod)
+        if (!isWrapMethodReturnCompatible(targetReturnType, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapMethod handler ${handlerMethod.name} return type mismatch: " +
+                    "original $targetReturnType, handler $handlerReturnType",
+            )
+        }
+    }
+
+    private fun createWrapMethodOperation(
+        il: InsnList,
+        methodName: String,
+        methodDesc: String,
+        isStaticTarget: Boolean,
+        targetParamTypes: Array<Type>,
+    ) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(LdcInsnNode(Type.getObjectType(className)))
+        il.add(LdcInsnNode(methodName))
+        il.add(LdcInsnNode(methodDesc))
+        il.add(InsnNode(if (isStaticTarget) Opcodes.ICONST_1 else Opcodes.ICONST_0))
+        il.add(LdcInsnNode(targetParamTypes.size))
+        il.add(TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Class"))
+        for (index in targetParamTypes.indices) {
+            il.add(InsnNode(Opcodes.DUP))
+            il.add(LdcInsnNode(index))
+            il.add(InstructionUtil.loadType(targetParamTypes[index]))
+            il.add(InsnNode(Opcodes.AASTORE))
+        }
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;Z[Ljava/lang/Class;)V",
+                false,
+            ),
+        )
+    }
+
+    private fun addWrapMethodHandlerOwner(
+        il: InsnList,
+        handlerMethod: Method,
+    ) {
+        if (Modifier.isStatic(handlerMethod.modifiers)) {
+            return
+        }
+
+        val ownerType = Type.getType(asmInfo.asmClass)
+        if (isAsmKotlinObject()) {
+            il.add(
+                FieldInsnNode(
+                    Opcodes.GETSTATIC,
+                    ownerType.internalName,
+                    "INSTANCE",
+                    "L${ownerType.internalName};",
+                ),
+            )
+            return
+        }
+
+        il.add(TypeInsnNode(Opcodes.NEW, ownerType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, ownerType.internalName, "<init>", "()V", false))
+    }
+
+    private fun loadWrapMethodParameters(
+        il: InsnList,
+        targetDesc: String,
+        isStaticTarget: Boolean,
+    ) {
+        var varIndex = if (isStaticTarget) 0 else 1
+        for (paramType in Type.getArgumentTypes(targetDesc)) {
+            il.add(InstructionUtil.loadParam(paramType, varIndex))
+            varIndex += paramType.size
+        }
+    }
+
+    private fun methodParameterLocalCount(
+        targetDesc: String,
+        isStaticTarget: Boolean,
+    ): Int {
+        var count = if (isStaticTarget) 0 else 1
+        for (paramType in Type.getArgumentTypes(targetDesc)) {
+            count += paramType.size
+        }
+        return count
+    }
+
+    private fun wrapMethodHandlerOpcode(handlerMethod: Method): Int =
+        if (Modifier.isStatic(handlerMethod.modifiers)) {
+            Opcodes.INVOKESTATIC
+        } else {
+            Opcodes.INVOKEVIRTUAL
+        }
+
+    private fun toWrappedOriginalAccess(originalAccess: Int): Int =
+        (originalAccess and (Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED).inv() and
+            Opcodes.ACC_ABSTRACT.inv() and Opcodes.ACC_NATIVE.inv()) or
+            Opcodes.ACC_PRIVATE or Opcodes.ACC_SYNTHETIC
+
+    private fun nextWrappedOriginalMethodName(
+        originalName: String,
+        methodDesc: String,
+    ): String {
+        val baseName = "\$asm\$wrapMethod\$original\$$originalName\$${methodDesc.hashCode().toUInt().toString(16)}"
+        var candidate = baseName
+        var index = 0
+        while (classNode.methods.any { it.name == candidate && it.desc == methodDesc }) {
+            index++
+            candidate = "$baseName\$$index"
+        }
+        return candidate
+    }
+
+    private fun isAsmKotlinObject(): Boolean =
+        try {
+            val instanceField = asmInfo.asmClass.getDeclaredField("INSTANCE")
+            instanceField.isAccessible = true
+            instanceField.get(null) != null
+        } catch (_: NoSuchFieldException) {
+            false
+        }
+
+    private fun isWrapMethodParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
+            return actual.sort == Type.OBJECT && actual.internalName == "java/lang/Object"
+        }
+        return false
+    }
+
+    private fun isWrapMethodReturnCompatible(
+        original: Type,
+        handler: Type,
+    ): Boolean {
+        if (original == Type.VOID_TYPE) {
+            return handler == Type.VOID_TYPE
+        }
+        if (handler == Type.VOID_TYPE) {
+            return false
+        }
+        if (original == handler) {
+            return true
+        }
+        return (original.sort == Type.OBJECT || original.sort == Type.ARRAY) && handler.sort >= Type.ARRAY
+    }
+
+    /**
      * 收集父类和接口的方法信息
      */
     private fun collectParentMethods(): Map<String, List<String>> {
@@ -1700,6 +1999,37 @@ class TargetClassContext(
         if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
             System.err.println(
                 "Warning: @WrapOperation handler ${method.name} expected ${annotation.expect} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        return injectionCount > 0
+    }
+
+    private fun requireWrapMethodCount(
+        injectionCount: Int,
+        annotation: WrapMethod,
+        method: Method,
+        targetMethodSignature: String,
+    ): Boolean {
+        val requiredCount = if (annotation.require > 0) annotation.require else 1
+        if (injectionCount < requiredCount) {
+            throw IllegalStateException(
+                "@WrapMethod handler ${method.name} requires at least $requiredCount injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
+            throw IllegalStateException(
+                "@WrapMethod handler ${method.name} allows at most ${annotation.allow} injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
+            System.err.println(
+                "Warning: @WrapMethod handler ${method.name} expected ${annotation.expect} injection(s), " +
                     "actual $injectionCount in target method $targetMethodSignature of class $className",
             )
         }
