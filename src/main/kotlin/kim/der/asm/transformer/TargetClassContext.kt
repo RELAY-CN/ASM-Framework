@@ -595,8 +595,14 @@ class TargetClassContext(
             }
 
         val targetMethod =
-            findTargetMethod("$targetMethodName${Type.getMethodDescriptor(method)}")
-                ?: throw IllegalStateException("Invoker target method $targetMethodName not found in $className")
+            if (targetMethodName == "<init>") {
+                val constructorSignature = buildConstructorSignature(method)
+                findTargetMethod(constructorSignature)
+                    ?: throw IllegalStateException("Invoker target constructor $constructorSignature not found in $className")
+            } else {
+                findTargetMethod("$targetMethodName${Type.getMethodDescriptor(method)}")
+                    ?: throw IllegalStateException("Invoker target method $targetMethodName not found in $className")
+            }
 
         // 生成调用器方法
         val invokerMethod = generateInvokerMethod(method, targetMethod, targetMethodName)
@@ -738,6 +744,10 @@ class TargetClassContext(
         targetMethod: MethodNode,
         methodName: String,
     ): MethodNode {
+        if (methodName == "<init>") {
+            return generateConstructorInvokerMethod(asmMethod, targetMethod)
+        }
+
         val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
         val asmMethodStatic =
             java.lang.reflect.Modifier
@@ -817,6 +827,69 @@ class TargetClassContext(
             maxStack += if (returnType.sort == Type.LONG || returnType.sort == Type.DOUBLE) 2 else 1
         }
         methodNode.maxStack = maxStack
+
+        return methodNode
+    }
+
+    /**
+     * 构建构造器调用器目标签名。
+     *
+     * `@Invoker("<init>")` 的 ASM 方法返回类型用于生成工厂方法签名，目标构造器本身始终返回 `void`。
+     */
+    private fun buildConstructorSignature(asmMethod: Method): String {
+        val argumentDesc = Type.getArgumentTypes(asmMethod).joinToString(separator = "") { it.descriptor }
+        return "<init>($argumentDesc)V"
+    }
+
+    /**
+     * 生成构造器调用器方法。
+     *
+     * 构造器调用器会在目标类中生成一个静态工厂方法，创建目标类实例并调用匹配构造器。
+     */
+    private fun generateConstructorInvokerMethod(
+        asmMethod: Method,
+        targetMethod: MethodNode,
+    ): MethodNode {
+        if (!java.lang.reflect.Modifier.isStatic(asmMethod.modifiers)) {
+            throw IllegalStateException("Constructor invoker method must be static")
+        }
+
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        val constructorParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        if (!asmParamTypes.contentEquals(constructorParamTypes)) {
+            throw IllegalStateException("Constructor invoker parameters must match target constructor parameters")
+        }
+
+        val returnType = Type.getReturnType(asmMethod)
+        val returnsTargetType = returnType.internalName == className || returnType.internalName == "java/lang/Object"
+        if (returnType.sort != Type.OBJECT || !returnsTargetType) {
+            throw IllegalStateException("Constructor invoker return type must be $className or java/lang/Object")
+        }
+
+        val methodNode =
+            MethodNode(
+                Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC or Opcodes.ACC_SYNTHETIC,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                null,
+                null,
+            )
+        val il = InsnList()
+        il.add(TypeInsnNode(Opcodes.NEW, className))
+        il.add(InsnNode(Opcodes.DUP))
+
+        var varIndex = 0
+        for (paramType in constructorParamTypes) {
+            il.add(InstructionUtil.loadParam(paramType, varIndex))
+            varIndex += paramType.size
+        }
+
+        il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, className, "<init>", targetMethod.desc, false))
+        il.add(InsnNode(Opcodes.ARETURN))
+
+        methodNode.instructions = il
+        methodNode.maxLocals = varIndex
+        methodNode.maxStack = 2 + constructorParamTypes.sumOf { it.size }
 
         return methodNode
     }
