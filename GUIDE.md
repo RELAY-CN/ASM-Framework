@@ -724,7 +724,7 @@ object SafeDefaultMixin {
 `@Copy` 可把 Mixin 中的辅助方法复制到目标类中，供 `@Overwrite` 或其他被复制方法调用。默认情况下，
 目标类已存在同名同描述符方法时 `@Copy` 会跳过，避免覆盖目标类逻辑；如果该辅助方法只服务于当前 Mixin，
 可以同时标记 `@Unique`。当发生同签名冲突时，框架会把该辅助方法复制为私有 synthetic 唯一方法，
-并改写同一个 Mixin 内 `@Overwrite` / `@Copy` 方法体中对该辅助方法的调用。当前 `@Unique` 支持的是
+并改写同一个 Mixin 内 `@Overwrite` / `@Copy` / inline `@AsmInject` 方法体中对该辅助方法的调用。当前 `@Unique` 支持的是
 `@Copy` 方法冲突重命名，不会处理字段唯一化。
 
 ### 场景 6: 访问私有字段

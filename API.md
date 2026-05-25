@@ -202,7 +202,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 当 `@Copy` 目标方法签名与目标类已有方法冲突时，未标记 `@Unique` 的复制方法会跳过并输出 warning；
 标记 `@Unique` 后，框架会为复制方法生成唯一名称，访问级别设为 `private synthetic`，并保留静态性。
-同一个 Mixin 中 `@Overwrite` 与 `@Copy` 方法体里对该复制方法的调用会被同步改写到唯一名称。
+同一个 Mixin 中 `@Overwrite`、`@Copy` 与 inline `@AsmInject` 方法体里对该复制方法的调用会被同步改写到唯一名称。
 
 当前 `@Unique` 不处理字段唯一化，也不改变 `@AddField` 的同名字段跳过语义。
 
