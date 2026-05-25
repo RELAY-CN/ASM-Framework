@@ -599,7 +599,7 @@ object ValidationMixin {
 `Operation<Int>`。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
 参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`
 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被包裹，
-`ordinal` 会在切片内重新计数。
+`ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 
 `@WrapWithCondition` 用于保留原 `void` 调用、字段写入或数组元素写入但按条件跳过副作用的场景。
 handler 返回 `true` 时继续执行原指令，返回 `false` 时跳过；调用模式下 handler 先接收原调用
@@ -920,7 +920,7 @@ fun onEveryReturn() {
 }
 ```
 
-同样的契约也适用于关键参数修改、关键参数组修改、关键 receiver 修改、关键变量修改、关键返回值修改、关键表达式值修改、关键常量修改和关键重定向：
+同样的契约也适用于关键参数修改、关键参数组修改、关键 receiver 修改、关键操作包裹、关键变量修改、关键返回值修改、关键表达式值修改、关键常量修改和关键重定向：
 
 ```kotlin
 @ModifyArg(
@@ -949,6 +949,18 @@ fun normalizeArguments(args: Args) {
     allow = 1,
 )
 fun replaceReceiver(original: String): String = original.trim()
+
+@WrapOperation(
+    method = "render(Ljava/lang/String;)Ljava/lang/String;",
+    at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;"),
+    require = 1,
+    allow = 1,
+)
+fun wrapRenderConcat(
+    receiver: String,
+    value: String,
+    operation: Operation<String>,
+): String = operation.call(receiver.trim(), value)
 
 @ModifyVariable(
     method = "normalize(Ljava/lang/String;)Ljava/lang/String;",
