@@ -3315,6 +3315,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokerCanGenerateConstructorFactoryMethod() {
+        AsmRegistry.register(ConstructorInvokerMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorInvokerTarget", constructorInvokerTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorInvokerTarget", transformed)
+        val created = clazz.getMethod("create", String::class.java).invoke(null, "created")
+        val result = clazz.getMethod("value").invoke(created)
+
+        assertEquals("created", result)
+    }
+
+    @Test
     fun modifyConstantDoesNotTreatNewInstructionAsClassConstant() {
         AsmRegistry.register(ClassConstantModifyMixin::class.java)
 
@@ -7135,6 +7148,13 @@ class FrameworkReliabilityTest {
         fun invokeTarget(): String = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("ConstructorInvokerTarget")
+    object ConstructorInvokerMixin {
+        @Invoker("<init>")
+        @JvmStatic
+        fun create(value: String): Any = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("NewInstructionTarget")
     object ClassConstantModifyMixin {
         @ModifyConstant(method = "create()Ljava/lang/StringBuilder;")
@@ -9576,6 +9596,34 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun constructorInvokerTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorInvokerTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "value", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "ConstructorInvokerTarget", "value", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "ConstructorInvokerTarget", "value", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun newInstructionTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NewInstructionTarget", null, "java/lang/Object", null)
