@@ -2790,6 +2790,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun uniqueCopyRewritesInlineCallsToRenamedMethod() {
+        AsmRegistry.register(UniqueCopyInlineMixin::class.java)
+
+        val transformed = AsmProcessor().transform("UniqueCopyInlineTarget", uniqueCopyInlineTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("UniqueCopyInlineTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("run").invoke(instance)
+    }
+
+    @Test
     fun addInterfaceAddsMissingInterface() {
         AsmRegistry.register(AddCloseableInterfaceMixin::class.java)
 
@@ -6878,6 +6889,22 @@ class FrameworkReliabilityTest {
         fun helper(): String = "unique"
     }
 
+    @AsmMixin("UniqueCopyInlineTarget")
+    object UniqueCopyInlineMixin {
+        @AsmInject(method = "run()V", inline = true)
+        @JvmStatic
+        fun injectInline() {
+            if (helper() != "unique") {
+                throw IllegalStateException("wrong helper")
+            }
+        }
+
+        @Copy("helper()Ljava/lang/String;")
+        @Unique
+        @JvmStatic
+        fun helper(): String = "unique"
+    }
+
     @AsmMixin("InterfaceTarget")
     @AddInterface("java/io/Closeable")
     object AddCloseableInterfaceMixin
@@ -9459,6 +9486,27 @@ class FrameworkReliabilityTest {
             visitLdcInsn("target")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun uniqueCopyInlineTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "UniqueCopyInlineTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "helper", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 0)
             visitEnd()
         }
         cw.visitEnd()
