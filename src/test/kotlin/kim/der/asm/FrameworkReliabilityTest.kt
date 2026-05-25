@@ -2778,6 +2778,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun uniqueCopyRewritesOverwriteCallsToRenamedMethod() {
+        AsmRegistry.register(UniqueCopyOverwriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("UniqueCopyOverwriteTarget", uniqueCopyOverwriteTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("UniqueCopyOverwriteTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("entry").invoke(instance)
+
+        assertEquals("unique", result)
+    }
+
+    @Test
     fun addInterfaceAddsMissingInterface() {
         AsmRegistry.register(AddCloseableInterfaceMixin::class.java)
 
@@ -6854,6 +6866,18 @@ class FrameworkReliabilityTest {
         fun helper(): String = "unique"
     }
 
+    @AsmMixin("UniqueCopyOverwriteTarget")
+    object UniqueCopyOverwriteMixin {
+        @Overwrite("entry()Ljava/lang/String;")
+        @JvmStatic
+        fun entry(): String = helper()
+
+        @Copy("helper()Ljava/lang/String;")
+        @Unique
+        @JvmStatic
+        fun helper(): String = "unique"
+    }
+
     @AsmMixin("InterfaceTarget")
     @AddInterface("java/io/Closeable")
     object AddCloseableInterfaceMixin
@@ -9408,6 +9432,28 @@ class FrameworkReliabilityTest {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "UniqueCopyTarget", null, "java/lang/Object", null)
         addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "helper", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun uniqueCopyOverwriteTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "UniqueCopyOverwriteTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "entry", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("original")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
         cw.visitMethod(Opcodes.ACC_PUBLIC, "helper", "()Ljava/lang/String;", null, null).apply {
             visitCode()
             visitLdcInsn("target")
