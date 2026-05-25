@@ -60,7 +60,18 @@ class WrapOperationInjector(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    override fun inject(target: MethodNode): Boolean =
+    override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
+
+    /**
+     * 用 handler 替换匹配的原始操作，并返回实际替换数量。
+     *
+     * @param target 目标方法
+     * @return 实际替换的操作点数量
+     * @throws IllegalArgumentException 定位点、目标操作或 handler 签名不合法时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    override fun injectCount(target: MethodNode): Int =
         when (at.value) {
             InjectionPoint.INVOKE -> injectMethodCall(target)
             InjectionPoint.FIELD -> {
@@ -100,13 +111,13 @@ class WrapOperationInjector(
         }
     }
 
-    private fun injectMethodCall(target: MethodNode): Boolean {
+    private fun injectMethodCall(target: MethodNode): Int {
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
         if (targetName == null || targetDesc == null) {
             throw IllegalArgumentException("@WrapOperation INVOKE requires at.target method signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
@@ -130,7 +141,7 @@ class WrapOperationInjector(
                 target.instructions.remove(allocation.newInsn)
                 target.instructions.remove(allocation.dupInsn)
                 target.instructions.remove(insn)
-                transformed = true
+                injectionCount++
                 continue
             }
 
@@ -138,19 +149,19 @@ class WrapOperationInjector(
             val il = buildOperationWrapper(target, insn, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldRead(target: MethodNode): Boolean {
+    private fun injectFieldRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapOperation FIELD requires at.target field signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
@@ -166,19 +177,19 @@ class WrapOperationInjector(
             val il = buildFieldReadWrapper(target, insn, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
-    private fun injectFieldAssign(target: MethodNode): Boolean {
+    private fun injectFieldAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapOperation FIELD_ASSIGN requires at.target field signature")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         for (insn in target.instructions.toArray()) {
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
@@ -194,16 +205,16 @@ class WrapOperationInjector(
             val il = buildFieldAssignWrapper(target, insn, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun injectArrayAccess(
         target: MethodNode,
         mode: ArrayAccessMode,
-    ): Boolean {
+    ): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapOperation array access requires at.target array field signature")
@@ -212,7 +223,7 @@ class WrapOperationInjector(
             throw IllegalArgumentException("@WrapOperation array access target must be an array field: ${at.target}")
         }
 
-        var transformed = false
+        var injectionCount = 0
         var matchedOrdinal = 0
         val targetOpcodes =
             when (mode) {
@@ -236,10 +247,10 @@ class WrapOperationInjector(
             val il = buildArrayAccessWrapper(target, fieldInsn, mode, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
-            transformed = true
+            injectionCount++
         }
 
-        return transformed
+        return injectionCount
     }
 
     private fun buildOperationWrapper(
