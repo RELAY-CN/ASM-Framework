@@ -182,7 +182,7 @@ annotation class Copy(
  *
  * 用于标记 ASM 成员在复制到目标类时避免与目标类已有成员冲突（语义参考 Mixin 的 `@Unique`）。
  * 当前实现支持与 [Copy] 配合使用：当目标类已存在同名同描述符方法时，会把被复制方法重命名为私有 synthetic 方法，
- * 并同步改写同一个 ASM 类中对该 [Copy] 方法的调用。
+ * 并同步改写同一个 ASM 类中 [Overwrite]、[Copy] 与 inline [AsmInject] 方法体内对该 [Copy] 方法的调用。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
