@@ -112,7 +112,7 @@ class TargetClassContext(
             if (injectAnnotation != null &&
                 (injectAnnotation.target == InjectionPoint.RETURN || injectAnnotation.target == InjectionPoint.TAIL)
             ) {
-                if (applyInject(method, injectAnnotation)) {
+                if (applyInject(method, injectAnnotation, copyMethodNames)) {
                     transformed = true
                 }
             }
@@ -150,7 +150,7 @@ class TargetClassContext(
                         injectAnnotation.target != InjectionPoint.RETURN &&
                         injectAnnotation.target != InjectionPoint.TAIL
                     ) {
-                        if (applyInject(method, injectAnnotation)) {
+                        if (applyInject(method, injectAnnotation, copyMethodNames)) {
                             transformed = true
                         }
                     }
@@ -266,7 +266,7 @@ class TargetClassContext(
         for (method in methodsToProcess) {
             val injectAnnotation = method.getAnnotation(AsmInject::class.java)
             if (injectAnnotation != null && injectAnnotation.target == InjectionPoint.HEAD) {
-                if (applyInject(method, injectAnnotation)) {
+                if (applyInject(method, injectAnnotation, copyMethodNames)) {
                     transformed = true
                 }
             }
@@ -919,13 +919,14 @@ class TargetClassContext(
     private fun applyInject(
         method: Method,
         annotation: AsmInject,
+        copyMethodNames: Map<String, String>,
     ): Boolean {
         val targetMethod = requireTargetMethod(annotation.method)
 
         // 如果设置了 inline=true，则内联 ASM 方法的字节码
         val injectionCount =
             if (annotation.inline) {
-                injectInlineCode(targetMethod, method, annotation)
+                injectInlineCode(targetMethod, method, annotation, copyMethodNames)
             } else {
                 // 否则使用普通的注入器在指定位置注入代码
                 val injector = AsmInjectorFactory.createInjector(annotation.target, method, asmInfo)
@@ -951,6 +952,7 @@ class TargetClassContext(
         target: MethodNode,
         asmMethod: Method,
         annotation: AsmInject,
+        copyMethodNames: Map<String, String>,
     ): Int {
         val il =
             InlineCodeGenerator.inlineMethodCode(
@@ -958,6 +960,7 @@ class TargetClassContext(
                 asmMethod,
                 asmInfo,
                 className,
+                copyMethodNames,
             )
 
         // 根据注入点位置插入代码
