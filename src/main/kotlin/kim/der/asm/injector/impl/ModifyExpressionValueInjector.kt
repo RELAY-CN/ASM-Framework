@@ -26,14 +26,15 @@ import java.lang.reflect.Modifier
 /**
  * ModifyExpressionValue 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、字段读取、数组元素读取、数组长度、对象构造或类型转换，
+ * 该注入器会匹配目标方法内的指定方法调用、字段读取、数组元素读取、数组长度、对象构造、类型转换或
+ * `INSTANCEOF` 判断，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
- * [InjectionPoint.FIELD]、[InjectionPoint.NEW] 与 [InjectionPoint.CAST]；[InjectionPoint.FIELD]
+ * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]；[InjectionPoint.FIELD]
  * 可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值，
- * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值
+ * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值，[InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
@@ -77,8 +78,9 @@ class ModifyExpressionValueInjector(
                 }
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
+            InjectionPoint.INSTANCEOF -> injectInstanceof(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW and CAST",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST and INSTANCEOF",
             )
         }
     }
@@ -273,6 +275,32 @@ class ModifyExpressionValueInjector(
             val expressionType = Type.getObjectType(insn.desc)
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectInstanceof(target: MethodNode): Int {
+        val normalizedTarget = at.target.replace('.', '/')
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        for (insn in target.instructions.toArray()) {
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.INSTANCEOF) {
+                continue
+            }
+            if (normalizedTarget.isNotEmpty() && insn.desc != normalizedTarget) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, Type.BOOLEAN_TYPE)
+            val il = buildExpressionValueModification(target, Type.BOOLEAN_TYPE, targetParamCount)
             target.instructions.insert(insn, il)
             injectionCount++
         }
