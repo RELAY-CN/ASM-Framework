@@ -5,9 +5,11 @@
 package kim.der.asm.injector.impl
 
 import kim.der.asm.api.annotation.AsmInject
+import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Shift
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.injector.util.AsmMethodCallGenerator
@@ -16,6 +18,7 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
+import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
@@ -57,10 +60,15 @@ class InstructionPointInjector(
         requireSupportedShift(injectAnnotation.at.shift)
         val matcher = buildMatcher(injectAnnotation.at.target)
         val instructions = target.instructions
+        val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns, injectAnnotation.slice)
         var injectionCount = 0
         var matchedOrdinal = 0
 
-        for (insn in instructions.toArray()) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (!matcher(insn)) {
                 continue
             }
@@ -93,6 +101,58 @@ class InstructionPointInjector(
                     "an uninitialized object on the stack; use Shift.BEFORE or Shift.REPLACE",
             )
         }
+    }
+
+    private fun resolveSliceRange(
+        insns: Array<AbstractInsnNode>,
+        slice: Slice,
+    ): Pair<Int, Int> {
+        val startIndex =
+            if (hasSliceBoundary(slice.from)) {
+                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (hasSliceBoundary(slice.to)) {
+                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
+            } else {
+                insns.size
+            }
+
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+
+    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
+
+    private fun findSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @AsmInject instruction points: ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid @AsmInject instruction point slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+        }
+
+        return null
     }
 
     private fun buildMatcher(target: String): (AbstractInsnNode) -> Boolean {
@@ -202,6 +262,48 @@ class InstructionPointInjector(
             return false
         }
         return true
+    }
+
+    private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun matchesTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
     }
 
     private fun allocateLocalVariable(
