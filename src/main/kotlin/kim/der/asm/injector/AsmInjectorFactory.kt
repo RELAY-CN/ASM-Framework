@@ -54,6 +54,9 @@ object AsmInjectorFactory {
             InjectionPoint.STORE -> throw IllegalArgumentException(
                 "InjectionPoint.STORE is supported only by @ModifyVariable; ordinary @AsmInject does not receive local variable values",
             )
+            InjectionPoint.INSTANCEOF -> throw IllegalArgumentException(
+                "InjectionPoint.INSTANCEOF is supported only by @ModifyExpressionValue; ordinary @AsmInject does not receive expression values",
+            )
         }
 
     /**
