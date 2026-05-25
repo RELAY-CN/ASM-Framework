@@ -29,6 +29,7 @@ object InlineCodeGenerator {
      * @param asmMethod ASM 方法
      * @param asmInfo ASM 信息
      * @param targetClassName 目标类名（内部名称，如 "com/example/MyClass"）
+     * @param copyMethodNames 同一 ASM 类内 @Copy 方法复制到目标类后的方法名映射
      * @return 内联后的指令列表
      */
     fun inlineMethodCode(
@@ -36,6 +37,7 @@ object InlineCodeGenerator {
         asmMethod: Method,
         asmInfo: AsmInfo,
         targetClassName: String,
+        copyMethodNames: Map<String, String> = emptyMap(),
     ): InsnList {
         // 获取 ASM 方法的字节码
         val asmMethodNode =
@@ -83,7 +85,7 @@ object InlineCodeGenerator {
         adjustLocalVariables(il, asmMethodNode, target, asmInfo)
 
         // 转换 Shadow 字段和方法调用
-        transformShadowReferences(il, asmInfo, targetClassName)
+        transformShadowReferences(il, asmInfo, targetClassName, copyMethodNames)
         normalizeInlineReturns(il)
         adaptKotlinObjectSelfReceivers(il, target, asmInfo, targetClassName)
 
@@ -447,6 +449,7 @@ object InlineCodeGenerator {
         il: InsnList,
         asmInfo: AsmInfo,
         targetClassName: String,
+        copyMethodNames: Map<String, String>,
     ) {
         val asmClassName = Type.getType(asmInfo.asmClass).internalName
 
@@ -503,14 +506,15 @@ object InlineCodeGenerator {
 
                 // 确定目标方法名
                 val targetMethodName =
-                    if (copyAnnotation.method.isEmpty()) {
-                        // 如果 method 为空，使用 ASM 方法名
-                        methodName
-                    } else {
-                        // 解析方法签名
-                        val (name, _) = parseMethodSignature(copyAnnotation.method)
-                        name
-                    }
+                    copyMethodNames["$methodName$methodDesc"]
+                        ?: if (copyAnnotation.method.isEmpty()) {
+                            // 如果 method 为空，使用 ASM 方法名
+                            methodName
+                        } else {
+                            // 解析方法签名
+                            val (name, _) = parseMethodSignature(copyAnnotation.method)
+                            name
+                        }
 
                 // 使用方法名和描述符作为键，确保唯一性
                 copyMethodMap["$methodName$methodDesc"] = targetMethodName
