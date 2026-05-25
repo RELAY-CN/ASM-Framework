@@ -1939,6 +1939,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodCanCallOriginalInstanceMethodWithChangedArguments() {
+        AsmRegistry.register(WrapMethodInstanceTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapMethodInstanceTarget", wrapMethodInstanceTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapMethodInstanceTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result =
+            clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType)
+                .invoke(instance, "raw", 7)
+
+        assertEquals("instance:RAW8-wrapped", result)
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
@@ -5996,6 +6010,17 @@ class FrameworkReliabilityTest {
         ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
     }
 
+    @AsmMixin("WrapMethodInstanceTarget")
+    object WrapMethodInstanceTargetMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;I)Ljava/lang/String;")
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            count: Int,
+            operation: Operation<String>,
+        ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
+    }
+
     @AsmMixin("ModifyReceiverParamTarget")
     object WrapOperationWithTargetParamsMixin {
         @WrapOperation(
@@ -8459,6 +8484,48 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wrapMethodInstanceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapMethodInstanceTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false)
+            visitLdcInsn("instance:")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                false,
+            )
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                false,
+            )
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(I)Ljava/lang/StringBuilder;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
