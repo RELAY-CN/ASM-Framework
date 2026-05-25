@@ -35,7 +35,8 @@ package kim.der.asm.api.annotation
  * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST 时用于描述具体指令点；
- * 核心字段为 [At.target] 与 [At.shift]，其中 LOAD/STORE 当前只使用 [At.shift]
+ * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
+ * 或 `var=N` 按 JVM 局部变量槽位过滤
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写指令点注入支持用 [Slice.from] / [Slice.to] 的
@@ -138,6 +139,8 @@ enum class InjectionPoint {
  * - [WrapWithCondition] 可通过 [args] 中的 `array=set`，把 [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素写入。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [args] 中的 `array=get` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式。
+ * - 普通 [AsmInject] 的 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可通过 [args] 中的
+ *   `index=N` 或 `var=N`，只匹配指定 JVM 局部变量槽位的读写指令。
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
@@ -146,7 +149,8 @@ enum class InjectionPoint {
  * @param by 预留参数，当前实现未实现按字节码偏移移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set` 与 `array=length`，
  * [WrapOperation] 支持 `array=get`、`array=set` 与 `array=length`，[WrapWithCondition] 支持 `array=set`，
- * [ModifyExpressionValue] 支持 `array=get` 与 `array=length`
+ * [ModifyExpressionValue] 支持 `array=get` 与 `array=length`，普通 [AsmInject] 的 LOAD/STORE
+ * 支持 `index=N` 与 `var=N`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */

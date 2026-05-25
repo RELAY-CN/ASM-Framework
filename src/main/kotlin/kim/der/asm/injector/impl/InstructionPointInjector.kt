@@ -30,7 +30,8 @@ import java.lang.reflect.Method
  * 用于处理字段访问、字段赋值、局部变量读写、对象创建、类型转换与抛异常等单条字节码指令附近的普通 `@AsmInject`。
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
  * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 `Slice` 的 [InjectionPoint.INVOKE] 边界缩小
- * 读写指令查找范围；字段、对象创建、类型转换与抛异常指令点当前不使用 `slice`。
+ * 读写指令查找范围，也可通过 `At.args` 中的 `index=N` 或 `var=N` 限制 JVM 局部变量槽位；
+ * 字段、对象创建、类型转换与抛异常指令点当前不使用 `slice`。
  * 由于 JVM verifier 不允许在未初始化对象仍位于栈顶时插入普通方法调用，[InjectionPoint.NEW] 不支持 [Shift.AFTER]。
  *
  * @param method ASM 方法
