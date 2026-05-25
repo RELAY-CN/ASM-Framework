@@ -5677,8 +5677,12 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun modify(
             original: Boolean,
+            value: Any,
             force: Boolean,
-        ): Boolean = original || force
+        ): Boolean {
+            value.hashCode()
+            return original || force
+        }
     }
 
     @AsmMixin("ModifyReceiverTarget")
