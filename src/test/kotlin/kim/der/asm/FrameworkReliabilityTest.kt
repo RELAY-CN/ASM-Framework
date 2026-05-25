@@ -920,6 +920,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireThreeWrapConditionMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiWrapConditionTarget", multiWrapConditionTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 3 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowOneWrapConditionMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("MultiWrapConditionTarget", multiWrapConditionTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectThreeWrapConditionMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("MultiWrapConditionTarget", multiWrapConditionTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 3 injection(s), actual 2"),
+        )
+    }
+
+    @Test
     fun wrapWithConditionSliceLimitsInvokeCallMatchesBetweenFromAndTo() {
         AsmRegistry.register(WrapConditionSliceMixin::class.java)
 
@@ -4863,6 +4914,57 @@ class FrameworkReliabilityTest {
         fun shouldRun(value: String): Boolean {
             value.length
             return false
+        }
+    }
+
+    @AsmMixin("MultiWrapConditionTarget")
+    object RequireThreeWrapConditionMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "MultiWrapConditionTarget.record(Ljava/lang/String;)V",
+            ),
+            require = 3,
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return true
+        }
+    }
+
+    @AsmMixin("MultiWrapConditionTarget")
+    object AllowOneWrapConditionMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "MultiWrapConditionTarget.record(Ljava/lang/String;)V",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return true
+        }
+    }
+
+    @AsmMixin("MultiWrapConditionTarget")
+    object ExpectThreeWrapConditionMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "MultiWrapConditionTarget.record(Ljava/lang/String;)V",
+            ),
+            expect = 3,
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return true
         }
     }
 
