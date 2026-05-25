@@ -410,9 +410,10 @@ annotation class WrapWithCondition(
  *
  * 用于修改目标方法内某个表达式产生的值（语义参考 Mixin Extras 的 `@ModifyExpressionValue`）。
  * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
- * [InjectionPoint.NEW] 与 [InjectionPoint.CAST]，可修改匹配方法调用完成后的非 `void` 返回值、字段读取值、
- * 数组元素读取值、数组长度值、对象构造完成后的实例或 `CHECKCAST` 完成后的类型转换结果。
- * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用或类型转换指令，只在表达式产生值后
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]，可修改匹配方法调用完成后的
+ * 非 `void` 返回值、字段读取值、数组元素读取值、数组长度值、对象构造完成后的实例、`CHECKCAST` 完成后的类型转换结果或
+ * `INSTANCEOF` 判断后的 boolean 结果。
+ * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用、类型转换或类型判断指令，只在表达式产生值后
  * 把原值交给 handler 改写。
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式可使用 [slice] 把候选调用限制在
  * 一段 INVOKE 边界内，边界指令本身不参与匹配。
@@ -427,12 +428,13 @@ annotation class WrapWithCondition(
  * - 数组长度目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象
  * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象
+ * - [InjectionPoint.INSTANCEOF] 的 [At.target] 为类型 internal name 或 binary name；handler 接收 `Boolean` 判断结果
  * - [require] / [allow] 可约束实际表达式值修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望表达式值修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
- * [InjectionPoint.NEW] 与 [InjectionPoint.CAST]
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]
  * @param ordinal 匹配表达式序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式支持用
  * [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
