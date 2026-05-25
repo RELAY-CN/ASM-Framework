@@ -60,7 +60,8 @@ class InstructionPointInjector(
     override fun injectCount(target: MethodNode): Int {
         val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
         requireSupportedShift(injectAnnotation.at.shift)
-        val matcher = buildMatcher(injectAnnotation.at.target)
+        val localVariableIndex = parseLocalVariableIndex(injectAnnotation.at.args)
+        val matcher = buildMatcher(injectAnnotation.at.target, localVariableIndex)
         val instructions = target.instructions
         val insns = instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) =
@@ -164,7 +165,43 @@ class InstructionPointInjector(
         return null
     }
 
-    private fun buildMatcher(target: String): (AbstractInsnNode) -> Boolean {
+    private fun parseLocalVariableIndex(args: Array<String>): Int? {
+        if (point != InjectionPoint.LOAD && point != InjectionPoint.STORE) {
+            return null
+        }
+
+        val values =
+            args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                when {
+                    trimmed.startsWith("index=") -> trimmed.substringAfter("index=")
+                    trimmed.startsWith("var=") -> trimmed.substringAfter("var=")
+                    else -> null
+                }
+            }
+
+        if (values.isEmpty()) {
+            return null
+        }
+        require(values.size == 1) {
+            "@AsmInject ${point.name} supports only one local variable slot filter in At.args"
+        }
+
+        val index =
+            values.single().toIntOrNull()
+                ?: throw IllegalArgumentException(
+                    "@AsmInject ${point.name} local variable slot filter must be an integer: ${values.single()}",
+                )
+        require(index >= 0) {
+            "@AsmInject ${point.name} local variable slot filter must be non-negative: $index"
+        }
+        return index
+    }
+
+    private fun buildMatcher(
+        target: String,
+        localVariableIndex: Int?,
+    ): (AbstractInsnNode) -> Boolean {
         return when (point) {
             InjectionPoint.FIELD -> {
                 val fieldTarget = parseFieldTarget(target)
@@ -197,12 +234,14 @@ class InstructionPointInjector(
             InjectionPoint.LOAD -> {
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is VarInsnNode &&
-                        insn.opcode in LOAD_OPS
+                        insn.opcode in LOAD_OPS &&
+                        matchesLocalVariableIndex(insn, localVariableIndex)
             }
             InjectionPoint.STORE -> {
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is VarInsnNode &&
-                        insn.opcode in STORE_OPS
+                        insn.opcode in STORE_OPS &&
+                        matchesLocalVariableIndex(insn, localVariableIndex)
             }
             InjectionPoint.THROW -> {
                 fun(insn: AbstractInsnNode): Boolean = insn.opcode == Opcodes.ATHROW
@@ -212,6 +251,11 @@ class InstructionPointInjector(
             }
         }
     }
+
+    private fun matchesLocalVariableIndex(
+        insn: VarInsnNode,
+        requestedIndex: Int?,
+    ): Boolean = requestedIndex == null || insn.`var` == requestedIndex
 
     private fun buildHandlerCall(target: MethodNode): InsnList {
         val il = InsnList()
