@@ -3355,6 +3355,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun asmInjectLoadArgsIndexLimitsLocalVariableSlot() {
+        AsmRegistry.register(LoadInjectIndexMixin::class.java)
+        LoadInjectIndexMixin.injectCount = 0
+
+        val transformed = AsmProcessor().transform("LoadOrdinalVariableTarget", loadOrdinalVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadOrdinalVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:second", result)
+        assertEquals(1, LoadInjectIndexMixin.injectCount)
+    }
+
+    @Test
     fun asmInjectCanRunAfterLocalVariableStore() {
         AsmRegistry.register(StoreInjectMixin::class.java)
         StoreInjectMixin.injectCount = 0
@@ -3366,6 +3380,20 @@ class FrameworkReliabilityTest {
 
         assertEquals("local", result)
         assertEquals(1, StoreInjectMixin.injectCount)
+    }
+
+    @Test
+    fun asmInjectStoreArgsVarLimitsLocalVariableSlot() {
+        AsmRegistry.register(StoreInjectVarMixin::class.java)
+        StoreInjectVarMixin.injectCount = 0
+
+        val transformed = AsmProcessor().transform("StoreOrdinalVariableTarget", storeOrdinalVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreOrdinalVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:second", result)
+        assertEquals(1, StoreInjectVarMixin.injectCount)
     }
 
     @Test
@@ -7347,6 +7375,23 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("LoadOrdinalVariableTarget")
+    object LoadInjectIndexMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.LOAD,
+            at = At(value = InjectionPoint.LOAD, shift = Shift.BEFORE, args = ["index=2"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
     @AsmMixin("SliceLoadVariableTarget")
     object LoadInjectSliceMixin {
         var injectCount: Int = 0
@@ -7377,6 +7422,23 @@ class FrameworkReliabilityTest {
             target = InjectionPoint.STORE,
             at = At(value = InjectionPoint.STORE, shift = Shift.AFTER),
             ordinal = 0,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
+    @AsmMixin("StoreOrdinalVariableTarget")
+    object StoreInjectVarMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.STORE,
+            at = At(value = InjectionPoint.STORE, shift = Shift.AFTER, args = ["var=2"]),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun inject() {
