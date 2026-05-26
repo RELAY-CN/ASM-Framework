@@ -1302,6 +1302,63 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueFieldSliceLimitsFieldReadsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueFieldSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("raw-field-slice", result)
+    }
+
+    @Test
+    fun modifyExpressionValueNewSliceLimitsConstructionsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueNewSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceNewExpressionValueTarget", sliceNewExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceNewExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("createSelected").invoke(instance).toString()
+
+        assertEquals("changed", result)
+    }
+
+    @Test
+    fun modifyExpressionValueCastSliceLimitsCheckcastsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueCastSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceCastInstructionTarget", sliceCastInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceCastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("castSelected", Any::class.java).invoke(instance, "raw")
+
+        assertEquals("raw-cast-slice", result)
+    }
+
+    @Test
+    fun modifyExpressionValueInstanceofSliceLimitsChecksBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueInstanceofSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "SliceInstanceofExpressionValueTarget",
+                sliceInstanceofExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("SliceInstanceofExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("isSelected", Any::class.java).invoke(instance, "raw")
+
+        assertEquals(false, result)
+    }
+
+    @Test
     fun modifyExpressionValueWithMismatchedHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(MismatchedModifyExpressionValueMixin::class.java)
 
@@ -5628,6 +5685,73 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("SliceFieldReadTarget")
+    object ModifyExpressionValueFieldSliceMixin {
+        @ModifyExpressionValue(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-field-slice"
+    }
+
+    @AsmMixin("SliceNewExpressionValueTarget")
+    object ModifyExpressionValueNewSliceMixin {
+        @ModifyExpressionValue(
+            method = "createSelected()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: StringBuilder): StringBuilder {
+            original.length
+            return StringBuilder("changed")
+        }
+    }
+
+    @AsmMixin("SliceCastInstructionTarget")
+    object ModifyExpressionValueCastSliceMixin {
+        @ModifyExpressionValue(
+            method = "castSelected(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-cast-slice"
+    }
+
+    @AsmMixin("SliceInstanceofExpressionValueTarget")
+    object ModifyExpressionValueInstanceofSliceMixin {
+        @ModifyExpressionValue(
+            method = "isSelected(Ljava/lang/Object;)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Boolean): Boolean = !original
     }
 
     @AsmMixin("ExpressionValueTarget")
@@ -10406,6 +10530,37 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun sliceNewExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceNewExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "createSelected", "()Ljava/lang/StringBuilder;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("outside")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("inside")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun newParamTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NewParamTarget", null, "java/lang/Object", null)
@@ -10550,6 +10705,34 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun sliceInstanceofExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceInstanceofExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "isSelected", "(Ljava/lang/Object;)Z", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.INSTANCEOF, "java/lang/String")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.INSTANCEOF, "java/lang/String")
+            visitVarInsn(Opcodes.ISTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun shadowOverloadTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ShadowOverloadTarget", null, "java/lang/Object", null)
