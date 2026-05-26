@@ -9901,6 +9901,7 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 0)
             visitTypeInsn(Opcodes.NEW, "SliceModifyReceiverFieldTarget")
             visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_1)
             visitMethodInsn(Opcodes.INVOKESPECIAL, "SliceModifyReceiverFieldTarget", "<init>", "(Z)V", false)
             visitFieldInsn(
                 Opcodes.PUTFIELD,
