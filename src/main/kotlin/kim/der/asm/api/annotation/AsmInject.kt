@@ -12,8 +12,9 @@ package kim.der.asm.api.annotation
  *
  * ## 取消与返回值
  *
- * - 当注入方法的第一个参数为 [CallbackInfo] 时，可在注入方法内通过 [CallbackInfo.cancel] 标记取消。
- * - 是否以及如何提前返回/替换返回值由注入器实现决定（例如 HEAD 注入可能在取消分支提前返回）。
+ * - 当 HEAD 注入声明 [cancellable] 为 `true` 且第一个参数为 [CallbackInfo] 时，
+ *   可在注入方法内通过 [CallbackInfo.cancel] 标记取消并提前返回。
+ * - 未声明可取消的回调调用 [CallbackInfo.cancel] 会抛出 [IllegalStateException]，用于尽早发现错误配置。
  *
  * ## Handler 参数
  *
@@ -32,7 +33,7 @@ package kim.der.asm.api.annotation
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
  * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/THROW，
  * INSTANCEOF 当前仅用于 [ModifyExpressionValue]
- * @param cancellable 是否声明该注入点允许取消（当前实现不会基于该开关屏蔽取消分支，仅作为元数据保留）
+ * @param cancellable 是否声明该注入点允许取消；当前 HEAD 注入会据此允许 [CallbackInfo.cancel] 并生成提前返回分支
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
