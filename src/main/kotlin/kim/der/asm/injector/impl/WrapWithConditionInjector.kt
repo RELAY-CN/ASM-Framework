@@ -137,7 +137,12 @@ class WrapWithConditionInjector(
 
         var injectionCount = 0
         var matchedOrdinal = 0
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
                 continue
             }
@@ -169,7 +174,12 @@ class WrapWithConditionInjector(
 
         var injectionCount = 0
         var matchedOrdinal = 0
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn.opcode !in ARRAY_WRITE_OPS) {
                 continue
             }
