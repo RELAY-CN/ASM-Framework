@@ -4181,6 +4181,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun asmInjectCastSliceLimitsCheckcastsBetweenFromAndTo() {
+        AsmRegistry.register(CastInstructionSliceMixin::class.java)
+        CastInstructionSliceMixin.injectCount = 0
+
+        val transformed =
+            AsmProcessor().transform("SliceCastInstructionTarget", sliceCastInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceCastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("castSelected", Any::class.java).invoke(instance, "raw")
+
+        assertEquals("raw", result)
+        assertEquals(1, CastInstructionSliceMixin.injectCount)
+    }
+
+    @Test
     fun newInjectAfterShiftFailsDuringTransform() {
         AsmRegistry.register(NewInstructionAfterInjectMixin::class.java)
 
@@ -4203,6 +4218,50 @@ class FrameworkReliabilityTest {
         assertEquals(true, handlerCallIndex >= 0)
         assertEquals(true, throwIndex >= 0)
         assertEquals(throwIndex - 1, handlerCallIndex)
+    }
+
+    @Test
+    fun asmInjectThrowSliceLimitsThrowsBetweenFromAndTo() {
+        AsmRegistry.register(ThrowInstructionSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceThrowInstructionTarget", sliceThrowInstructionTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "failSelected" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ThrowInstructionSliceMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val throwIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn.opcode == Opcodes.ATHROW) {
+                index
+            } else {
+                null
+            }
+        }
+        val boundaryIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode &&
+                insn.owner == "java/lang/String" &&
+                insn.name == "toString"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(2, boundaryIndexes.size)
+        val inSliceThrowIndexes = throwIndexes.filter { it > boundaryIndexes[0] && it < boundaryIndexes[1] }
+        assertEquals(1, inSliceThrowIndexes.size)
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(true, handlerCallIndexes.single() > boundaryIndexes[0])
+        assertEquals(true, handlerCallIndexes.single() < boundaryIndexes[1])
+        assertEquals(inSliceThrowIndexes.single() - 1, handlerCallIndexes.single())
     }
 
     @Test
@@ -8128,6 +8187,27 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceCastInstructionTarget")
+    object CastInstructionSliceMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "castSelected(Ljava/lang/Object;)Ljava/lang/String;",
+            target = InjectionPoint.CAST,
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
     @AsmMixin("NewInstructionTarget")
     object NewInstructionAfterInjectMixin {
         @AsmInject(
@@ -8143,6 +8223,23 @@ class FrameworkReliabilityTest {
     @AsmMixin("ThrowPointTarget")
     object ThrowInstructionInjectMixin {
         @AsmInject(method = "fail()V", target = InjectionPoint.THROW)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("SliceThrowInstructionTarget")
+    object ThrowInstructionSliceMixin {
+        @AsmInject(
+            method = "failSelected()V",
+            target = InjectionPoint.THROW,
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
         @JvmStatic
         fun inject() {
         }
@@ -10208,6 +10305,40 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun sliceThrowInstructionTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceThrowInstructionTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "failSelected", "()V", null, null).apply {
+            val insideThrow = org.objectweb.asm.Label()
+            visitCode()
+            visitInsn(Opcodes.ICONST_0)
+            visitJumpInsn(Opcodes.IFEQ, insideThrow)
+            visitTypeInsn(Opcodes.NEW, "java/lang/IllegalStateException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("outside")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ATHROW)
+            visitLabel(insideThrow)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitTypeInsn(Opcodes.NEW, "java/lang/IllegalStateException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("inside")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ATHROW)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun invokerConflictTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokerConflictTarget", null, "java/lang/Object", null)
@@ -10377,6 +10508,33 @@ class FrameworkReliabilityTest {
             visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceCastInstructionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceCastInstructionTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "castSelected", "(Ljava/lang/Object;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
             visitEnd()
         }
         cw.visitEnd()
