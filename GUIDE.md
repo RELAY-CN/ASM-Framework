@@ -492,6 +492,16 @@ object ValidationMixin {
             value = InjectionPoint.INVOKE,
             target = "java/lang/String.trim()Ljava/lang/String;",
         ),
+    )
+    fun rewriteTrimResultFromAny(value: Any, prefix: String, count: Int): String =
+        "$prefix:${value.toString().lowercase()}#$count"
+
+    @ModifyExpressionValue(
+        method = "format(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/String.trim()Ljava/lang/String;",
+        ),
         slice = Slice(
             from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
             to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
@@ -640,7 +650,8 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 `to` 边界之前的调用、字段写入或数组元素写入才会参与匹配，边界调用本身不会被包裹，`ordinal` 会在切片内重新计数。关键条件包裹可设置 `require` / `allow` / `expect`，按实际插入条件判断的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 `@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、数组长度、对象构造、类型转换或类型判断但
 改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象、转换后的对象或 `INSTANCEOF` 判断结果并
-返回同类型新值，后续参数可接收目标方法参数前缀；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
+返回同类型新值，后续参数可接收目标方法参数前缀；对象或数组表达式的首参可声明为 `Any` / `Object`，
+但返回类型仍需保持表达式类型；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，数组读取模式通过 `args = ["array=get"]`
 指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果。
 `INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST` 与 `INSTANCEOF` 表达式值修改可用
