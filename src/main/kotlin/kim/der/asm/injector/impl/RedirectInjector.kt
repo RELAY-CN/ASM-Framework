@@ -208,6 +208,7 @@ class RedirectInjector(
         var injectionCount = 0
         val insns = instructions.toArray()
         var matchedOrdinal = 0
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
         val targetOpcodes =
             when (mode) {
                 ArrayAccessMode.GET -> ARRAY_READ_OPS
@@ -215,7 +216,10 @@ class RedirectInjector(
                 ArrayAccessMode.LENGTH -> setOf(Opcodes.ARRAYLENGTH)
             }
 
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn.opcode !in targetOpcodes) {
                 continue
             }
@@ -243,8 +247,12 @@ class RedirectInjector(
         var injectionCount = 0
         val insns = instructions.toArray()
         var matchedOrdinal = 0
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
 
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn is FieldInsnNode &&
                 insn.opcode in FIELD_READ_OPS &&
                 matchesTargetField(insn, fieldTarget)
@@ -271,8 +279,12 @@ class RedirectInjector(
         var injectionCount = 0
         val insns = instructions.toArray()
         var matchedOrdinal = 0
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
 
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn is FieldInsnNode &&
                 insn.opcode in FIELD_WRITE_OPS &&
                 matchesTargetField(insn, fieldTarget)
