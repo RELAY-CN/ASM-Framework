@@ -284,7 +284,8 @@ annotation class ModifyArgs(
  * - 返回类型必须兼容原 receiver 类型
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 为 [InjectionPoint.INVOKE] 时，通过 [At.target] 指定要匹配的实例方法调用
- * - [InjectionPoint.INVOKE] 模式可使用 [slice] 把候选调用限制在一段 INVOKE 边界之间，边界指令本身不参与匹配
+ * - [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice]
+ *   把候选 receiver 改写限制在一段 INVOKE 边界之间，边界指令本身不参与匹配
  * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
  * - [require] / [allow] 可约束实际 receiver 修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望 receiver 修改数量，不一致时只输出警告，不阻断转换
@@ -292,8 +293,8 @@ annotation class ModifyArgs(
  * @param method 目标方法签名
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE] receiver 改写支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
+ * receiver 改写支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际 receiver 修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际 receiver 修改数不能超过该值
