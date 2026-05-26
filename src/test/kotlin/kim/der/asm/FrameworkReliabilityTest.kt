@@ -3771,6 +3771,30 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun fieldInjectByMovesHandlerForwardFromMatchedFieldRead() {
+        AsmRegistry.register(FieldReadByForwardMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "readName" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, FieldReadByForwardMixin::class.java, "inject")
+        val fieldReadIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.FieldInsnNode &&
+                it.opcode == Opcodes.GETFIELD &&
+                it.owner == "FieldPointTarget" &&
+                it.name == "name"
+        }
+        val returnIndex = instructions.indexOfFirst { it.opcode == Opcodes.ARETURN }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, fieldReadIndex >= 0)
+        assertEquals(true, returnIndex >= 0)
+        assertEquals(true, handlerCallIndex > fieldReadIndex)
+        assertEquals(returnIndex - 1, handlerCallIndex)
+    }
+
+    @Test
     fun fieldInjectOrdinalSelectsSingleMatchedFieldRead() {
         AsmRegistry.register(FieldReadOrdinalMixin::class.java)
 
@@ -4407,6 +4431,27 @@ class FrameworkReliabilityTest {
         val method = classNode.methods.single { it.name == "writeName" }
         val instructions = method.instructions.toArray()
         val handlerCallIndex = handlerCallIndex(instructions, FieldAssignInjectMixin::class.java, "inject")
+        val fieldWriteIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.FieldInsnNode &&
+                it.opcode == Opcodes.PUTFIELD &&
+                it.owner == "FieldPointTarget" &&
+                it.name == "name"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, fieldWriteIndex >= 0)
+        assertEquals(fieldWriteIndex - 1, handlerCallIndex)
+    }
+
+    @Test
+    fun fieldAssignInjectByMovesHandlerBackwardFromMatchedFieldWrite() {
+        AsmRegistry.register(FieldAssignByBackwardMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "writeName" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, FieldAssignByBackwardMixin::class.java, "inject")
         val fieldWriteIndex = instructions.indexOfFirst {
             it is org.objectweb.asm.tree.FieldInsnNode &&
                 it.opcode == Opcodes.PUTFIELD &&
@@ -8231,6 +8276,25 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("FieldPointTarget")
+    object FieldReadByForwardMixin {
+        @AsmInject(
+            method = "readName()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+                shift = Shift.BEFORE,
+                by = 1,
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("MultiFieldReadTarget")
     object FieldReadOrdinalMixin {
         @AsmInject(
@@ -8846,6 +8910,25 @@ class FrameworkReliabilityTest {
             method = "writeName(Ljava/lang/String;)V",
             target = InjectionPoint.FIELD_ASSIGN,
             at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldAssignByBackwardMixin {
+        @AsmInject(
+            method = "writeName(Ljava/lang/String;)V",
+            target = InjectionPoint.FIELD_ASSIGN,
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+                shift = Shift.AFTER,
+                by = -1,
+            ),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun inject() {
