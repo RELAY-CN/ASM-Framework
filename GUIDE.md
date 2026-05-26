@@ -154,7 +154,7 @@ object LoggingMixin {
 }
 ```
 
-普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`THROW`
+普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`INSTANCEOF`、`THROW`
 等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
@@ -162,7 +162,7 @@ object LoggingMixin {
 只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
 
-当目标方法内有多个相同调用、字段读写点、局部变量读写点、类型转换点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CAST` 或 `THROW`
+当目标方法内有多个相同调用、字段读写点、局部变量读写点、类型转换点、类型判断点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CAST`、`INSTANCEOF` 或 `THROW`
 注入限制在一段调用边界内：
 
 ```kotlin
@@ -972,7 +972,7 @@ object MultiInjectMixin {
 
 ### 场景 12: 指令点注入
 
-`FIELD`、`FIELD_ASSIGN`、`CAST`、`THROW` 可以把 handler 插入到具体字节码指令前后，`NEW` 可以插入到对象创建指令之前，适合观察字段访问、字段写入、类型转换、对象创建或异常抛出位置。
+`FIELD`、`FIELD_ASSIGN`、`CAST`、`INSTANCEOF`、`THROW` 可以把 handler 插入到具体字节码指令前后，`NEW` 可以插入到对象创建指令之前，适合观察字段访问、字段写入、类型转换、类型判断、对象创建或异常抛出位置。
 
 ```kotlin
 @AsmMixin("com/example/Player")
@@ -1010,10 +1010,20 @@ object FieldPointMixin {
     fun beforeStringCast() {
         println("value will be cast to String")
     }
+
+    @AsmInject(
+        method = "isString(Ljava/lang/Object;)Z",
+        target = InjectionPoint.INSTANCEOF,
+        at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+    )
+    @JvmStatic
+    fun beforeInstanceof() {
+        println("value will be tested as String")
+    }
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。`INSTANCEOF` 当前不作为普通 `@AsmInject` 指令点使用；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
