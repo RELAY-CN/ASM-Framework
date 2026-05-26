@@ -191,7 +191,8 @@ enum class Shift {
  * [Redirect] 的普通方法调用重定向，[ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN] receiver 改写，
- * [WrapOperation] / [WrapWithCondition] 的 [InjectionPoint.INVOKE] 操作包裹或条件包裹，
+ * [WrapOperation] 的 [InjectionPoint.INVOKE] 操作包裹、[WrapWithCondition] 的 [InjectionPoint.INVOKE] /
+ * [InjectionPoint.FIELD_ASSIGN] 条件包裹，
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、数组读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与
  * [InjectionPoint.INSTANCEOF] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /

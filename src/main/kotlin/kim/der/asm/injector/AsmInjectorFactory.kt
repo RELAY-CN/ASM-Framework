@@ -148,7 +148,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param at 调用点定位；当前支持 INVOKE 与 FIELD_ASSIGN
      * @param ordinal 匹配点序号；负数表示处理全部匹配点
-     * @param slice 切片范围；当前 INVOKE 条件包裹支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE 与 FIELD_ASSIGN 条件包裹支持 INVOKE 边界切片
      * @return WrapWithCondition 注入器
      *
      * @author Dr (dr@der.kim)
