@@ -418,7 +418,8 @@ annotation class WrapMethod(
  * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
  * 数组元素写入使用 [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定，
  * 当前匹配由最近的目标数组字段读取产生数组引用的 `xASTORE` 指令。
- * [InjectionPoint.INVOKE] 模式可使用 [slice] 把候选调用限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
+ * [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice] 把候选调用、字段写入或数组元素写入
+ * 限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
  *
  * ASM 方法要求：
  *
@@ -434,7 +435,7 @@ annotation class WrapMethod(
  * @param method 目标方法签名
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
- * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 模式支持 INVOKE 边界切片
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN] 模式支持 INVOKE 边界切片
  * @param require 最小命中数；大于 0 时实际条件包裹数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际条件包裹数不能超过该值

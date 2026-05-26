@@ -34,7 +34,8 @@ import java.lang.reflect.Modifier
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
- * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 条件包裹使用 INVOKE 边界缩小匹配范围
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN] 条件包裹使用
+ * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
