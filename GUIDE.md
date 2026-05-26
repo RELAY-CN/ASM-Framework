@@ -691,10 +691,14 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 object CacheMixin {
     @ModifyReturnValue(method = "get(Ljava/lang/String;)Ljava/lang/Object;", ordinal = 0)
     fun wrapResult(original: Any?): Any? = original ?: createDefault()
+
+    @ModifyReturnValue(method = "lookup(Ljava/lang/String;)Ljava/lang/String;", ordinal = 0)
+    fun wrapStringResult(original: Any): String = original.toString().ifBlank { "default" }
 }
 ```
 
 `@ModifyReturnValue` 默认会修改目标方法的全部非 void 返回点；`ordinal` 可限定只修改第 N 个返回点。
+handler 返回类型必须与目标方法返回类型一致；对象或数组返回值可用 `Any` / `Object` 接收原返回值，后续也可接收目标方法参数前缀。
 关键返回值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的非 void 返回点数量计数。
 
 ### 场景 4: 修改常量
