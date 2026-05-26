@@ -157,7 +157,7 @@ object RemoveInterfacesMixin
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
 - `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
-- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` 注入与普通 `LOAD` / `STORE` 指令点注入支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE`、`FIELD` / `FIELD_ASSIGN` 与 `LOAD` / `STORE` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `inline: Boolean = false` - 是否内联代码
@@ -171,12 +171,13 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
 
-普通 `@AsmInject(target = InjectionPoint.INVOKE)` 与普通 `@AsmInject(target = InjectionPoint.LOAD / STORE)`
+普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通 `@AsmInject(target = InjectionPoint.FIELD / FIELD_ASSIGN)`
+与普通 `@AsmInject(target = InjectionPoint.LOAD / STORE)`
 支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界。框架只在起始边界之后、
-结束边界之前查找目标调用或局部变量读写指令；边界调用本身不会作为候选注入点，`ordinal`
+结束边界之前查找目标调用、字段读写指令或局部变量读写指令；边界调用本身不会作为候选注入点，`ordinal`
 也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
-`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；需要读取并写回变量值时使用 `@ModifyVariable`。`FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW` 当前不使用 `slice`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` 可用 `Slice` 缩小候选范围；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；需要读取并写回变量值时使用 `@ModifyVariable`。`NEW` / `CAST` / `THROW` 当前不使用 `slice`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -849,8 +850,9 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
 解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持
-`Shift.BEFORE` 与 `Shift.REPLACE`。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
-不会把局部变量值传给 handler，但可以用 `Slice` 把候选读写指令限制在一段 `INVOKE` 边界内，也可以用
+`Shift.BEFORE` 与 `Shift.REPLACE`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE)` 可用 `Slice`
+把候选读写指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
+不会把局部变量值传给 handler，也可以用
 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；需要读取并写回变量值时使用 `@ModifyVariable`。`INSTANCEOF` 不支持普通
 `@AsmInject`，当前用于 `@ModifyExpressionValue` 的类型判断结果改写。`Shift.REPLACE` 当前按 `BEFORE` 处理。
 
@@ -907,7 +909,7 @@ At(
 
 ### Slice
 
-用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通 `@AsmInject(target = InjectionPoint.LOAD / InjectionPoint.STORE)`、普通方法调用 `@Redirect`
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE)`、普通方法调用 `@Redirect`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE)`、`@WrapOperation(at.value = InjectionPoint.INVOKE)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE)`、`@ModifyExpressionValue(at.value = InjectionPoint.INVOKE)`、
