@@ -46,13 +46,11 @@ object AsmInjectorFactory {
             InjectionPoint.FIELD_ASSIGN,
             InjectionPoint.NEW,
             InjectionPoint.CAST,
+            InjectionPoint.INSTANCEOF,
             InjectionPoint.LOAD,
             InjectionPoint.STORE,
             InjectionPoint.THROW,
             -> InstructionPointInjector(method, asmInfo, injectionPoint)
-            InjectionPoint.INSTANCEOF -> throw IllegalArgumentException(
-                "InjectionPoint.INSTANCEOF is supported only by @ModifyExpressionValue; ordinary @AsmInject does not receive expression values",
-            )
         }
 
     /**
