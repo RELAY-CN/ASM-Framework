@@ -3404,6 +3404,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtHeadAcceptsObjectHandlerParameterByLocalIndex() {
+        AsmRegistry.register(ModifyVariableObjectParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("value-any", result)
+    }
+
+    @Test
     fun modifyVariableExposesCountContractParameters() {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
@@ -8047,6 +8059,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "modified-$original"
+    }
+
+    @AsmMixin("VariableTarget")
+    object ModifyVariableObjectParameterMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): String = "$original-any"
     }
 
     @AsmMixin("StaticVariableTarget")
