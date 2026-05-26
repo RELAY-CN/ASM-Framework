@@ -144,7 +144,12 @@ class ModifyExpressionValueInjector(
 
         var injectionCount = 0
         var matchedOrdinal = 0
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
                 continue
             }
@@ -231,7 +236,12 @@ class ModifyExpressionValueInjector(
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
         var matchedOrdinal = 0
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn !is TypeInsnNode || insn.opcode != Opcodes.NEW) {
                 continue
             }
@@ -259,7 +269,12 @@ class ModifyExpressionValueInjector(
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
         var matchedOrdinal = 0
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn !is TypeInsnNode || insn.opcode != Opcodes.CHECKCAST) {
                 continue
             }
@@ -286,7 +301,12 @@ class ModifyExpressionValueInjector(
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
         var matchedOrdinal = 0
-        for (insn in target.instructions.toArray()) {
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn !is TypeInsnNode || insn.opcode != Opcodes.INSTANCEOF) {
                 continue
             }
