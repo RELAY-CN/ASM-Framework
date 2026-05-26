@@ -469,7 +469,7 @@ class ModifyReceiverInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @ModifyReceiver(INVOKE): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @ModifyReceiver: ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)

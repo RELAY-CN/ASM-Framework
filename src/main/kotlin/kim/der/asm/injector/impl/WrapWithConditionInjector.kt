@@ -673,7 +673,7 @@ class WrapWithConditionInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @WrapWithCondition(INVOKE): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @WrapWithCondition: ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
