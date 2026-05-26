@@ -104,9 +104,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 调用点定位；当前仅支持 INVOKE
+     * @param at 调用点定位；当前支持 INVOKE、FIELD 与 FIELD_ASSIGN
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前 INVOKE receiver 改写支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE、FIELD 与 FIELD_ASSIGN receiver 改写支持 INVOKE 边界切片
      * @return ModifyReceiver 注入器
      *
      * @author Dr (dr@der.kim)
@@ -167,9 +167,10 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN 与 FIELD
+     * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、NEW、CAST 与 INSTANCEOF
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前 INVOKE 表达式改写支持 INVOKE 边界切片
+     * @param slice 切片范围；当前调用返回、字段读取、数组读取、数组长度、NEW、CAST 与 INSTANCEOF
+     * 表达式改写支持 INVOKE 边界切片
      * @return ModifyExpressionValue 注入器
      *
      * @author Dr (dr@der.kim)
@@ -191,7 +192,7 @@ object AsmInjectorFactory {
      * @param injectionPoint 修改位置
      * @param index 要修改的局部变量槽位索引
      * @param ordinal 未指定槽位索引时，同类型入口参数、读取点或写入点的序号
-     * @param slice 切片范围；当前 LOAD 局部变量读取改写支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 LOAD 与 STORE 局部变量改写支持 INVOKE 边界切片
      * @return ModifyVariable 注入器
      *
      * @author Dr (dr@der.kim)
