@@ -527,6 +527,7 @@ annotation class ModifyExpressionValue(
  * - 第一个参数接收原始变量值并返回同类型的新值
  * - 后续参数可按目标方法声明顺序接收目标方法参数前缀
  * - [index] 使用 JVM 局部变量槽位索引；实例方法中 `this` 占用槽位 0，第一个参数从槽位 1 开始
+ * - 显式指定 [index] 时，对象/数组变量或目标方法参数对应的 handler 参数可声明为 `Any` / `Object`，但返回类型仍需保持变量类型
  * - [InjectionPoint.HEAD] 会在目标方法体执行前写回选中的参数槽位
  * - [InjectionPoint.LOAD] 会在匹配的 xLOAD 指令前加载当前槽位值、调用 handler，并写回同一槽位
  * - [InjectionPoint.STORE] 会在匹配的 xSTORE 指令后加载新存入的值、调用 handler，并写回同一槽位
