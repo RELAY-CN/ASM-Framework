@@ -2786,6 +2786,31 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantMatchesExplicitTrueBooleanConstant() {
+        AsmRegistry.register(TrueBooleanModifyConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("TrueBooleanConstantTarget", trueBooleanConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("TrueBooleanConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(false, result)
+    }
+
+    @Test
+    fun modifyConstantMatchesExplicitFalseBooleanConstant() {
+        AsmRegistry.register(FalseBooleanModifyConstantMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("FalseBooleanConstantTarget", falseBooleanConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FalseBooleanConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(true, result)
+    }
+
+    @Test
     fun modifyConstantMatchesBipushIntConstant() {
         AsmRegistry.register(BipushModifyConstantMixin::class.java)
 
@@ -7527,6 +7552,20 @@ class FrameworkReliabilityTest {
         fun modify(original: Any?): Any = "changed"
     }
 
+    @AsmMixin("TrueBooleanConstantTarget")
+    object TrueBooleanModifyConstantMixin {
+        @ModifyConstant(method = "value()Z", constant = "true")
+        @JvmStatic
+        fun modify(original: Boolean): Boolean = !original
+    }
+
+    @AsmMixin("FalseBooleanConstantTarget")
+    object FalseBooleanModifyConstantMixin {
+        @ModifyConstant(method = "value()Z", constant = "false")
+        @JvmStatic
+        fun modify(original: Boolean): Boolean = !original
+    }
+
     @AsmMixin("BipushConstantTarget")
     object BipushModifyConstantMixin {
         @ModifyConstant(method = "value()I", constant = "7")
@@ -11942,6 +11981,36 @@ class FrameworkReliabilityTest {
             visitCode()
             visitInsn(Opcodes.ACONST_NULL)
             visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun trueBooleanConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "TrueBooleanConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Z", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ICONST_1)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun falseBooleanConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FalseBooleanConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Z", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ICONST_0)
+            visitInsn(Opcodes.IRETURN)
             visitMaxs(1, 1)
             visitEnd()
         }
