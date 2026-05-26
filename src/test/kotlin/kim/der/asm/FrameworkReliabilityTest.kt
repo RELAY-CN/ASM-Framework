@@ -285,6 +285,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueAcceptsObjectHandlerParameter() {
+        AsmRegistry.register(ModifyReturnValueObjectParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-any", result)
+    }
+
+    @Test
     fun modifyReturnValueWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyReturnParametersMixin::class.java)
 
@@ -4974,6 +4986,13 @@ class FrameworkReliabilityTest {
         fun inject(unavailable: String) {
             unavailable.length
         }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ModifyReturnValueObjectParameterMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: Any): String = "$original-any"
     }
 
     @AsmMixin("ReturnTarget")
