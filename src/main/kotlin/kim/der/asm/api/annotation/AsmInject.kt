@@ -39,8 +39,9 @@ package kim.der.asm.api.annotation
  * 或 `var=N` 按 JVM 局部变量槽位过滤
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.FIELD] /
- * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入，以及普通 [InjectionPoint.LOAD] /
- * [InjectionPoint.STORE] 局部变量读写指令点注入支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.LOAD] /
+ * [InjectionPoint.STORE] 局部变量读写指令点注入，以及普通 [InjectionPoint.CAST] /
+ * [InjectionPoint.THROW] 类型转换与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
@@ -185,7 +186,8 @@ enum class Shift {
  *
  * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
  * [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、
- * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写指令点注入、
+ * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写指令点注入、普通
+ * [InjectionPoint.CAST] / [InjectionPoint.THROW] 类型转换与抛异常指令点注入、
  * [Redirect] 的普通方法调用重定向，[ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE] receiver 改写，
  * [WrapOperation] / [WrapWithCondition] 的 [InjectionPoint.INVOKE] 操作包裹或条件包裹，以及

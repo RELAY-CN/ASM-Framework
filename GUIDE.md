@@ -159,7 +159,7 @@ object LoggingMixin {
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
 
-当目标方法内有多个相同调用、字段读写点或局部变量读写点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD` 或 `STORE`
+当目标方法内有多个相同调用、字段读写点、局部变量读写点、类型转换点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CAST` 或 `THROW`
 注入限制在一段调用边界内：
 
 ```kotlin
@@ -182,7 +182,7 @@ fun beforeTrim(value: String) {
 }
 ```
 
-`from` 边界之后、`to` 边界之前的调用点、字段读写指令或局部变量读写指令才会参与匹配，边界调用本身不会被注入；
+`from` 边界之后、`to` 边界之前的调用点、字段读写指令、局部变量读写指令、类型转换指令或抛异常指令才会参与匹配，边界调用本身不会被注入；
 `ordinal` 会在切片内重新计数。
 
 ### 场景 2: 修改参数与局部变量
@@ -966,7 +966,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` 可用 `Slice` 缩小候选读写指令范围，普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；对象创建、类型转换与抛异常指令点当前不使用 `slice`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。`INSTANCEOF` 当前不作为普通 `@AsmInject` 指令点使用；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `THROW` 可用 `Slice` 缩小候选指令范围，普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；对象创建指令点当前不使用 `slice`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。`INSTANCEOF` 当前不作为普通 `@AsmInject` 指令点使用；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
