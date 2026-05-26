@@ -4298,6 +4298,75 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectFieldSliceLimitsFieldReadsBetweenFromAndTo() {
+        AsmRegistry.register(RedirectFieldReadSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("redirected", result)
+    }
+
+    @Test
+    fun redirectFieldAssignSliceLimitsFieldWritesBetweenFromAndTo() {
+        RedirectFieldAssignSliceMixin.lastValue = null
+        AsmRegistry.register(RedirectFieldAssignSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceFieldAssignTarget", sliceFieldAssignTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldAssignTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeSelected", String::class.java, String::class.java).invoke(instance, "outside", "inside")
+        val result = clazz.getField("name").get(instance)
+
+        assertEquals("outside", result)
+        assertEquals("inside", RedirectFieldAssignSliceMixin.lastValue)
+    }
+
+    @Test
+    fun redirectArrayReadSliceLimitsLoadsBetweenFromAndTo() {
+        AsmRegistry.register(RedirectArrayReadSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceArrayExpressionValueTarget", sliceArrayExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceArrayExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readSelected", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("redirected-raw", result)
+    }
+
+    @Test
+    fun redirectArrayLengthSliceLimitsLengthsBetweenFromAndTo() {
+        AsmRegistry.register(RedirectArrayLengthSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceArrayExpressionValueTarget", sliceArrayExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceArrayExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("countSelected").invoke(instance)
+
+        assertEquals(6, result)
+    }
+
+    @Test
+    fun redirectArrayWriteSliceLimitsStoresBetweenFromAndTo() {
+        AsmRegistry.register(RedirectArrayWriteSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceWrapConditionArrayTarget", sliceWrapConditionArrayTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceWrapConditionArrayTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("writeSelected").invoke(instance)
+
+        assertEquals("pre:redirected-inside:outside", result)
+    }
+
+    @Test
     fun redirectOrdinalSelectsSingleFieldRead() {
         AsmRegistry.register(FieldReadRedirectOrdinalMixin::class.java)
 
@@ -8624,6 +8693,118 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): String = "redirected"
+    }
+
+    @AsmMixin("SliceFieldReadTarget")
+    object RedirectFieldReadSliceMixin {
+        @Redirect(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(target: Any): String {
+            target.hashCode()
+            return "redirected"
+        }
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object RedirectFieldAssignSliceMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            lastValue = value
+        }
+    }
+
+    @AsmMixin("SliceArrayExpressionValueTarget")
+    object RedirectArrayReadSliceMixin {
+        @Redirect(
+            method = "readSelected(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceArrayExpressionValueTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+        ): String = "redirected-${array[index]}"
+    }
+
+    @AsmMixin("SliceArrayExpressionValueTarget")
+    object RedirectArrayLengthSliceMixin {
+        @Redirect(
+            method = "countSelected()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceArrayExpressionValueTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(array: Array<String>): Int = array.size + 5
+    }
+
+    @AsmMixin("SliceWrapConditionArrayTarget")
+    object RedirectArrayWriteSliceMixin {
+        @Redirect(
+            method = "writeSelected()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceWrapConditionArrayTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ) {
+            array[index] = "redirected-$value"
+        }
     }
 
     @AsmMixin("FieldReadOrdinalTarget")
