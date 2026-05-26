@@ -88,6 +88,9 @@ class RedirectInjector(
         if (isInstanceofRedirect()) {
             return injectInstanceofCount(target)
         }
+        if (isCastRedirect()) {
+            return injectCastCount(target)
+        }
         if (isFieldAssignRedirect()) {
             return injectFieldAssignCount(target)
         }
@@ -191,6 +194,8 @@ class RedirectInjector(
 
     private fun isInstanceofRedirect(): Boolean = injectionPoint == InjectionPoint.INSTANCEOF
 
+    private fun isCastRedirect(): Boolean = injectionPoint == InjectionPoint.CAST
+
     private fun arrayAccessMode(): ArrayAccessMode? {
         val arrayArg = args.firstOrNull { it.trim().startsWith("array=") } ?: return null
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
@@ -268,6 +273,35 @@ class RedirectInjector(
                     continue
                 }
                 replaceInstanceof(target, instructions, insn)
+                injectionCount++
+            }
+        }
+
+        return injectionCount
+    }
+
+    private fun injectCastCount(target: MethodNode): Int {
+        val typeTarget = redirectTarget.replace('.', '/')
+        if (typeTarget.isEmpty()) {
+            throw IllegalArgumentException("Redirect CAST target type must not be empty")
+        }
+
+        val instructions = target.instructions
+        var injectionCount = 0
+        val insns = instructions.toArray()
+        var matchedOrdinal = 0
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn is TypeInsnNode && insn.opcode == Opcodes.CHECKCAST && insn.desc == typeTarget) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+                replaceCast(target, instructions, insn)
                 injectionCount++
             }
         }
@@ -645,6 +679,31 @@ class RedirectInjector(
         instructions.remove(arrayInsn)
     }
 
+    private fun replaceCast(
+        target: MethodNode,
+        instructions: InsnList,
+        originalInsn: TypeInsnNode,
+    ) {
+        val castType = Type.getObjectType(originalInsn.desc)
+        val targetParamCount = validateCastHandlerSignature(target, castType)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectInstanceofHandlerCall(target, il, targetParamCount)
+        }
+
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (castType != handlerReturnType) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, castType.internalName))
+        }
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(originalInsn)
+    }
+
     private fun replaceInstanceof(
         target: MethodNode,
         instructions: InsnList,
@@ -993,6 +1052,41 @@ class RedirectInjector(
         if (handlerReturnType != Type.VOID_TYPE) {
             throw IllegalStateException(
                 "Redirect field assign handler ${asmMethod.name} must return void, actual $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateCastHandlerSignature(
+        target: MethodNode,
+        castType: Type,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val expectedParams = arrayOf(Type.getType(Any::class.java))
+        if (actualParams.isEmpty()) {
+            throw IllegalStateException(
+                "Redirect CAST handler ${asmMethod.name} parameter count mismatch: " +
+                    "expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+        if (!isHandlerParameterCompatible(expectedParams[0], actualParams[0])) {
+            throw IllegalStateException(
+                "Redirect CAST handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected stack type ${expectedParams[0]}, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(castType, handlerReturnType)) {
+            throw IllegalStateException(
+                "Redirect CAST handler ${asmMethod.name} return type mismatch: original $castType, handler $handlerReturnType",
             )
         }
         return targetParamCount
