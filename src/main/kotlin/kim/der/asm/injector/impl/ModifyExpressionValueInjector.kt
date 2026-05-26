@@ -370,9 +370,9 @@ class ModifyExpressionValueInjector(
         expressionType: Type,
     ): Int {
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
-        if (asmParamTypes.isEmpty() || asmParamTypes[0] != expressionType) {
+        if (asmParamTypes.isEmpty() || !isHandlerParameterCompatible(expressionType, asmParamTypes[0])) {
             throw IllegalArgumentException(
-                "@ModifyExpressionValue handler ${asmMethod.name} first parameter must be $expressionType, " +
+                "@ModifyExpressionValue handler ${asmMethod.name} first parameter must accept $expressionType, " +
                     "actual ${asmParamTypes.toList()}",
             )
         }
@@ -398,7 +398,7 @@ class ModifyExpressionValueInjector(
         for (index in 0 until requestedTargetParamCount) {
             val expected = targetParamTypes[index]
             val actual = asmParamTypes[index + 1]
-            if (actual != expected) {
+            if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalArgumentException(
                     "@ModifyExpressionValue handler ${asmMethod.name} target parameter #$index mismatch: " +
                         "expected $expected, actual $actual",
@@ -407,6 +407,20 @@ class ModifyExpressionValueInjector(
         }
 
         return requestedTargetParamCount
+    }
+
+    private fun isHandlerParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
+            return actual.sort == Type.OBJECT &&
+                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        }
+        return false
     }
 
     private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
