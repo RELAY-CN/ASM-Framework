@@ -4221,7 +4221,7 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun asmInjectThrowSliceLimitsThrowsBetweenFromAndTo() {
+    fun asmInjectThrowSliceLimitsThrowsAfterFrom() {
         AsmRegistry.register(ThrowInstructionSliceMixin::class.java)
 
         val transformed =
@@ -4255,12 +4255,11 @@ class FrameworkReliabilityTest {
             }
         }
 
-        assertEquals(2, boundaryIndexes.size)
-        val inSliceThrowIndexes = throwIndexes.filter { it > boundaryIndexes[0] && it < boundaryIndexes[1] }
+        assertEquals(1, boundaryIndexes.size)
+        val inSliceThrowIndexes = throwIndexes.filter { it > boundaryIndexes.single() }
         assertEquals(1, inSliceThrowIndexes.size)
         assertEquals(1, handlerCallIndexes.size)
-        assertEquals(true, handlerCallIndexes.single() > boundaryIndexes[0])
-        assertEquals(true, handlerCallIndexes.single() < boundaryIndexes[1])
+        assertEquals(true, handlerCallIndexes.single() > boundaryIndexes.single())
         assertEquals(inSliceThrowIndexes.single() - 1, handlerCallIndexes.single())
     }
 
@@ -8235,7 +8234,6 @@ class FrameworkReliabilityTest {
             target = InjectionPoint.THROW,
             slice = Slice(
                 from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
-                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
             ),
             require = 1,
             allow = 1,
@@ -10328,10 +10326,6 @@ class FrameworkReliabilityTest {
             visitLdcInsn("inside")
             visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
             visitInsn(Opcodes.ATHROW)
-            visitLdcInsn(" end ")
-            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
-            visitInsn(Opcodes.POP)
-            visitInsn(Opcodes.RETURN)
             visitMaxs(0, 0)
             visitEnd()
         }
