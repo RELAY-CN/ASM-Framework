@@ -102,7 +102,9 @@ class InstructionPointInjector(
         point == InjectionPoint.LOAD ||
             point == InjectionPoint.STORE ||
             point == InjectionPoint.FIELD ||
-            point == InjectionPoint.FIELD_ASSIGN
+            point == InjectionPoint.FIELD_ASSIGN ||
+            point == InjectionPoint.CAST ||
+            point == InjectionPoint.THROW
 
     private fun matchesOrdinal(
         currentOrdinal: Int,
