@@ -639,9 +639,10 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 改写表达式结果的场景，handler 第一个参数接收匹配调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象、转换后的对象或 `INSTANCEOF` 判断结果并
 返回同类型新值，后续参数可接收目标方法参数前缀；它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，数组读取模式通过 `args = ["array=get"]`
-指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果。`INVOKE` 表达式值修改可用
-`Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被改写，
-`ordinal` 会在切片内重新计数。
+指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果。
+`INVOKE` / `INVOKE_ASSIGN` 调用返回、普通字段读取、`NEW`、`CAST` 与 `INSTANCEOF` 表达式值修改可用
+`Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用、字段读取、对象构造、类型转换或类型判断候选点才会参与匹配，
+边界调用本身不会被改写，`ordinal` 会在切片内重新计数；数组读取和数组长度模式当前不使用 `slice`。
 关键表达式值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的表达式值数量计数。
 
 `@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`LOAD` / `STORE` 模式可用 `Slice` 限制读取点或写入点匹配范围；`from` 边界之后、`to` 边界之前的读取或写入才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值，后续参数可继续接收目标方法参数前缀。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 `ordinal` 选择第 N 个同类型匹配项。关键变量补丁可设置 `require` / `allow` / `expect`，`HEAD` 按入口改写计 1 次，`LOAD` / `STORE` 按实际改写的读写点数量计数。`HEAD` 当前不使用 `slice`。

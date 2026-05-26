@@ -36,7 +36,9 @@ import java.lang.reflect.Modifier
  * 可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值，
  * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值，[InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
- * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式使用 INVOKE 边界缩小匹配范围
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、普通
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]
+ * 表达式使用 INVOKE 边界缩小匹配范围；数组元素读取和数组长度模式当前不使用 slice
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -522,7 +524,7 @@ class ModifyExpressionValueInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @ModifyExpressionValue(INVOKE): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @ModifyExpressionValue: ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
