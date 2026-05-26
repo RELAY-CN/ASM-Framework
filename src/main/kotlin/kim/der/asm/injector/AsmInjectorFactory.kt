@@ -210,10 +210,10 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param target 目标调用签名
+     * @param target 目标调用、构造器、字段或类型签名
      * @param injectionPoint Redirect 的定位点类型
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向支持
+     * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度与类型判断重定向支持
      * INVOKE 边界切片
      * @param args 调用点附加参数
      * @return Redirect 注入器

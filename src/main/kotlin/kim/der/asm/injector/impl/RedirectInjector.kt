@@ -26,20 +26,23 @@ import java.lang.reflect.Modifier
 /**
  * Redirect 注入器。
  *
- * 查找目标方法中的匹配方法调用、构造器调用、字段读取、字段写入、简单数组元素访问或数组长度指令，并用 ASM 方法调用替换原指令。
+ * 查找目标方法中的匹配方法调用、构造器调用、字段读取、字段写入、简单数组元素访问、数组长度或
+ * `INSTANCEOF` 类型判断指令，并用 ASM 方法调用替换原指令。
  *
  * 方法调用目标使用 `owner.name(desc)` 或 `name(desc)` 格式；字段读取目标使用
  * `owner.field:desc`、`field:desc` 或 `field` 格式。字段写入目标格式与字段读取相同，
  * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素访问与数组长度使用 [InjectionPoint.FIELD]
  * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get`、`array=set` 或 `array=length` 区分读取、写入与长度读取。
- * 方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向支持静态处理器、`@JvmStatic` 处理器或
- * Kotlin `object` 实例处理器。处理器需先接收原调用、构造器或字段访问需要的栈参数，后续可按顺序接收目标方法的部分参数。
+ * 类型判断使用 [InjectionPoint.INSTANCEOF] 与类型 internal name 或 binary name 匹配。
+ * 方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度与类型判断重定向支持静态处理器、`@JvmStatic`
+ * 处理器或 Kotlin `object` 实例处理器。处理器需先接收原调用、构造器、字段访问或类型判断需要的栈参数，
+ * 后续可按顺序接收目标方法的部分参数。
  *
- * @param redirectTarget 要重定向的方法调用或字段访问签名
+ * @param redirectTarget 要重定向的方法调用、构造器调用、字段访问或类型签名
  * @param injectionPoint Redirect 的定位点类型；[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
- * 会强制按字段访问语义解析目标
- * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、字段读取、字段写入、数组元素访问与数组长度重定向
- * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向
+ * 会强制按字段访问语义解析目标，[InjectionPoint.INSTANCEOF] 会按类型判断语义解析目标
+ * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、字段读取、字段写入、数组元素访问、数组长度与类型判断重定向
+ * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度与类型判断重定向
  * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
  * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配数组长度
  *
