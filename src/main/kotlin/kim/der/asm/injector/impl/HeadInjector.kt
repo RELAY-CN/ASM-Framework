@@ -4,6 +4,7 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
@@ -38,6 +39,7 @@ class HeadInjector(
      * @date 2025-11-24
      */
     override fun inject(target: MethodNode): Boolean {
+        val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java)
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         val il = InsnList()
 
@@ -46,7 +48,7 @@ class HeadInjector(
 
         var callbackVarIndex: Int? = null
         if (needsCallbackInfo) {
-            AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+            AsmMethodCallGenerator.generateCallbackInfoCreation(il, injectAnnotation?.cancellable == true)
             callbackVarIndex = allocateLocalVariable(target, Type.getType(CallbackInfo::class.java))
             il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
         }
