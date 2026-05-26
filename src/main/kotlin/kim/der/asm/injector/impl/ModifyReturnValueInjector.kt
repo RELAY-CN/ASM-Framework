@@ -19,6 +19,8 @@ import java.lang.reflect.Modifier
  * 在非 void 方法的返回指令前保存原始返回值，并调用 ASM 方法生成替换返回值。
  * void 方法没有可修改的返回值，因此会直接返回未修改。默认修改全部非 void 返回点；
  * 当 [ordinal] 为非负数时，只修改对应序号的返回点。
+ * 原返回值或目标方法参数为对象/数组类型时，对应 handler 参数可声明为 `Any` / `Object`；
+ * handler 返回类型仍需保持目标方法返回类型。
  *
  * @param ordinal 返回点序号；负数表示修改全部非 void 返回点
  *
