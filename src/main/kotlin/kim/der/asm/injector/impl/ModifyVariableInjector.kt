@@ -27,7 +27,8 @@ import java.lang.reflect.Modifier
  *
  * 当前实现支持在方法入口修改已有参数槽位，也支持在局部变量读取前或写入指令后改写槽位值。
  * 优先按 JVM 局部变量槽位索引定位；未显式指定槽位时，可按 handler 参数类型与 [ordinal] 选择同类型参数、读取点或写入点。
- * handler 第一个参数接收原变量值，后续可按顺序接收目标方法参数前缀；调用后会把返回的新值写回同一个槽位。
+ * handler 第一个参数接收原变量值；显式指定槽位时，对象或数组变量可声明为 `Any` / `Object` 接收，
+ * 但返回类型仍需保持实际变量类型。后续可按顺序接收目标方法参数前缀；调用后会把返回的新值写回同一个槽位。
  *
  * @param injectionPoint 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param variableIndex 要修改的 JVM 局部变量槽位索引
