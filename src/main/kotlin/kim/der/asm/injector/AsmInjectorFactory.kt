@@ -125,9 +125,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 调用点定位；当前仅支持 INVOKE
+     * @param at 调用点定位；当前支持 INVOKE、FIELD 与 FIELD_ASSIGN
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前 INVOKE 操作包裹支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE、FIELD 与 FIELD_ASSIGN 操作包裹支持 INVOKE 边界切片
      * @return WrapOperation 注入器
      *
      * @author Dr (dr@der.kim)

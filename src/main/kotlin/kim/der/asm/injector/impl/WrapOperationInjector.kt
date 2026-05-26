@@ -40,7 +40,8 @@ import java.lang.reflect.Modifier
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
- * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 操作包裹使用 INVOKE 边界缩小匹配范围
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
+ * [InjectionPoint.FIELD_ASSIGN] 操作包裹使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -1127,7 +1128,7 @@ class WrapOperationInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @WrapOperation(INVOKE): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @WrapOperation: ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)

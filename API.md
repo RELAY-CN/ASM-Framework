@@ -286,7 +286,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `method: String = ""` - 目标方法签名
 - `at: At = At(value = InjectionPoint.INVOKE)` - 操作点定位；当前支持 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN`
 - `ordinal: Int = -1` - 操作点匹配序号；`-1` 表示包裹全部匹配操作点，`0` 及以上表示只包裹第 N 个匹配操作点
-- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 模式支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际操作包裹数必须不少于该值
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
@@ -296,16 +296,17 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 当 `INVOKE` 的 `At.target` 指向 `<init>` 构造器时，`@WrapOperation` 会替换常见 `NEW/DUP/args/INVOKESPECIAL` 构造表达式。handler 先接收构造器参数，不接收未初始化 receiver；下一参数必须是 `Operation<T>`，其中 `T` 为构造器 owner 类型；handler 返回类型必须兼容 owner 类型。`operation.call(...)` 只传构造器参数，并通过原构造器创建对象。
 
-`FIELD` 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取。`GETFIELD` handler 先接收字段 owner，再接收 `Operation<R>`；`GETSTATIC` handler 直接接收 `Operation<R>`。后续参数可按目标方法声明顺序接收目标方法参数前缀，handler 返回类型必须兼容字段类型。
+`FIELD` 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取。`GETFIELD` handler 先接收字段 owner，再接收 `Operation<R>`；`GETSTATIC` handler 直接接收 `Operation<R>`。后续参数可按目标方法声明顺序接收目标方法参数前缀，handler 返回类型必须兼容字段类型。可用 `slice.from` / `slice.to` 把候选字段读取限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
-`FIELD_ASSIGN` 模式匹配 `PUTFIELD` / `PUTSTATIC` 字段写入。`PUTFIELD` handler 先接收字段 owner，再接收待写入值与 `Operation<Unit>`；`PUTSTATIC` handler 接收待写入值与 `Operation<Unit>`。handler 必须返回 `Unit` / `void`，后续参数可按目标方法声明顺序接收目标方法参数前缀。
+`FIELD_ASSIGN` 模式匹配 `PUTFIELD` / `PUTSTATIC` 字段写入。`PUTFIELD` handler 先接收字段 owner，再接收待写入值与 `Operation<Unit>`；`PUTSTATIC` handler 接收待写入值与 `Operation<Unit>`。handler 必须返回 `Unit` / `void`，后续参数可按目标方法声明顺序接收目标方法参数前缀。可用 `slice.from` / `slice.to` 把候选字段写入限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 数组元素读取使用 `FIELD + at.args = ["array=get"]`，`At.target` 指向产生数组引用的数组字段。
 handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必须兼容数组元素类型。
 数组元素写入使用 `FIELD_ASSIGN + at.args = ["array=set"]`，handler 先接收数组引用、`Int` 索引、
 待写入元素值与 `Operation<Unit>`，并必须返回 `Unit` / `void`。数组长度读取使用 `FIELD + at.args = ["array=length"]`，
 handler 先接收数组引用与 `Operation<Int>`，返回类型必须为 `Int`。数组访问当前匹配简单数组字段访问形态，
-即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
+即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。数组读取、数组长度与数组写入也可用 `slice.from` / `slice.to`
+把候选数组访问限制在一段 `INVOKE` 边界之间。
 
 `Operation.call` 的参数形态与原操作栈参数一致：实例调用传入 receiver 与原方法参数，静态调用只传入原方法参数；
 构造器调用只传入构造器参数；
@@ -913,7 +914,7 @@ At(
 
 用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.CAST / InjectionPoint.THROW)`、普通方法调用 `@Redirect`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
-`@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE)`、
+`@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD_ASSIGN)`、
 `@ModifyExpressionValue(at.value = InjectionPoint.INVOKE / InjectionPoint.INVOKE_ASSIGN / InjectionPoint.FIELD / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`、
 `@ModifyVariable(at.value = InjectionPoint.LOAD / InjectionPoint.STORE)`、`@ModifyConstant`
