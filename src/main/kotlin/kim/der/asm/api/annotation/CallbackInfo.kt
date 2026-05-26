@@ -71,6 +71,9 @@ class CallbackInfo
          */
         fun setReturnValue(value: Any?) {
             this.returnValue = value
+            if (cancellable) {
+                cancelled = true
+            }
         }
 
         companion object {
