@@ -670,8 +670,8 @@ annotation class ModifyConstant(
  * @param target 目标调用、构造器或字段签名组件；会与 [At.target] 组合构建最终的匹配签名
  * @param at 调用点信息；[At.value] 决定重定向方法调用、构造器调用、字段读取、字段写入、数组元素访问还是数组长度读取，[At.target] 用于指定匹配签名
  * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度读取中生效
- * @param slice 切片范围；当前普通方法调用重定向支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向
+ * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际重定向数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际重定向数不能超过该值

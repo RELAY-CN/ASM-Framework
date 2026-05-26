@@ -39,7 +39,8 @@ import java.lang.reflect.Modifier
  * @param injectionPoint Redirect 的定位点类型；[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * 会强制按字段访问语义解析目标
  * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、字段读取、字段写入、数组元素访问与数组长度重定向
- * @param slice 切片范围；当前仅普通方法调用重定向使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
+ * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向
+ * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
  * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配数组长度
  *
  * @author Dr (dr@der.kim)
@@ -155,7 +156,7 @@ class RedirectInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @Redirect(INVOKE): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @Redirect: ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)

@@ -504,16 +504,16 @@ handler 参数必须先按目标方法声明顺序接收原方法参数，下一
 - `target: String = ""` - 要重定向的方法调用、构造器调用或字段访问签名
 - `at: At = At()` - 注入位置；`at.value = InjectionPoint.FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向中生效
-- `slice: Slice = Slice()` - 切片范围；当前普通方法调用重定向支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际重定向数必须不少于该值
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
 方法调用、构造器调用、字段读取、字段写入、数组元素访问与数组长度重定向都可用 `ordinal` 只替换第 N 个匹配点。
-普通方法调用重定向支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界；框架只在起始边界之后、
-结束边界之前查找目标调用，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。指定的边界未命中时，
-切片按空范围处理。构造器、字段、数组访问与数组长度重定向当前不使用 `slice`。
+这些模式均支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界；框架只在起始边界之后、
+结束边界之前查找目标调用、字段访问、数组访问或数组长度指令，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+指定的边界未命中时，切片按空范围处理。
 
 `@Redirect` 会统计实际替换的调用点、构造器调用点、字段访问点、数组元素访问点或数组长度读取点数量；显式设置
 `require` / `allow` / 非默认 `expect` 时按实际重定向数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，
@@ -912,7 +912,7 @@ At(
 
 ### Slice
 
-用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.CAST / InjectionPoint.THROW)`、普通方法调用 `@Redirect`
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.CAST / InjectionPoint.THROW)`、`@Redirect`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD_ASSIGN)`、
