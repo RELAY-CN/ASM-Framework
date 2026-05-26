@@ -4080,6 +4080,7 @@ class FrameworkReliabilityTest {
 
         assertEquals(true, method.invoke(instance, 42, false))
         assertEquals(false, method.invoke(instance, "raw", false))
+        assertEquals(true, method.invoke(instance, "raw", true))
     }
 
     @Test
@@ -6622,7 +6623,14 @@ class FrameworkReliabilityTest {
             at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
         )
         @JvmStatic
-        fun redirect(value: Any): Boolean = value is Number
+        fun redirect(
+            value: Any,
+            original: Any,
+            force: Boolean,
+        ): Boolean {
+            original.hashCode()
+            return value is Number || force
+        }
     }
 
     @AsmMixin("ModifyReceiverTarget")
