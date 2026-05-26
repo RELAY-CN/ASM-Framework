@@ -992,6 +992,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionFieldAssignSliceLimitsWritesBetweenFromAndTo() {
+        AsmRegistry.register(WrapConditionFieldAssignSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceWrapConditionFieldTarget", sliceWrapConditionFieldTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceWrapConditionFieldTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("writeSelected").invoke(instance)
+
+        assertEquals("pre:pre:outside", result)
+    }
+
+    @Test
+    fun wrapWithConditionArrayWriteSliceLimitsStoresBetweenFromAndTo() {
+        AsmRegistry.register(WrapConditionArrayWriteSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceWrapConditionArrayTarget", sliceWrapConditionArrayTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceWrapConditionArrayTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("writeSelected").invoke(instance)
+
+        assertEquals("pre:pre:outside", result)
+    }
+
+    @Test
     fun wrapWithConditionRejectsNonVoidInvokeCall() {
         AsmRegistry.register(WrapConditionNonVoidCallMixin::class.java)
 
@@ -5399,6 +5425,60 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceWrapConditionFieldTarget")
+    object WrapConditionFieldAssignSliceMixin {
+        @WrapWithCondition(
+            method = "writeSelected()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "SliceWrapConditionFieldTarget.name:Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("SliceWrapConditionArrayTarget")
+    object WrapConditionArrayWriteSliceMixin {
+        @WrapWithCondition(
+            method = "writeSelected()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "SliceWrapConditionArrayTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ): Boolean {
+            array[index].length
+            value.length
+            return false
+        }
+    }
+
     @AsmMixin("ExpressionValueTarget")
     object WrapConditionNonVoidCallMixin {
         @WrapWithCondition(
@@ -9762,6 +9842,135 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.PUTSTATIC, "SliceWrapConditionTarget", "last", "Ljava/lang/String;")
             visitInsn(Opcodes.RETURN)
             visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceWrapConditionFieldTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceWrapConditionFieldTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("initial")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeSelected", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("pre")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("inside")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("outside")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionFieldTarget", "name", "Ljava/lang/String;")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceWrapConditionArrayTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceWrapConditionArrayTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "names", "[Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ICONST_1)
+            visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("initial")
+            visitInsn(Opcodes.AASTORE)
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(5, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeSelected", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("pre")
+            visitInsn(Opcodes.AASTORE)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ICONST_0)
+            visitInsn(Opcodes.AALOAD)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("inside")
+            visitInsn(Opcodes.AASTORE)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ICONST_0)
+            visitInsn(Opcodes.AALOAD)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("outside")
+            visitInsn(Opcodes.AASTORE)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceWrapConditionArrayTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ICONST_0)
+            visitInsn(Opcodes.AALOAD)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 3)
             visitEnd()
         }
         cw.visitEnd()
