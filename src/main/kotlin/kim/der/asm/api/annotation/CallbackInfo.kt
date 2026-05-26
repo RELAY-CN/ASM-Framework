@@ -10,7 +10,7 @@ package kim.der.asm.api.annotation
  * 当注入方法以 [CallbackInfo] 作为第一个参数时，注入器会在调用后读取该对象的状态：
  *
  * - 通过 [cancel] 标记取消：用于声明 `cancellable = true` 的 HEAD 注入提前返回（跳过原方法体）
- * - 通过 [setReturnValue] 修改返回值：用于 RETURN 注入在返回前替换结果
+ * - 通过 [setReturnValue] 修改返回值：用于 RETURN 注入在返回前替换结果；在可取消回调中也会标记取消
  *
  * 注意：该对象是可变的、非线程安全的，只应在单次注入调用链路内使用。
  *
@@ -68,6 +68,9 @@ class CallbackInfo
          * 设置返回值。
          *
          * 该值用于支持“返回值可变”的注入点（例如 RETURN），以及取消分支需要返回特定结果的场景。
+         * 当前回调可取消时，设置返回值会同时标记为已取消，使 HEAD 注入提前返回该值。
+         *
+         * @param value 新的返回值；可以为 `null`
          */
         fun setReturnValue(value: Any?) {
             this.returnValue = value
