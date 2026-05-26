@@ -236,9 +236,10 @@ class ModifyVariableInjector(
         variableType: Type,
     ): Int {
         val handlerParams = Type.getArgumentTypes(asmMethod)
-        if (handlerParams.isEmpty() || handlerParams[0] != variableType) {
+        if (handlerParams.isEmpty() || !isHandlerParameterCompatible(variableType, handlerParams[0])) {
             throw IllegalArgumentException(
-                "@ModifyVariable handler ${asmMethod.name} first parameter must be $variableType, actual ${handlerParams.toList()}",
+                "@ModifyVariable handler ${asmMethod.name} first parameter must be $variableType " +
+                    "or compatible Object/Any, actual ${handlerParams.toList()}",
             )
         }
 
@@ -261,7 +262,7 @@ class ModifyVariableInjector(
         for (index in 0 until requestedTargetParamCount) {
             val expected = targetParamTypes[index]
             val actual = handlerParams[index + 1]
-            if (actual != expected) {
+            if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalArgumentException(
                     "@ModifyVariable handler ${asmMethod.name} target parameter #$index mismatch: expected $expected, actual $actual",
                 )
@@ -269,6 +270,20 @@ class ModifyVariableInjector(
         }
 
         return requestedTargetParamCount
+    }
+
+    private fun isHandlerParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
+            return actual.sort == Type.OBJECT &&
+                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        }
+        return false
     }
 
     private fun loadTargetMethodParameters(
