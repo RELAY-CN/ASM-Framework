@@ -679,6 +679,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtInvokeAcceptsObjectHandlerParameter() {
+        AsmRegistry.register(InvokeModifyArgObjectParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-original-any", result)
+    }
+
+    @Test
     fun modifyArgAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(InvokeModifyArgWithTargetParamsMixin::class.java)
 
@@ -5308,6 +5320,20 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "modified"
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InvokeModifyArgObjectParameterMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Any): String = "$original-any"
     }
 
     @AsmMixin("InvokeModifyArgParamTarget")
