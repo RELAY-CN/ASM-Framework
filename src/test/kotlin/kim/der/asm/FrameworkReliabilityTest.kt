@@ -2160,6 +2160,73 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationFieldSliceLimitsFieldReadsBetweenFromAndTo() {
+        AsmRegistry.register(WrapOperationFieldReadSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("raw-wrapped", result)
+    }
+
+    @Test
+    fun wrapOperationFieldAssignSliceLimitsFieldWritesBetweenFromAndTo() {
+        AsmRegistry.register(WrapOperationFieldAssignSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceFieldAssignTarget", sliceFieldAssignTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldAssignTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeSelected", String::class.java, String::class.java).invoke(instance, "outside", "inside")
+        val result = clazz.getField("name").get(instance)
+
+        assertEquals("wrapped-inside", result)
+    }
+
+    @Test
+    fun wrapOperationArrayReadSliceLimitsLoadsBetweenFromAndTo() {
+        AsmRegistry.register(WrapOperationArrayReadSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceArrayExpressionValueTarget", sliceArrayExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceArrayExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readSelected", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("wrapped-raw", result)
+    }
+
+    @Test
+    fun wrapOperationArrayLengthSliceLimitsLengthsBetweenFromAndTo() {
+        AsmRegistry.register(WrapOperationArrayLengthSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceArrayExpressionValueTarget", sliceArrayExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceArrayExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("countSelected").invoke(instance)
+
+        assertEquals(6, result)
+    }
+
+    @Test
+    fun wrapOperationArrayWriteSliceLimitsStoresBetweenFromAndTo() {
+        AsmRegistry.register(WrapOperationArrayWriteSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceWrapConditionArrayTarget", sliceWrapConditionArrayTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceWrapConditionArrayTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("writeSelected").invoke(instance)
+
+        assertEquals("pre:wrapped-inside:outside", result)
+    }
+
+    @Test
     fun wrapOperationWithMismatchedHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(MismatchedWrapOperationMixin::class.java)
 
@@ -6683,6 +6750,125 @@ class FrameworkReliabilityTest {
             target.length
             value.length
             return operation.call(target, "-wrapped")
+        }
+    }
+
+    @AsmMixin("SliceFieldReadTarget")
+    object WrapOperationFieldReadSliceMixin {
+        @WrapOperation(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String {
+            target.hashCode()
+            return "${operation.call(target)}-wrapped"
+        }
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object WrapOperationFieldAssignSliceMixin {
+        @WrapOperation(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            target.hashCode()
+            operation.call(target, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("SliceArrayExpressionValueTarget")
+    object WrapOperationArrayReadSliceMixin {
+        @WrapOperation(
+            method = "readSelected(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceArrayExpressionValueTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            operation: Operation<String>,
+        ): String = "wrapped-${operation.call(array, index)}"
+    }
+
+    @AsmMixin("SliceArrayExpressionValueTarget")
+    object WrapOperationArrayLengthSliceMixin {
+        @WrapOperation(
+            method = "countSelected()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceArrayExpressionValueTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            operation: Operation<Int>,
+        ): Int = operation.call(array) + 5
+    }
+
+    @AsmMixin("SliceWrapConditionArrayTarget")
+    object WrapOperationArrayWriteSliceMixin {
+        @WrapOperation(
+            method = "writeSelected()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "SliceWrapConditionArrayTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(array, index, "wrapped-$value")
         }
     }
 
