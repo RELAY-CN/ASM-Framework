@@ -4070,6 +4070,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtCastReplacesCheckcastValue() {
+        AsmRegistry.register(CastRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("cast", Any::class.java)
+
+        assertEquals("redirect-raw-true", method.invoke(instance, StringBuilder("raw")))
+    }
+
+    @Test
     fun redirectAtInstanceofReplacesTypeCheckResult() {
         AsmRegistry.register(InstanceofRedirectMixin::class.java)
 
@@ -6597,6 +6609,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object CastRedirectMixin {
+        @Redirect(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun redirect(
+            value: Any,
+            input: Any,
+        ): String = "redirect-$value-${value === input}"
     }
 
     @AsmMixin("InstanceofTarget")
