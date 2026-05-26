@@ -123,14 +123,18 @@ enum class InjectionPoint {
  *
  * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF] 的匹配目标，
- * 并通过 [shift] 指定在匹配指令前/后插入 handler。
+ * 并通过 [shift] 指定在匹配指令前/后插入 handler。普通 [AsmInject] 的
+ * [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] /
+ * [InjectionPoint.STORE] / [InjectionPoint.CAST] / [InjectionPoint.THROW] 还可用 [by]
+ * 按真实字节码指令数移动锚点，偏移过程会跳过 label、frame 与 line number 等伪指令。
  *
  * 注意：
  *
  * - INVOKE 目标要求包含方法或构造器描述符；owner 可省略，省略时只按方法名与描述符匹配。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
- * - NEW 只支持 BEFORE 或 REPLACE；AFTER 会在未初始化对象仍位于栈顶时插入调用，当前实现会拒绝该配置。
+ * - NEW 只支持 BEFORE 或 REPLACE，且不支持 by；AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
+ *   当前实现会拒绝该配置。
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
@@ -148,7 +152,9 @@ enum class InjectionPoint {
  * 当前仅支持 [InjectionPoint.INVOKE]
  * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型或 INSTANCEOF 类型签名
  * @param shift 注入偏移策略
- * @param by 预留参数，当前实现未实现按字节码偏移移动
+ * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
+ * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
+ * [InjectionPoint.CAST] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set` 与 `array=length`，
  * [WrapOperation] 支持 `array=get`、`array=set` 与 `array=length`，[WrapWithCondition] 支持 `array=set`，
  * [ModifyExpressionValue] 支持 `array=get` 与 `array=length`，普通 [AsmInject] 的 LOAD/STORE
