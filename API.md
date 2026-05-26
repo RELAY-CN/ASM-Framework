@@ -177,7 +177,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 结束边界之前查找目标调用、字段读写指令、局部变量读写指令、类型转换指令或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
 也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
-`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `THROW` 可用 `Slice` 缩小候选范围；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `NEW` 当前不使用 `slice`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `THROW` 可用 `Slice` 缩小候选范围，也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `NEW` 当前不使用 `slice` 或 `At.by`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -852,8 +852,9 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”。
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
 解释为“匹配字段写入或数组元素写入前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)`
-使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`；普通 `@AsmInject(NEW)` 只支持
-`Shift.BEFORE` 与 `Shift.REPLACE`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)` 可用 `Slice`
+使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`，并支持 `At.by` 按真实字节码指令数移动插入锚点；
+普通 `@AsmInject(NEW)` 只支持
+`Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)` 可用 `Slice`
 把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
 不会把局部变量值传给 handler，也可以用
 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；需要读取并写回变量值时使用 `@ModifyVariable`。`INSTANCEOF` 不支持普通
@@ -868,7 +869,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `value: InjectionPoint = InjectionPoint.HEAD` - 注入点类型
 - `target: String = ""` - 目标方法、字段或类型签名
 - `shift: Shift = Shift.BEFORE` - 偏移方向
-- `by: Int = 0` - 偏移量
+- `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/THROW)` 支持按真实字节码指令数正负移动锚点
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`
   与 `array=length`，`@WrapOperation` 当前支持 `array=get`、`array=set` 与 `array=length`，`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`
   与 `array=length`，普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N` 与 `var=N`
