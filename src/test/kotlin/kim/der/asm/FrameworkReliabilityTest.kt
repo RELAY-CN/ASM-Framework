@@ -4618,6 +4618,26 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun instanceofInjectInsertsHandlerBeforeMatchedInstanceofInstruction() {
+        AsmRegistry.register(InstanceofInstructionInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "isString" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, InstanceofInstructionInjectMixin::class.java, "inject")
+        val instanceofIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.TypeInsnNode &&
+                it.opcode == Opcodes.INSTANCEOF &&
+                it.desc == "java/lang/String"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, instanceofIndex >= 0)
+        assertEquals(instanceofIndex - 1, handlerCallIndex)
+    }
+
+    @Test
     fun asmInjectCastSliceLimitsCheckcastsBetweenFromAndTo() {
         AsmRegistry.register(CastInstructionSliceMixin::class.java)
         CastInstructionSliceMixin.injectCount = 0
@@ -9174,6 +9194,18 @@ class FrameworkReliabilityTest {
             method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
             target = InjectionPoint.CAST,
             at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object InstanceofInstructionInjectMixin {
+        @AsmInject(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            target = InjectionPoint.INSTANCEOF,
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
         )
         @JvmStatic
         fun inject() {
