@@ -1520,6 +1520,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueArrayReadSliceLimitsReadsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueArrayReadSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceArrayExpressionValueTarget", sliceArrayExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceArrayExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readSelected", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("raw-array-slice", result)
+    }
+
+    @Test
+    fun modifyExpressionValueArrayLengthSliceLimitsLengthsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueArrayLengthSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceArrayExpressionValueTarget", sliceArrayExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceArrayExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("countSelected").invoke(instance)
+
+        assertEquals(4, result)
+    }
+
+    @Test
     fun modifyExpressionValueArrayLengthWithMismatchedHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(MismatchedModifyExpressionValueArrayLengthMixin::class.java)
 
@@ -5914,6 +5940,46 @@ class FrameworkReliabilityTest {
         ): Int = original + bonus
     }
 
+    @AsmMixin("SliceArrayExpressionValueTarget")
+    object ModifyExpressionValueArrayReadSliceMixin {
+        @ModifyExpressionValue(
+            method = "readSelected(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceArrayExpressionValueTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-array-slice"
+    }
+
+    @AsmMixin("SliceArrayExpressionValueTarget")
+    object ModifyExpressionValueArrayLengthSliceMixin {
+        @ModifyExpressionValue(
+            method = "countSelected()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "SliceArrayExpressionValueTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 3
+    }
+
     @AsmMixin("ArrayAccessTarget")
     object MismatchedModifyExpressionValueArrayLengthMixin {
         @ModifyExpressionValue(
@@ -10266,6 +10332,74 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 0)
             visitFieldInsn(Opcodes.GETFIELD, "ArrayAccessTarget", "names", "[Ljava/lang/String;")
             visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceArrayExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceArrayExpressionValueTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "names", "[Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ICONST_1)
+            visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_0)
+            visitLdcInsn("raw")
+            visitInsn(Opcodes.AASTORE)
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceArrayExpressionValueTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(5, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readSelected", "(I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceArrayExpressionValueTarget", "names", "[Ljava/lang/String;")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.AALOAD)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceArrayExpressionValueTarget", "names", "[Ljava/lang/String;")
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.AALOAD)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "countSelected", "()I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceArrayExpressionValueTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceArrayExpressionValueTarget", "names", "[Ljava/lang/String;")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitVarInsn(Opcodes.ISTORE, 1)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ILOAD, 1)
             visitInsn(Opcodes.IRETURN)
             visitMaxs(1, 2)
             visitEnd()
