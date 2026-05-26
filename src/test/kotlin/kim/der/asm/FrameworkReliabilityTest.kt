@@ -215,6 +215,34 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun nonCancellableHeadCancelFailsDuringInvocation() {
+        AsmRegistry.register(NonCancellableHeadCancelMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("value").invoke(instance)
+            }
+
+        assertEquals(true, exception.cause is IllegalStateException)
+        assertEquals(true, exception.cause?.message?.contains("not cancellable") == true)
+    }
+
+    @Test
+    fun cancellableHeadCancelReturnsCallbackValue() {
+        AsmRegistry.register(CancellableHeadCancelReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("cancelled", result)
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -4815,6 +4843,25 @@ class FrameworkReliabilityTest {
     class ClassTailInjectMixin {
         @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.TAIL)
         fun injectTail() {
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object NonCancellableHeadCancelMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.HEAD)
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.cancel()
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object CancellableHeadCancelReturnMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.HEAD, cancellable = true)
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.setReturnValue("cancelled")
+            callback.cancel()
         }
     }
 
