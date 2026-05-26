@@ -372,7 +372,8 @@ class ModifyExpressionValueInjector(
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
         if (asmParamTypes.isEmpty() || !isHandlerParameterCompatible(expressionType, asmParamTypes[0])) {
             throw IllegalArgumentException(
-                "@ModifyExpressionValue handler ${asmMethod.name} first parameter must accept $expressionType, " +
+                "@ModifyExpressionValue handler ${asmMethod.name} first parameter must be $expressionType " +
+                    "or compatible Object/Any, " +
                     "actual ${asmParamTypes.toList()}",
             )
         }
