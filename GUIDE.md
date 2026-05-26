@@ -159,6 +159,8 @@ object LoggingMixin {
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
 
+只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
+
 当目标方法内有多个相同调用、字段读写点、局部变量读写点、类型转换点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CAST` 或 `THROW`
 注入限制在一段调用边界内：
 
@@ -892,6 +894,8 @@ object ConditionalMixin {
     }
 }
 ```
+
+`CallbackInfo.cancel()` 需要 `@AsmInject(cancellable = true)`；漏写时会在 handler 调用期间抛出异常，避免补丁静默失效。
 
 `@WrapWithCondition` 可用于按条件跳过 `void` 调用、字段写入或数组元素写入。字段写入模式需要使用
 `At(value = InjectionPoint.FIELD_ASSIGN, target = "...")`，`PUTFIELD` handler 参数为字段 owner 与待写入值，

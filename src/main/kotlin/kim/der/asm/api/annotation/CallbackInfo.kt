@@ -9,7 +9,7 @@ package kim.der.asm.api.annotation
  *
  * 当注入方法以 [CallbackInfo] 作为第一个参数时，注入器会在调用后读取该对象的状态：
  *
- * - 通过 [cancel] 标记取消：用于 HEAD 注入提前返回（跳过原方法体）
+ * - 通过 [cancel] 标记取消：用于声明 `cancellable = true` 的 HEAD 注入提前返回（跳过原方法体）
  * - 通过 [setReturnValue] 修改返回值：用于 RETURN 注入在返回前替换结果
  *
  * 注意：该对象是可变的、非线程安全的，只应在单次注入调用链路内使用。
@@ -17,7 +17,7 @@ package kim.der.asm.api.annotation
  * ## 示例
  *
  * ```kotlin
- * @AsmInject(method = "targetMethod()V", target = InjectionPoint.HEAD)
+ * @AsmInject(method = "targetMethod()V", target = InjectionPoint.HEAD, cancellable = true)
  * fun onHead(ci: CallbackInfo) {
  *     // 跳过目标方法体
  *     ci.cancel()
@@ -25,6 +25,7 @@ package kim.der.asm.api.annotation
  * ```
  *
  * @param returnValue 初始返回值（用于在返回值可变的注入点中提供默认值）
+ * @param cancellable 是否允许 [cancel] 标记取消；为 `false` 时调用 [cancel] 会抛出异常
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -39,7 +40,7 @@ class CallbackInfo
         /**
          * 标记取消。
          *
-         * 注入器在支持取消的注入点（例如 HEAD）会根据该标记决定是否提前返回。
+         * 注入器在支持取消的注入点（例如声明 `cancellable = true` 的 HEAD）会根据该标记决定是否提前返回。
          *
          * @throws IllegalStateException 当前注入点未声明可取消时抛出
          */
