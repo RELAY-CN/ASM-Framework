@@ -32,6 +32,7 @@ class CallbackInfo
     @JvmOverloads
     constructor(
         private var returnValue: Any? = null,
+        private val cancellable: Boolean = false,
     ) {
         private var cancelled = false
 
@@ -39,8 +40,13 @@ class CallbackInfo
          * 标记取消。
          *
          * 注入器在支持取消的注入点（例如 HEAD）会根据该标记决定是否提前返回。
+         *
+         * @throws IllegalStateException 当前注入点未声明可取消时抛出
          */
         fun cancel() {
+            check(cancellable) {
+                "CallbackInfo is not cancellable; set @AsmInject(cancellable = true) before calling cancel()"
+            }
             cancelled = true
         }
 
@@ -71,7 +77,7 @@ class CallbackInfo
              * 创建并立即标记为取消的回调信息。
              */
             @JvmStatic
-            fun cancellable(): CallbackInfo = CallbackInfo().apply { cancel() }
+            fun cancellable(): CallbackInfo = CallbackInfo(cancellable = true).apply { cancel() }
 
             /**
              * 创建带初始返回值的回调信息。

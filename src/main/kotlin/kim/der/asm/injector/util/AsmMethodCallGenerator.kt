@@ -169,15 +169,20 @@ object AsmMethodCallGenerator {
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    fun generateCallbackInfoCreation(il: InsnList) {
+    fun generateCallbackInfoCreation(
+        il: InsnList,
+        cancellable: Boolean = false,
+    ) {
         il.add(TypeInsnNode(Opcodes.NEW, Type.getInternalName(kim.der.asm.api.annotation.CallbackInfo::class.java)))
         il.add(InsnNode(Opcodes.DUP))
+        il.add(InsnNode(Opcodes.ACONST_NULL))
+        il.add(InsnNode(if (cancellable) Opcodes.ICONST_1 else Opcodes.ICONST_0))
         il.add(
             MethodInsnNode(
                 Opcodes.INVOKESPECIAL,
                 Type.getInternalName(kim.der.asm.api.annotation.CallbackInfo::class.java),
                 "<init>",
-                "()V",
+                "(Ljava/lang/Object;Z)V",
                 false,
             ),
         )
