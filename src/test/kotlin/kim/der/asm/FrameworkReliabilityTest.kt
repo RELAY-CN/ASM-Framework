@@ -4070,6 +4070,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtInstanceofReplacesTypeCheckResult() {
+        AsmRegistry.register(InstanceofRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InstanceofTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType)
+
+        assertEquals(true, method.invoke(instance, 42, false))
+        assertEquals(false, method.invoke(instance, "raw", false))
+    }
+
+    @Test
     fun redirectFieldReadReplacesGetFieldValue() {
         AsmRegistry.register(FieldReadRedirectMixin::class.java)
 
@@ -6600,6 +6613,16 @@ class FrameworkReliabilityTest {
             value.hashCode()
             return original || force
         }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object InstanceofRedirectMixin {
+        @Redirect(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun redirect(value: Any): Boolean = value is Number
     }
 
     @AsmMixin("ModifyReceiverTarget")
