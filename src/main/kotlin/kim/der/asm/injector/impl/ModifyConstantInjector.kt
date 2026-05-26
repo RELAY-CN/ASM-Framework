@@ -82,13 +82,13 @@ class ModifyConstantInjector(
             // 如果指定了常量值，检查是否匹配
             if (constantValue != null) {
                 val constant = BytecodeUtil.getConstant(insn)
-                if (!matchesConstant(constant, constantValue)) {
+                if (!matchesConstant(insn, constant, constantValue)) {
                     continue
                 }
             }
 
             // 获取常量类型
-            val constantType = BytecodeUtil.getConstantType(insn) ?: continue
+            val constantType = resolveConstantType(insn, constantValue) ?: continue
 
             // 检查 ASM 方法的返回类型是否匹配
             val asmReturnType = Type.getReturnType(asmMethod)
@@ -216,11 +216,15 @@ class ModifyConstantInjector(
      * 检查常量值是否匹配
      */
     private fun matchesConstant(
+        insn: AbstractInsnNode,
         constant: Any?,
         value: String,
     ): Boolean {
         if (constant == null) {
             return value == "null"
+        }
+        if (isBooleanLiteral(value)) {
+            return isBooleanConstantInsn(insn, value == "true")
         }
 
         return when (constant) {
@@ -317,6 +321,28 @@ class ModifyConstantInjector(
             }
         }
     }
+
+    private fun resolveConstantType(
+        insn: AbstractInsnNode,
+        requestedValue: String?,
+    ): Type? {
+        if (requestedValue != null && isBooleanLiteral(requestedValue) && isBooleanConstantInsn(insn, requestedValue == "true")) {
+            return Type.BOOLEAN_TYPE
+        }
+        return BytecodeUtil.getConstantType(insn)
+    }
+
+    private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
+
+    private fun isBooleanConstantInsn(
+        insn: AbstractInsnNode,
+        value: Boolean,
+    ): Boolean =
+        when (insn.opcode) {
+            Opcodes.ICONST_0 -> !value
+            Opcodes.ICONST_1 -> value
+            else -> false
+        }
 
     private fun loadTargetMethodParameters(
         il: InsnList,
