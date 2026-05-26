@@ -98,7 +98,11 @@ class InstructionPointInjector(
         return injectionCount
     }
 
-    private fun usesSliceRange(): Boolean = point == InjectionPoint.LOAD || point == InjectionPoint.STORE
+    private fun usesSliceRange(): Boolean =
+        point == InjectionPoint.LOAD ||
+            point == InjectionPoint.STORE ||
+            point == InjectionPoint.FIELD ||
+            point == InjectionPoint.FIELD_ASSIGN
 
     private fun matchesOrdinal(
         currentOrdinal: Int,
