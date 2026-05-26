@@ -61,7 +61,7 @@ class InstructionPointInjector(
 
     override fun injectCount(target: MethodNode): Int {
         val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
-        requireSupportedShift(injectAnnotation.at.shift)
+        requireSupportedShift(injectAnnotation.at.shift, injectAnnotation.at.by)
         val localVariableIndex = parseLocalVariableIndex(injectAnnotation.at.args)
         val matcher = buildMatcher(injectAnnotation.at.target, localVariableIndex)
         val instructions = target.instructions
@@ -89,9 +89,10 @@ class InstructionPointInjector(
             }
 
             val il = buildHandlerCall(target)
+            val anchor = resolveByAnchor(insns, index, injectAnnotation.at.by)
             when (injectAnnotation.at.shift) {
-                Shift.BEFORE, Shift.REPLACE -> instructions.insertBefore(insn, il)
-                Shift.AFTER -> instructions.insert(insn, il)
+                Shift.BEFORE, Shift.REPLACE -> instructions.insertBefore(anchor, il)
+                Shift.AFTER -> instructions.insert(anchor, il)
             }
             injectionCount++
         }
@@ -112,13 +113,67 @@ class InstructionPointInjector(
         requestedOrdinal: Int,
     ): Boolean = requestedOrdinal < 0 || currentOrdinal == requestedOrdinal
 
-    private fun requireSupportedShift(shift: Shift) {
+    private fun requireSupportedShift(
+        shift: Shift,
+        by: Int,
+    ) {
         if (point == InjectionPoint.NEW && shift == Shift.AFTER) {
             throw IllegalStateException(
                 "InjectionPoint.NEW does not support Shift.AFTER because inserting after NEW leaves " +
                     "an uninitialized object on the stack; use Shift.BEFORE or Shift.REPLACE",
             )
         }
+        if (point == InjectionPoint.NEW && by != 0) {
+            throw IllegalStateException(
+                "InjectionPoint.NEW does not support At.by because moving from NEW can leave an uninitialized " +
+                    "object on the stack",
+            )
+        }
+    }
+
+    private fun resolveByAnchor(
+        insns: Array<AbstractInsnNode>,
+        index: Int,
+        by: Int,
+    ): AbstractInsnNode {
+        if (by == 0) {
+            return insns[index]
+        }
+        val steps =
+            if (by > 0) {
+                by
+            } else if (by > Int.MIN_VALUE) {
+                -by
+            } else {
+                throw IllegalArgumentException("@AsmInject ${point.name} At.by is too small: $by")
+            }
+        val direction = if (by > 0) 1 else -1
+        var currentIndex = index
+
+        repeat(steps) {
+            currentIndex =
+                nextRealInstructionIndex(insns, currentIndex, direction)
+                    ?: throw IllegalStateException(
+                        "@AsmInject ${point.name} At.by offset $by moves outside method instructions",
+                    )
+        }
+
+        return insns[currentIndex]
+    }
+
+    private fun nextRealInstructionIndex(
+        insns: Array<AbstractInsnNode>,
+        index: Int,
+        direction: Int,
+    ): Int? {
+        var candidate = index + direction
+        while (candidate in insns.indices) {
+            if (insns[candidate].opcode >= 0) {
+                return candidate
+            }
+            candidate += direction
+        }
+        return null
     }
 
     private fun resolveSliceRange(
