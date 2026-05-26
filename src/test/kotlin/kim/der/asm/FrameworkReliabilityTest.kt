@@ -243,6 +243,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun cancellableHeadSetReturnValueReturnsCallbackValue() {
+        AsmRegistry.register(CancellableHeadSetReturnValueMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("set-only", result)
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -4887,6 +4899,15 @@ class FrameworkReliabilityTest {
         fun inject(callback: CallbackInfo) {
             callback.setReturnValue("cancelled")
             callback.cancel()
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object CancellableHeadSetReturnValueMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.HEAD, cancellable = true)
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.setReturnValue("set-only")
         }
     }
 
