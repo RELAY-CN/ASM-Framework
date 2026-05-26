@@ -95,7 +95,8 @@ class ModifyReturnValueInjector(
                 // 2. 后续参数（可选）：目标方法的参数
 
                 // 确定第一个参数是否是返回值
-                val firstParamIsReturnValue = asmParamTypes.isNotEmpty() && asmParamTypes[0] == returnType
+                val firstParamIsReturnValue =
+                    asmParamTypes.isNotEmpty() && isHandlerParameterCompatible(returnType, asmParamTypes[0])
 
                 // 获取 ASM 实例并生成调用
                 val instanceType = Type.getType(asmInfo.asmClass)
@@ -206,7 +207,8 @@ class ModifyReturnValueInjector(
             )
         }
 
-        val firstParamIsReturnValue = asmParamTypes.isNotEmpty() && asmParamTypes[0] == returnType
+        val firstParamIsReturnValue =
+            asmParamTypes.isNotEmpty() && isHandlerParameterCompatible(returnType, asmParamTypes[0])
         val targetParamStart = if (firstParamIsReturnValue) 1 else 0
         val expectedTargetParams = Type.getArgumentTypes(target.desc)
         val requestedTargetParamCount = asmParamTypes.size - targetParamStart
@@ -221,13 +223,27 @@ class ModifyReturnValueInjector(
         for (index in 0 until requestedTargetParamCount) {
             val expected = expectedTargetParams[index]
             val actual = asmParamTypes[targetParamStart + index]
-            if (actual != expected) {
+            if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalArgumentException(
                     "ASM method ${asmMethod.name} parameter #${targetParamStart + index} ($actual) " +
                         "must match target method ${target.name}${target.desc} parameter #$index ($expected)",
                 )
             }
         }
+    }
+
+    private fun isHandlerParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
+            return actual.sort == Type.OBJECT &&
+                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        }
+        return false
     }
 
     /**
