@@ -1269,6 +1269,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInvokeAcceptsObjectHandlerParameter() {
+        AsmRegistry.register(ModifyExpressionValueObjectParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-object", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueWithTargetParamsMixin::class.java)
 
@@ -6009,6 +6021,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object ModifyExpressionValueObjectParamMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Any): String = "$original-object"
     }
 
     @AsmMixin("ExpressionValueParamTarget")
