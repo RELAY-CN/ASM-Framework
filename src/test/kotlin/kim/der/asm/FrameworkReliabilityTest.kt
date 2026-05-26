@@ -1803,6 +1803,40 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverFieldSliceLimitsFieldReadReceiversBetweenFromAndTo() {
+        AsmRegistry.register(ModifyReceiverFieldReadSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "SliceModifyReceiverFieldTarget",
+                sliceModifyReceiverFieldTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("SliceModifyReceiverFieldTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("primary:replacement", result)
+    }
+
+    @Test
+    fun modifyReceiverFieldAssignSliceLimitsFieldWriteReceiversBetweenFromAndTo() {
+        AsmRegistry.register(ModifyReceiverFieldAssignSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "SliceModifyReceiverFieldTarget",
+                sliceModifyReceiverFieldTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("SliceModifyReceiverFieldTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("writeSelected").invoke(instance)
+
+        assertEquals("outside:inside", result)
+    }
+
+    @Test
     fun modifyReceiverRejectsStaticInvokeCall() {
         AsmRegistry.register(ModifyReceiverStaticCallMixin::class.java)
 
@@ -6227,6 +6261,46 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceModifyReceiverFieldTarget")
+    object ModifyReceiverFieldReadSliceMixin {
+        @ModifyReceiver(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceModifyReceiverFieldTarget.value:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any {
+            val field = original.javaClass.getDeclaredField("replacement")
+            field.isAccessible = true
+            return field.get(original)
+        }
+    }
+
+    @AsmMixin("SliceModifyReceiverFieldTarget")
+    object ModifyReceiverFieldAssignSliceMixin {
+        @ModifyReceiver(
+            method = "writeSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceModifyReceiverFieldTarget.value:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any {
+            val field = original.javaClass.getDeclaredField("replacement")
+            field.isAccessible = true
+            return field.get(original)
+        }
+    }
+
     @AsmMixin("StaticInvokeArgTarget")
     object ModifyReceiverStaticCallMixin {
         @ModifyReceiver(
@@ -9797,6 +9871,148 @@ class FrameworkReliabilityTest {
             visitCode()
             visitLdcInsn("original")
             visitLdcInsn("-call")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceModifyReceiverFieldTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceModifyReceiverFieldTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "value", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitField(
+            Opcodes.ACC_PRIVATE,
+            "replacement",
+            "LSliceModifyReceiverFieldTarget;",
+            null,
+            null,
+        ).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("primary")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitTypeInsn(Opcodes.NEW, "SliceModifyReceiverFieldTarget")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "SliceModifyReceiverFieldTarget", "<init>", "(Z)V", false)
+            visitFieldInsn(
+                Opcodes.PUTFIELD,
+                "SliceModifyReceiverFieldTarget",
+                "replacement",
+                "LSliceModifyReceiverFieldTarget;",
+            )
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PRIVATE, "<init>", "(Z)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("replacement")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "readReplacement",
+            "(Ljava/lang/Object;)Ljava/lang/Object;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitTypeInsn(Opcodes.CHECKCAST, "SliceModifyReceiverFieldTarget")
+            visitFieldInsn(
+                Opcodes.GETFIELD,
+                "SliceModifyReceiverFieldTarget",
+                "replacement",
+                "LSliceModifyReceiverFieldTarget;",
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "writeReplacement",
+            "(Ljava/lang/Object;)Ljava/lang/Object;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitTypeInsn(Opcodes.CHECKCAST, "SliceModifyReceiverFieldTarget")
+            visitFieldInsn(
+                Opcodes.GETFIELD,
+                "SliceModifyReceiverFieldTarget",
+                "replacement",
+                "LSliceModifyReceiverFieldTarget;",
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readSelected", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeSelected", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("outside")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("inside")
+            visitFieldInsn(Opcodes.PUTFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(
+                Opcodes.GETFIELD,
+                "SliceModifyReceiverFieldTarget",
+                "replacement",
+                "LSliceModifyReceiverFieldTarget;",
+            )
+            visitFieldInsn(Opcodes.GETFIELD, "SliceModifyReceiverFieldTarget", "value", "Ljava/lang/String;")
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
