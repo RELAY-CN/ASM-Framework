@@ -464,8 +464,9 @@ annotation class WrapWithCondition(
  * `INSTANCEOF` 判断后的 boolean 结果。
  * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用、类型转换或类型判断指令，只在表达式产生值后
  * 把原值交给 handler 改写。
- * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式可使用 [slice] 把候选调用限制在
- * 一段 INVOKE 边界内，边界指令本身不参与匹配。
+ * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、普通 [InjectionPoint.FIELD] 字段读取、
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF] 表达式可使用 [slice] 把候选点限制在
+ * 一段 INVOKE 边界内，边界指令本身不参与匹配；数组元素读取和数组长度模式当前不使用 [slice]。
  *
  * ASM 方法要求：
  *
@@ -485,8 +486,10 @@ annotation class WrapWithCondition(
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]
  * @param ordinal 匹配表达式序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 表达式支持用
- * [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、普通
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与
+ * [InjectionPoint.INSTANCEOF] 表达式支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]
+ * 边界缩小查找范围；数组元素读取和数组长度模式当前不使用 [slice]
  * @param require 最小命中数；大于 0 时实际表达式值修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际表达式值修改数不能超过该值

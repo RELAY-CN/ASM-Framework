@@ -190,9 +190,11 @@ enum class Shift {
  * [InjectionPoint.CAST] / [InjectionPoint.THROW] 类型转换与抛异常指令点注入、
  * [Redirect] 的普通方法调用重定向，[ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE] receiver 改写，
- * [WrapOperation] / [WrapWithCondition] 的 [InjectionPoint.INVOKE] 操作包裹或条件包裹，以及
- * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] 表达式值修改、[ModifyVariable] 的
- * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写改写，以及 [ModifyConstant] 常量修改
+ * [WrapOperation] / [WrapWithCondition] 的 [InjectionPoint.INVOKE] 操作包裹或条件包裹，
+ * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、普通
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]
+ * 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写改写，
+ * 以及 [ModifyConstant] 常量修改
  * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；
  * 起始边界之后、结束边界之前的候选点才会参与匹配，边界指令本身不会作为候选注入点。
  * [AsmInject.ordinal] / [Redirect.ordinal] / [ModifyArg.ordinal] / [ModifyArgs.ordinal] /
