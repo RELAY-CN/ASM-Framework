@@ -427,6 +427,16 @@ object ValidationMixin {
         prefix: String,
     ): StringBuilder = operation.call("$prefix:$value")
 
+    @WrapOperation(
+        method = "createRouteByType(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+    )
+    fun wrapRouteBuilderByNew(
+        value: String,
+        operation: Operation<StringBuilder>,
+        prefix: String,
+    ): StringBuilder = operation.call("new:$prefix:$value")
+
     @WrapMethod(method = "decorateWhole(Ljava/lang/String;I)Ljava/lang/String;")
     fun wrapDecorateWhole(
         prefix: String,
@@ -648,7 +658,8 @@ object ValidationMixin {
 
 `@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；
-构造器模式通过 `INVOKE + <init>` 目标指定，handler 先接收构造器参数，不接收未初始化 receiver；
+构造器模式可通过 `INVOKE + <init>` 目标指定，也可通过 `NEW` 与类型目标指定；`NEW` 目标可写
+`java/lang/StringBuilder` 或 `java.lang.StringBuilder`，handler 先接收构造器参数，不接收未初始化 receiver；
 `GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；`PUTFIELD` handler
 先接收字段 owner 和待写入值，`PUTSTATIC` handler 先接收待写入值；数组读取模式通过
 `FIELD + args = ["array=get"]` 指定，handler 接收数组引用、`Int` 索引与 `Operation<R>`；数组写入模式
@@ -658,7 +669,7 @@ object ValidationMixin {
 `operation.call(value)` 会执行原始 `CHECKCAST` 语义；类型判断模式通过 `INSTANCEOF` 与类型目标指定，
 handler 接收被判断对象与 `Operation<Boolean>`，`operation.call(value)` 会执行原始 `INSTANCEOF` 语义。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
 参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
-`FIELD_ASSIGN`、`CAST`、`INSTANCEOF` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
+`FIELD_ASSIGN`、`NEW`、`CAST`、`INSTANCEOF` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 
 `@WrapMethod` 用于包裹整个目标方法，而不是某一个调用点或字段访问点。handler 先按目标方法声明顺序接收原方法参数，
