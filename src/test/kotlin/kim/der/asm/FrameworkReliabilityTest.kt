@@ -1822,6 +1822,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtThrowAcceptsSpecificThrowableReturnType() {
+        AsmRegistry.register(ModifyExpressionValueSpecificThrowableMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ThrowPointTarget", throwPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("fail").invoke(instance)
+            }
+
+        assertEquals(true, exception.cause is IllegalArgumentException)
+        assertEquals("specific-failed", exception.cause?.message)
+    }
+
+    @Test
     fun modifyReceiverAtInvokeReplacesInstanceCallReceiver() {
         AsmRegistry.register(ModifyReceiverConcatMixin::class.java)
 
@@ -9489,6 +9505,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Throwable): Throwable = IllegalArgumentException("modified-${original.message}")
+    }
+
+    @AsmMixin("ThrowPointTarget")
+    object ModifyExpressionValueSpecificThrowableMixin {
+        @ModifyExpressionValue(
+            method = "fail()V",
+            at = At(value = InjectionPoint.THROW),
+        )
+        @JvmStatic
+        fun modify(original: Throwable): IllegalArgumentException =
+            IllegalArgumentException("specific-${original.message}")
     }
 
     @AsmMixin("SliceThrowInstructionTarget")
