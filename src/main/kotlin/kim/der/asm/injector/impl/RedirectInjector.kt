@@ -1374,7 +1374,7 @@ class RedirectInjector(
         original: Type,
         handler: Type,
     ): Boolean {
-        if (original == Type.VOID_TYPE) return true
+        if (original == Type.VOID_TYPE) return handler == Type.VOID_TYPE
         if (handler == Type.VOID_TYPE) return false
         if (original == handler) return true
         if (!original.isReferenceType() || !handler.isReferenceType()) {
