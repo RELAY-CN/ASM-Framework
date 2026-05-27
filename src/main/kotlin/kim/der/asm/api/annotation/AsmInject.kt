@@ -200,7 +200,8 @@ enum class Shift {
  * [ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN] receiver 改写，
- * [WrapOperation] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 操作包裹、
+ * [WrapOperation] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * [InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF] 操作包裹、
  * [WrapWithCondition] 的 [InjectionPoint.INVOKE] /
  * [InjectionPoint.FIELD_ASSIGN] 条件包裹，
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
