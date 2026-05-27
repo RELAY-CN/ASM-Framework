@@ -2129,6 +2129,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtCastCanCallOriginalCastWithChangedValue() {
+        AsmRegistry.register(WrapOperationCastMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("cast", Any::class.java).invoke(instance, StringBuilder("raw"))
+
+        assertEquals("wrapped-raw-true", result)
+    }
+
+    @Test
     fun wrapOperationOrdinalSelectsSingleInvokeCall() {
         AsmRegistry.register(WrapOperationOrdinalMixin::class.java)
 
@@ -6638,6 +6650,20 @@ class FrameworkReliabilityTest {
             value: Any,
             input: Any,
         ): String = "redirect-$value-${value === input}"
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object WrapOperationCastMixin {
+        @WrapOperation(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun wrap(
+            value: Any,
+            operation: Operation<String>,
+            input: Any,
+        ): String = "wrapped-${operation.call(value.toString())}-${value === input}"
     }
 
     @AsmMixin("InstanceofTarget")
