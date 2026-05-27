@@ -681,6 +681,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeBeforeInjectionAcceptsAssignableCallArgumentType() {
+        AsmRegistry.register(InvokeBeforeAssignableCallArgumentMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-original", result)
+    }
+
+    @Test
     fun modifyArgWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyArgParametersMixin::class.java)
 
@@ -5670,6 +5682,25 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun inject(value: Int) {
             if (value != 42) {
+                throw IllegalStateException("Unexpected call argument: $value")
+            }
+        }
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InvokeBeforeAssignableCallArgumentMixin {
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+        )
+        @JvmStatic
+        fun inject(value: CharSequence) {
+            if (value != "original") {
                 throw IllegalStateException("Unexpected call argument: $value")
             }
         }
