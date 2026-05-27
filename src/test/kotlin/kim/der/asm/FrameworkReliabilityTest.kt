@@ -957,6 +957,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsAtInvokeAcceptsAssignableTargetParameter() {
+        AsmRegistry.register(ModifyArgsParentTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsParamTarget", modifyArgsParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 7)
+
+        assertEquals("left-suffix-right-7", result)
+    }
+
+    @Test
     fun modifyArgsAtConstructorInvokeRewritesConstructorArguments() {
         AsmRegistry.register(ConstructorModifyArgsMixin::class.java)
 
@@ -5982,6 +5994,27 @@ class FrameworkReliabilityTest {
         fun modify(
             args: Args,
             suffix: String,
+            count: Int,
+        ) {
+            args.set(0, "${args.get<String>(0)}-$suffix")
+            args.set(1, "right")
+            args.set(2, count)
+        }
+    }
+
+    @AsmMixin("ModifyArgsParamTarget")
+    object ModifyArgsParentTargetParamsMixin {
+        @ModifyArgs(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "ModifyArgsParamTarget.join(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            args: Args,
+            suffix: CharSequence,
             count: Int,
         ) {
             args.set(0, "${args.get<String>(0)}-$suffix")
