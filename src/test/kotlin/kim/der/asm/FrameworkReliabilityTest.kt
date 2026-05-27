@@ -3089,6 +3089,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantCanUseAssignableReferenceParameters() {
+        AsmRegistry.register(ConstantWithAssignableTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstantParamTarget", constantParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstantParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("base-suffix3", result)
+    }
+
+    @Test
     fun modifyConstantCanUseStaticTargetMethodParameters() {
         AsmRegistry.register(StaticConstantWithTargetParamsMixin::class.java)
 
@@ -8435,6 +8447,17 @@ class FrameworkReliabilityTest {
         fun modify(
             original: String,
             suffix: String,
+            count: Int,
+        ): String = "$original$suffix$count"
+    }
+
+    @AsmMixin("ConstantParamTarget")
+    object ConstantWithAssignableTargetParamsMixin {
+        @ModifyConstant(method = "value(Ljava/lang/String;I)Ljava/lang/String;", constant = "base-")
+        @JvmStatic
+        fun modify(
+            original: CharSequence,
+            suffix: CharSequence,
             count: Int,
         ): String = "$original$suffix$count"
     }
