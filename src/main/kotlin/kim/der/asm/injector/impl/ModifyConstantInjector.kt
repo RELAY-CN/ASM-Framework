@@ -92,7 +92,7 @@ class ModifyConstantInjector(
 
             // 检查 ASM 方法的返回类型是否匹配
             val asmReturnType = Type.getReturnType(asmMethod)
-            if (asmReturnType != constantType) {
+            if (!isHandlerReturnCompatible(constantType, asmReturnType)) {
                 if (constantValue == null) {
                     continue
                 }
@@ -330,6 +330,38 @@ class ModifyConstantInjector(
             return Type.BOOLEAN_TYPE
         }
         return BytecodeUtil.getConstantType(insn)
+    }
+
+    private fun isHandlerReturnCompatible(
+        constantType: Type,
+        handlerReturnType: Type,
+    ): Boolean {
+        if (constantType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (!constantType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        return runCatching {
+            val constantClass = loadReferenceClass(constantType)
+            constantClass.isAssignableFrom(asmMethod.returnType)
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
