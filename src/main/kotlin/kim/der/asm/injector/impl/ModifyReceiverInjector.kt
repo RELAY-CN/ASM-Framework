@@ -347,10 +347,31 @@ class ModifyReceiverInjector(
         if (expected == actual) {
             return true
         }
-        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
-            return actual.sort == Type.OBJECT && actual.internalName == "java/lang/Object"
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
         }
-        return false
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun isReceiverReturnCompatible(
@@ -375,19 +396,6 @@ class ModifyReceiverInjector(
             val receiverClass = loadReferenceClass(receiverType)
             receiverClass.isAssignableFrom(asmMethod.returnType)
         }.getOrDefault(false)
-    }
-
-    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
-
-    private fun loadReferenceClass(type: Type): Class<*> {
-        val className =
-            if (type.sort == Type.ARRAY) {
-                type.descriptor.replace('/', '.')
-            } else {
-                type.className
-            }
-        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
-        return Class.forName(className, false, classLoader)
     }
 
     private fun loadTargetMethodParameters(
