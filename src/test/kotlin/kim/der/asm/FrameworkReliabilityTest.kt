@@ -125,6 +125,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectVoidMethodCallWithNonVoidHandlerFailsDuringTransform() {
+        AsmRegistry.register(NonVoidRedirectForVoidCallMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("return type mismatch") == true,
+        )
+    }
+
+    @Test
     fun redirectExposesCountContractParameters() {
         val methods = Redirect::class.java.declaredMethods.associateBy { it.name }
 
@@ -5969,6 +5984,19 @@ class FrameworkReliabilityTest {
             value.length
             return false
         }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object NonVoidRedirectForVoidCallMixin {
+        @Redirect(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
     }
 
     @AsmMixin("WrapConditionStaticTarget")
