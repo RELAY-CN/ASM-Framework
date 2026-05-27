@@ -4120,6 +4120,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectNewReplacesNewObjectExpression() {
+        AsmRegistry.register(NewConstructorRedirectMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("new-redirected-raw", result)
+    }
+
+    @Test
     fun redirectConstructorCallCanUseTargetMethodParameters() {
         AsmRegistry.register(ConstructorRedirectWithTargetParamsMixin::class.java)
 
@@ -4950,6 +4963,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): StringBuilder = StringBuilder("redirected-$value")
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object NewConstructorRedirectMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.NEW,
+                target = "java/lang/StringBuilder",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): StringBuilder = StringBuilder("new-redirected-$value")
     }
 
     @AsmMixin("NewParamTarget")
