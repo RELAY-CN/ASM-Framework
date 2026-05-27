@@ -734,6 +734,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtInvokeAcceptsAssignableParentParameter() {
+        AsmRegistry.register(InvokeModifyArgParentParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-original-parent", result)
+    }
+
+    @Test
     fun modifyArgAtInvokeAcceptsAssignableObjectReturnType() {
         AsmRegistry.register(InvokeModifyArgAssignableReturnMixin::class.java)
 
@@ -5746,6 +5758,20 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): String = "$original-any"
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InvokeModifyArgParentParameterMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: CharSequence): String = "$original-parent"
     }
 
     @AsmMixin("ModifyArgsTarget")
