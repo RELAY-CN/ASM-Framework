@@ -100,10 +100,11 @@ class WrapOperationInjector(
                     null -> injectFieldAssign(target)
                 }
             }
+            InjectionPoint.NEW -> injectNewConstructor(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
             else -> throw IllegalArgumentException(
-                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, CAST and INSTANCEOF injection points",
+                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST and INSTANCEOF injection points",
             )
         }
 
@@ -155,6 +156,47 @@ class WrapOperationInjector(
             val il = buildOperationWrapper(target, insn, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectNewConstructor(target: MethodNode): Int {
+        val normalizedTarget = at.target.replace('.', '/')
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.NEW) {
+                continue
+            }
+            if (normalizedTarget.isNotEmpty() && insn.desc != normalizedTarget) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val constructorInsn = findConstructorInvocation(insn)
+            val dupInsn = nextRealInstruction(insn)
+            if (dupInsn?.opcode != Opcodes.DUP) {
+                throw IllegalArgumentException(
+                    "@WrapOperation NEW requires NEW followed by DUP for ${insn.desc}",
+                )
+            }
+            val targetParamCount = validateConstructorHandlerSignature(target, constructorInsn)
+            val il = buildConstructorWrapper(target, constructorInsn, targetParamCount)
+            target.instructions.insertBefore(constructorInsn, il)
+            target.instructions.remove(insn)
+            target.instructions.remove(dupInsn)
+            target.instructions.remove(constructorInsn)
             injectionCount++
         }
 
@@ -1216,6 +1258,29 @@ class WrapOperationInjector(
         throw IllegalArgumentException(
             "@WrapOperation cannot find NEW allocation for constructor ${constructorInsn.owner}${constructorInsn.desc}",
         )
+    }
+
+    private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
+        var nestedSameOwnerNewCount = 0
+        var cursor = newInsn.next
+        while (cursor != null) {
+            if (cursor is TypeInsnNode && cursor.opcode == Opcodes.NEW && cursor.desc == newInsn.desc) {
+                nestedSameOwnerNewCount++
+            } else if (
+                cursor is MethodInsnNode &&
+                cursor.opcode == Opcodes.INVOKESPECIAL &&
+                cursor.owner == newInsn.desc &&
+                cursor.name == "<init>"
+            ) {
+                if (nestedSameOwnerNewCount == 0) {
+                    return cursor
+                }
+                nestedSameOwnerNewCount--
+            }
+            cursor = cursor.next
+        }
+
+        throw IllegalArgumentException("@WrapOperation cannot find constructor call for NEW ${newInsn.desc}")
     }
 
     private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
