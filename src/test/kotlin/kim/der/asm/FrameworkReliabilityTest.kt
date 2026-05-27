@@ -3200,6 +3200,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantMatchesDynamicConstant() {
+        AsmRegistry.register(DynamicConstantModifyConstantMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("DynamicConstantTarget", dynamicConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("DynamicConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed:original", result)
+    }
+
+    @Test
     fun modifyConstantMatchesBipushIntConstant() {
         AsmRegistry.register(BipushModifyConstantMixin::class.java)
 
@@ -8546,6 +8559,13 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("DynamicConstantTarget")
+    object DynamicConstantModifyConstantMixin {
+        @ModifyConstant(method = "value()Ljava/lang/String;", constant = "dynamicText:Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: String): String = "changed:$original"
+    }
+
     @AsmMixin("BipushConstantTarget")
     object BipushModifyConstantMixin {
         @ModifyConstant(method = "value()I", constant = "7")
@@ -13308,6 +13328,35 @@ class FrameworkReliabilityTest {
                     "valueOf",
                     "(I)Ljava/lang/String;",
                     false,
+                ),
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun dynamicConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "DynamicConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(
+                org.objectweb.asm.ConstantDynamic(
+                    "dynamicText",
+                    "Ljava/lang/String;",
+                    org.objectweb.asm.Handle(
+                        Opcodes.H_INVOKESTATIC,
+                        "java/lang/invoke/ConstantBootstraps",
+                        "explicitCast",
+                        "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/Class;" +
+                            "Ljava/lang/Object;)Ljava/lang/Object;",
+                        false,
+                    ),
+                    "original",
                 ),
             )
             visitInsn(Opcodes.ARETURN)
