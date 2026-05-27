@@ -2141,6 +2141,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtInstanceofCanCallOriginalCheckWithChangedValue() {
+        AsmRegistry.register(WrapOperationInstanceofMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InstanceofTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        assertEquals(true, clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType).invoke(instance, StringBuilder("raw"), false))
+        assertEquals(false, clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType).invoke(instance, StringBuilder("raw"), true))
+    }
+
+    @Test
     fun wrapOperationOrdinalSelectsSingleInvokeCall() {
         AsmRegistry.register(WrapOperationOrdinalMixin::class.java)
 
@@ -6698,6 +6710,21 @@ class FrameworkReliabilityTest {
             original.hashCode()
             return value is Number || force
         }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object WrapOperationInstanceofMixin {
+        @WrapOperation(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+        )
+        @JvmStatic
+        fun wrap(
+            value: Any,
+            operation: Operation<Boolean>,
+            original: Any,
+            force: Boolean,
+        ): Boolean = operation.call(value.toString()) && value === original && !force
     }
 
     @AsmMixin("ModifyReceiverTarget")
