@@ -275,7 +275,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyReceiver` handler 的第一个参数必须接收原 receiver，并返回兼容的新 receiver；后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyReceiver` handler 的第一个参数必须接收原 receiver，并返回兼容的新 receiver；后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回 receiver 类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `@ModifyReceiver` 会统计实际写入 receiver 修改逻辑的操作点数量。未设置 `ordinal` 时，`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 会按实际改写的 receiver 数量计数；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。显式设置 `require` / `allow` / 非默认 `expect` 时按实际 receiver 修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
