@@ -727,7 +727,7 @@ class FrameworkReliabilityTest {
         val instance = clazz.getDeclaredConstructor().newInstance()
         val result = clazz.getMethod("value").invoke(instance)
 
-        assertEquals("hello missing", result)
+        assertEquals("hello bad", result)
     }
 
     @Test
