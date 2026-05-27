@@ -410,7 +410,7 @@ class ModifyExpressionValueInjector(
         }
 
         val asmReturnType = Type.getReturnType(asmMethod)
-        if (asmReturnType != expressionType && !isThrowableSubtypeReturnAllowed(allowThrowableSubtypeReturn)) {
+        if (!isHandlerReturnCompatible(expressionType, asmReturnType, allowThrowableSubtypeReturn)) {
             throw IllegalArgumentException(
                 "@ModifyExpressionValue handler ${asmMethod.name} return type $asmReturnType " +
                     "must match expression type $expressionType",
@@ -441,9 +441,6 @@ class ModifyExpressionValueInjector(
         return requestedTargetParamCount
     }
 
-    private fun isThrowableSubtypeReturnAllowed(allowThrowableSubtypeReturn: Boolean): Boolean =
-        allowThrowableSubtypeReturn && Throwable::class.java.isAssignableFrom(asmMethod.returnType)
-
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -456,6 +453,42 @@ class ModifyExpressionValueInjector(
                 (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
         }
         return false
+    }
+
+    private fun isHandlerReturnCompatible(
+        expressionType: Type,
+        handlerReturnType: Type,
+        allowThrowableSubtypeReturn: Boolean,
+    ): Boolean {
+        if (expressionType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (allowThrowableSubtypeReturn && Throwable::class.java.isAssignableFrom(asmMethod.returnType)) {
+            return true
+        }
+        if (!expressionType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        return runCatching {
+            val expressionClass = loadReferenceClass(expressionType)
+            expressionClass.isAssignableFrom(asmMethod.returnType)
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
