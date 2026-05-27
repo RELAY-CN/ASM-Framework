@@ -23,7 +23,7 @@ import java.lang.reflect.Modifier
  * 默认按参数索引直接修改方法入口处的参数值；当 [at] 指向 [InjectionPoint.INVOKE] 时，
  * 会改写匹配方法调用或构造器调用点的指定调用参数。
  * handler 的第一个参数是被修改的原参数；对象或数组参数可声明为 `Any` / `Object` 接收，
- * 但返回类型仍需保持实际参数类型。后续可按顺序接收目标方法参数前缀。
+ * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原参数类型的子类型。后续可按顺序接收目标方法参数前缀。
  *
  * @param argIndex 要修改的目标参数索引，从 0 开始
  * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标方法调用或构造器调用
@@ -409,8 +409,10 @@ class ModifyArgInjector(
         }
 
         val asmReturnType = Type.getReturnType(asmMethod)
-        if (asmReturnType != paramType) {
-            throw IllegalArgumentException("ASM method return type ($asmReturnType) must match parameter type ($paramType)")
+        if (!isHandlerReturnCompatible(paramType, asmReturnType)) {
+            throw IllegalArgumentException(
+                "ASM method return type ($asmReturnType) must match parameter type ($paramType)",
+            )
         }
 
         val targetParamTypes = Type.getArgumentTypes(target.desc)
@@ -447,6 +449,38 @@ class ModifyArgInjector(
                 (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
         }
         return false
+    }
+
+    private fun isHandlerReturnCompatible(
+        targetParamType: Type,
+        handlerReturnType: Type,
+    ): Boolean {
+        if (targetParamType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (!targetParamType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        return runCatching {
+            val targetParamClass = loadReferenceClass(targetParamType)
+            targetParamClass.isAssignableFrom(asmMethod.returnType)
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun loadTargetMethodParameters(
