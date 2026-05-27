@@ -657,9 +657,9 @@ annotation class ModifyConstant(
 )
 
 /**
- * 重定向方法调用、构造器调用、字段访问、类型转换或类型判断注解。
+ * 重定向方法调用、构造器调用、NEW 构造表达式、字段访问、类型转换或类型判断注解。
  *
- * 用于将目标方法中的某个方法调用、构造器调用、字段读取、字段写入、简单数组元素访问、数组长度读取、`CHECKCAST` 类型转换或 `INSTANCEOF`
+ * 用于将目标方法中的某个方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度读取、`CHECKCAST` 类型转换或 `INSTANCEOF`
  * 类型判断重定向到当前 ASM 方法（语义参考 Mixin 的 `@Redirect`）。
  * 当前实现会在字节码中查找匹配的调用指令、构造器调用指令、字段访问指令、数组元素访问指令、数组长度指令或
  * 类型转换/类型判断指令，并用重定向处理器调用替换原指令。
@@ -668,8 +668,8 @@ annotation class ModifyConstant(
  * `owner.field:desc`、`field:desc` 或 `field`；字段写入重定向通过 [At.value] 指定
  * [InjectionPoint.FIELD_ASSIGN]，目标格式相同。数组元素访问与数组长度重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，
  * [At.target] 指定产生数组引用的字段，并通过 [At.args] 中的 `array=get`、`array=set` 或 `array=length` 区分读取、写入与长度读取。
- * 构造器重定向通过 [At.value] 指定 [InjectionPoint.INVOKE]，并使用 `<init>` 目标匹配常见
- * `NEW/DUP/args/<init>` 构造表达式。
+ * 构造器重定向可通过 [At.value] 指定 [InjectionPoint.INVOKE] 并使用 `<init>` 目标匹配，也可通过
+ * [InjectionPoint.NEW] 与构造类型目标匹配，当前支持常见 `NEW/DUP/args/<init>` 构造表达式。
  * 类型转换重定向通过 [At.value] 指定 [InjectionPoint.CAST]，并通过 [At.target] 指定要替换的类型
  * internal name 或 binary name。
  * 类型判断重定向通过 [At.value] 指定 [InjectionPoint.INSTANCEOF]，并通过 [At.target] 指定要替换的类型
@@ -677,7 +677,7 @@ annotation class ModifyConstant(
  *
  * 重定向处理器要求：
  *
- * - 方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法
+ * - 方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法
  * - 方法调用重定向的参数栈形态需先与原调用保持一致（包括实例方法的 `this`），后续参数可按顺序接收目标方法的部分参数
  * - 构造器重定向的参数栈形态需先与原构造器参数保持一致，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象
  * - 实例字段读取重定向的第一个参数为字段所属实例；静态字段读取重定向不需要接收者参数，后续参数可按顺序接收目标方法的部分参数
@@ -692,10 +692,10 @@ annotation class ModifyConstant(
  * - [expect] 用于调试期望重定向数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
- * @param target 目标调用、构造器、字段或类型签名组件；会与 [At.target] 组合构建最终的匹配签名
- * @param at 调用点信息；[At.value] 决定重定向方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度读取、类型转换还是类型判断，[At.target] 用于指定匹配签名
- * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度读取、类型转换与类型判断中生效
- * @param slice 切片范围；当前方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向
+ * @param target 目标调用、构造器、字段、构造类型或类型签名组件；会与 [At.target] 组合构建最终的匹配签名
+ * @param at 调用点信息；[At.value] 决定重定向方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、类型转换还是类型判断，[At.target] 用于指定匹配签名
+ * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、类型转换与类型判断中生效
+ * @param slice 切片范围；当前方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际重定向数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
