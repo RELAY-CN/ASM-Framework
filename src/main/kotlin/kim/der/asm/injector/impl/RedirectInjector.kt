@@ -98,6 +98,9 @@ class RedirectInjector(
         if (isFieldReadRedirect()) {
             return injectFieldReadCount(target)
         }
+        if (isNewRedirect()) {
+            return injectNewConstructorCount(target)
+        }
 
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(redirectTarget)
 
@@ -197,6 +200,8 @@ class RedirectInjector(
 
     private fun isCastRedirect(): Boolean = injectionPoint == InjectionPoint.CAST
 
+    private fun isNewRedirect(): Boolean = injectionPoint == InjectionPoint.NEW
+
     private fun arrayAccessMode(): ArrayAccessMode? {
         val arrayArg = args.firstOrNull { it.trim().startsWith("array=") } ?: return null
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
@@ -205,6 +210,36 @@ class RedirectInjector(
             "length" -> ArrayAccessMode.LENGTH
             else -> throw IllegalArgumentException("Unsupported Redirect array access mode: $arrayArg")
         }
+    }
+
+    private fun injectNewConstructorCount(target: MethodNode): Int {
+        val typeTarget = redirectTarget.replace('.', '/')
+        if (typeTarget.isEmpty()) {
+            throw IllegalArgumentException("Redirect NEW target type must not be empty")
+        }
+
+        val instructions = target.instructions
+        var injectionCount = 0
+        val insns = instructions.toArray()
+        var matchedOrdinal = 0
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn is TypeInsnNode && insn.opcode == Opcodes.NEW && insn.desc == typeTarget) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+                val constructorInsn = findConstructorInvocation(insn)
+                replaceNewConstructorCall(target, instructions, insn, constructorInsn)
+                injectionCount++
+            }
+        }
+
+        return injectionCount
     }
 
     private fun injectArrayAccessCount(
@@ -509,6 +544,38 @@ class RedirectInjector(
         instructions.insertBefore(originalInsn, il)
         instructions.remove(allocation.newInsn)
         instructions.remove(allocation.dupInsn)
+        instructions.remove(originalInsn)
+    }
+
+    private fun replaceNewConstructorCall(
+        target: MethodNode,
+        instructions: InsnList,
+        newInsn: TypeInsnNode,
+        originalInsn: MethodInsnNode,
+    ) {
+        val dupInsn = nextRealInstruction(newInsn)
+        if (dupInsn?.opcode != Opcodes.DUP) {
+            throw IllegalArgumentException("Redirect NEW requires NEW followed by DUP for ${newInsn.desc}")
+        }
+        val targetParamCount = validateConstructorHandlerSignature(target, originalInsn)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectConstructorHandlerCall(target, originalInsn, il, targetParamCount)
+        }
+
+        val constructedType = Type.getObjectType(originalInsn.owner)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (constructedType != handlerReturnType && constructedType.sort >= Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, constructedType.internalName))
+        }
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(newInsn)
+        instructions.remove(dupInsn)
         instructions.remove(originalInsn)
     }
 
@@ -1257,6 +1324,29 @@ class RedirectInjector(
         throw IllegalArgumentException(
             "Redirect cannot find NEW allocation for constructor ${constructorInsn.owner}${constructorInsn.desc}",
         )
+    }
+
+    private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
+        var nestedSameOwnerNewCount = 0
+        var cursor = newInsn.next
+        while (cursor != null) {
+            if (cursor is TypeInsnNode && cursor.opcode == Opcodes.NEW && cursor.desc == newInsn.desc) {
+                nestedSameOwnerNewCount++
+            } else if (
+                cursor is MethodInsnNode &&
+                cursor.opcode == Opcodes.INVOKESPECIAL &&
+                cursor.owner == newInsn.desc &&
+                cursor.name == "<init>"
+            ) {
+                if (nestedSameOwnerNewCount == 0) {
+                    return cursor
+                }
+                nestedSameOwnerNewCount--
+            }
+            cursor = cursor.next
+        }
+
+        throw IllegalArgumentException("Redirect cannot find constructor call for NEW ${newInsn.desc}")
     }
 
     private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
