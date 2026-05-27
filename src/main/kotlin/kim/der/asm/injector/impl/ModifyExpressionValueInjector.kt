@@ -30,6 +30,7 @@ import java.lang.reflect.Modifier
  * `INSTANCEOF` 判断或 `ATHROW` 抛异常指令，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
+ * 对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
  * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
