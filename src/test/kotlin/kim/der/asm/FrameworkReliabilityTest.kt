@@ -2823,6 +2823,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationArrayReadWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleWrapOperationArrayReadReturnMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("return type mismatch") == true,
+        )
+    }
+
+    @Test
     fun modifyConstantWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleModifyConstantMixin::class.java)
 
@@ -4573,6 +4588,21 @@ class FrameworkReliabilityTest {
         assertEquals(
             true,
             exception.cause?.message?.contains("parameter #") == true,
+        )
+    }
+
+    @Test
+    fun redirectArrayReadWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleArrayReadRedirectReturnMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("return type mismatch") == true,
         )
     }
 
@@ -7986,6 +8016,24 @@ class FrameworkReliabilityTest {
         ): String = operation.call(array, index.length)
     }
 
+    @AsmMixin("ArrayAccessTarget")
+    object IncompatibleWrapOperationArrayReadReturnMixin {
+        @WrapOperation(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            operation: Operation<String>,
+        ): StringBuilder = StringBuilder(operation.call(array, index))
+    }
+
     @AsmMixin("ReturnTarget")
     object IncompatibleModifyConstantMixin {
         @ModifyConstant(method = "value()Ljava/lang/String;", constant = "value")
@@ -9169,6 +9217,23 @@ class FrameworkReliabilityTest {
             array: Array<String>,
             index: Int,
         ): String = "redirected-${array[index]}"
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object IncompatibleArrayReadRedirectReturnMixin {
+        @Redirect(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+        ): StringBuilder = StringBuilder("redirected-${array[index]}")
     }
 
     @AsmMixin("ArrayAccessTarget")
