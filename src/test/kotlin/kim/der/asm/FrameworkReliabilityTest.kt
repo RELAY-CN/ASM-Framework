@@ -3752,6 +3752,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtHeadAcceptsAssignableTargetParameter() {
+        AsmRegistry.register(ModifyVariableParentTargetParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("value-value", result)
+    }
+
+    @Test
     fun modifyVariableAtHeadCanUseStaticTargetMethodParameters() {
         AsmRegistry.register(ModifyVariableStaticHeadTargetParamsMixin::class.java)
 
@@ -8863,6 +8875,20 @@ class FrameworkReliabilityTest {
         fun modify(
             original: String,
             targetValue: String,
+        ): String = "$original-$targetValue"
+    }
+
+    @AsmMixin("VariableTarget")
+    object ModifyVariableParentTargetParamMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            targetValue: CharSequence,
         ): String = "$original-$targetValue"
     }
 
