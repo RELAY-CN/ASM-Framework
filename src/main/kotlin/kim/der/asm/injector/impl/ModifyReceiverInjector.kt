@@ -363,8 +363,26 @@ class ModifyReceiverInjector(
         if (receiverType == handlerReturnType) {
             return true
         }
-        return (receiverType.sort == Type.OBJECT || receiverType.sort == Type.ARRAY) &&
-            (handlerReturnType.sort == Type.OBJECT || handlerReturnType.sort == Type.ARRAY)
+        if (!receiverType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        return runCatching {
+            val receiverClass = loadReferenceClass(receiverType)
+            receiverClass.isAssignableFrom(asmMethod.returnType)
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun loadTargetMethodParameters(
