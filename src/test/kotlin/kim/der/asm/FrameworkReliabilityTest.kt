@@ -1384,6 +1384,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInvokeAcceptsAssignableParentParameter() {
+        AsmRegistry.register(ModifyExpressionValueParentParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-parent", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeAcceptsAssignableObjectReturnType() {
         AsmRegistry.register(ModifyExpressionValueAssignableReturnMixin::class.java)
 
@@ -6560,6 +6572,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): String = "$original-object"
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object ModifyExpressionValueParentParamMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: CharSequence): String = "$original-parent"
     }
 
     @AsmMixin("CharSequenceExpressionValueTarget")
