@@ -106,7 +106,7 @@ val transformedBytes = processor.transform(
 - **@ModifyArg** - 修改方法参数
 - **@ModifyArgs** - 修改方法调用参数组
 - **@ModifyReceiver** - 修改实例方法调用或实例字段访问 receiver
-- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取
+- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取或类型转换
 - **@WrapMethod** - 用可调用原方法的 handler 包裹整个目标方法体
 - **@WrapWithCondition** - 按条件跳过 `void` 调用、字段写入或数组元素写入
 - **@ModifyExpressionValue** - 修改表达式值
@@ -646,7 +646,7 @@ object ValidationMixin {
 
 `@ModifyArg` 默认使用目标方法入口参数索引；当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标调用，并把 `index` 解释为目标调用的参数索引。handler 第一个参数接收被修改的原参数并返回同类型的新值；对象或数组参数可声明为 `Any` / `Object` 接收，但返回类型仍需保持实际参数类型。后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `Slice` 限制匹配范围。关键参数补丁可设置 `require` / `allow` 约束实际修改数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。`@ModifyArgs` 用于同一个调用点需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；后续参数同样可接收目标方法参数前缀，也支持用 `Slice` 限制匹配范围。关键参数组补丁同样可设置 `require` / `allow` / `expect`，按实际改写的调用点数量校验命中契约。`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver 并返回兼容的新 receiver；`INVOKE` 会保留原调用参数，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，三种模式都可用 `Slice` 限制 receiver 改写范围，后续参数可接收目标方法参数前缀。关键 receiver 补丁同样可设置 `require` / `allow` / `expect`，按实际改写的 receiver 数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
 
-`@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入、数组元素读写或数组长度读取替换为 handler，并通过 `Operation`
+`@WrapOperation` 用于把匹配方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取或类型转换替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；
 构造器模式通过 `INVOKE + <init>` 目标指定，handler 先接收构造器参数，不接收未初始化 receiver；
 `GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；`PUTFIELD` handler
@@ -654,9 +654,10 @@ object ValidationMixin {
 `FIELD + args = ["array=get"]` 指定，handler 接收数组引用、`Int` 索引与 `Operation<R>`；数组写入模式
 通过 `FIELD_ASSIGN + args = ["array=set"]` 指定，handler 接收数组引用、`Int` 索引、待写入元素值与
 `Operation<Unit>`；数组长度模式通过 `FIELD + args = ["array=length"]` 指定，handler 接收数组引用与
-`Operation<Int>`。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
+`Operation<Int>`；类型转换模式通过 `CAST` 与类型目标指定，handler 接收待转换对象与 `Operation<T>`，
+`operation.call(value)` 会执行原始 `CHECKCAST` 语义。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
 参数前缀；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
-`FIELD_ASSIGN` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
+`FIELD_ASSIGN`、`CAST` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 
 `@WrapMethod` 用于包裹整个目标方法，而不是某一个调用点或字段访问点。handler 先按目标方法声明顺序接收原方法参数，
@@ -1044,7 +1045,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要替换 `CHECKCAST`，应使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`，如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
