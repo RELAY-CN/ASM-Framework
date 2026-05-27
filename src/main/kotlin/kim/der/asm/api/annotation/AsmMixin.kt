@@ -624,7 +624,7 @@ annotation class ModifyReturnValue(
  * ASM 方法要求：
  *
  * - 第一个参数接收原始常量值，后续参数可按顺序接收目标方法的部分参数
- * - 返回类型必须与被修改常量的类型一致
+ * - 返回类型必须与被修改常量的类型一致；当常量类型为引用或数组时，返回值可为该常量类型的可赋值子类型
  * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
  *   边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
  * - [require] / [allow] 可约束实际替换的常量数量，目标字节码漂移时会在转换阶段失败

@@ -482,7 +482,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数，下一
 
 支持 `LDC` 字符串、数字与类字面量（handler 使用 `Class<*>` / `java.lang.Class`）、`ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`
 形式的常量加载。显式 `constant = "true"` 或 `"false"` 时，会把 `ICONST_1` / `ICONST_0` 按 boolean
-常量匹配；数字 `"1"` / `"0"` 仍按 int 常量匹配。类字面量由 Java `.class` 或 Kotlin `SomeType::class.java` 生成的 `LDC Type` 表示，按类名匹配。ASM 方法的第一个参数必须接收原始常量，并返回同类型的新值；后续参数可以按目标方法声明顺序接收目标方法参数前缀。未指定 `constant` 时会按 handler 返回类型筛选常量，再用 `ordinal` 选择第 N 个候选。可用 `slice.from` / `slice.to` 把候选常量限制在一段 `INVOKE` 边界之间；边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。指定边界未命中时，切片按空范围处理。`@ModifyConstant` 会统计实际替换常量数量；显式设置 `require` / `allow` / 非默认 `expect` 时按替换数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
+常量匹配；数字 `"1"` / `"0"` 仍按 int 常量匹配。类字面量由 Java `.class` 或 Kotlin `SomeType::class.java` 生成的 `LDC Type` 表示，按类名匹配。ASM 方法的第一个参数必须接收原始常量；返回值对基础类型仍需精确匹配，对引用或数组常量则可返回原常量类型的可赋值子类型。后续参数可以按目标方法声明顺序接收目标方法参数前缀。未指定 `constant` 时会按 handler 返回类型筛选常量，再用 `ordinal` 选择第 N 个候选。可用 `slice.from` / `slice.to` 把候选常量限制在一段 `INVOKE` 边界之间；边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。指定边界未命中时，切片按空范围处理。`@ModifyConstant` 会统计实际替换常量数量；显式设置 `require` / `allow` / 非默认 `expect` 时按替换数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
