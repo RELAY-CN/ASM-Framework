@@ -718,7 +718,7 @@ object CacheMixin {
 ```
 
 `@ModifyReturnValue` 默认会修改目标方法的全部非 void 返回点；`ordinal` 可限定只修改第 N 个返回点。
-handler 返回类型对 primitive 必须与目标方法返回类型一致；对象或数组返回值可为目标类型的子类型。对象或数组返回值可用 `Any` / `Object` 接收原返回值，后续也可接收目标方法参数前缀。
+handler 返回类型对 primitive 必须与目标方法返回类型一致；对象或数组返回值可为目标类型的子类型。对象或数组返回值可用原值类型的父类、接口、`Any` 或 `Object` 接收原返回值，后续也可接收目标方法参数前缀。
 关键返回值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的非 void 返回点数量计数。
 
 ### 场景 4: 修改常量
