@@ -4226,6 +4226,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectMethodCallAcceptsAssignableParentParameter() {
+        AsmRegistry.register(AssignableParentParameterRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("parent-value", result)
+    }
+
+    @Test
     fun redirectMethodCallCanUseTargetMethodParameters() {
         AsmRegistry.register(RedirectWithTargetParamsMixin::class.java)
 
@@ -5102,6 +5114,19 @@ class FrameworkReliabilityTest {
             ),
         )
         fun redirect(value: String): String = "object-$value"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object AssignableParentParameterRedirectMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: CharSequence): String = "parent-${value.trim()}"
     }
 
     @AsmMixin("RedirectParamTarget")
