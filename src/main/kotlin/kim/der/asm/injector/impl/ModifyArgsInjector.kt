@@ -232,7 +232,7 @@ class ModifyArgsInjector(
         for (index in 0 until requestedTargetParamCount) {
             val expected = targetParamTypes[index]
             val actual = asmParamTypes[index + 1]
-            if (actual != expected) {
+            if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalArgumentException(
                     "@ModifyArgs handler ${asmMethod.name} target parameter #$index mismatch: expected $expected, actual $actual",
                 )
@@ -240,6 +240,40 @@ class ModifyArgsInjector(
         }
 
         return requestedTargetParamCount
+    }
+
+    private fun isHandlerParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
+        }
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun loadTargetMethodParameters(
