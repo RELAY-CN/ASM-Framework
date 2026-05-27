@@ -476,9 +476,9 @@ annotation class WrapWithCondition(
  *
  * 用于修改目标方法内某个表达式产生的值（语义参考 Mixin Extras 的 `@ModifyExpressionValue`）。
  * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]，可修改匹配方法调用完成后的
- * 非 `void` 返回值、字段读取值、数组元素读取值、数组长度值、对象构造完成后的实例、`CHECKCAST` 完成后的类型转换结果或
- * `INSTANCEOF` 判断后的 boolean 结果，也可在 `ATHROW` 前改写即将抛出的异常对象。
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]，可修改匹配普通方法调用或
+ * `invokedynamic` 调用完成后的非 `void` 返回值、字段读取值、数组元素读取值、数组长度值、对象构造完成后的实例、
+ * `CHECKCAST` 完成后的类型转换结果或 `INSTANCEOF` 判断后的 boolean 结果，也可在 `ATHROW` 前改写即将抛出的异常对象。
  * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断或抛异常指令，只在表达式产生值后
  * 把原值交给 handler 改写。
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、[InjectionPoint.FIELD] 字段读取、
@@ -491,7 +491,9 @@ annotation class WrapWithCondition(
  * - 第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收
  * - primitive 返回类型必须与匹配表达式的值类型一致；引用类型表达式可返回匹配类型的子类型；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
  * - 后续参数可按顺序接收目标方法参数前缀
- * - 方法调用目标的 [At.target] 必须指定调用签名，字段读取目标必须指定字段签名
+ * - 方法调用目标的 [At.target] 必须指定调用签名；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
+ *   以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`
+ * - 字段读取目标必须指定字段签名
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
  * - 数组长度目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象
