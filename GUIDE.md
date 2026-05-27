@@ -672,8 +672,9 @@ handler 接收被判断对象与 `Operation<Boolean>`，`operation.call(value)` 
 `FIELD_ASSIGN`、`NEW`、`CAST`、`INSTANCEOF` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 
-`@WrapMethod` 用于包裹整个目标方法，而不是某一个调用点或字段访问点。handler 先按目标方法声明顺序接收原方法参数，
-下一参数必须是 `Operation<R>`，返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 返回 `Unit` / `void`。
+`@WrapMethod` 用于包裹整个目标方法，而不是某一个调用点或字段访问点。handler 先按目标方法声明顺序接收原方法参数；
+对象/数组参数可用其父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。下一参数必须是 `Operation<R>`，
+返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 返回 `Unit` / `void`。
 静态目标方法的 `operation.call(...)` 只传目标方法参数；实例目标方法的 `Operation` 已绑定当前 `this`，
 handler 不接收 receiver，`operation.call(...)` 同样只传目标方法参数。该注解会把原方法体迁移到私有 synthetic 方法，
 再用原方法名与原描述符生成 wrapper，因此不支持构造器、类初始化器、abstract 方法或 native 方法。
