@@ -448,11 +448,18 @@ class ModifyExpressionValueInjector(
         if (expected == actual) {
             return true
         }
-        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
-            return actual.sort == Type.OBJECT &&
-                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
         }
-        return false
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
     }
 
     private fun isHandlerReturnCompatible(
