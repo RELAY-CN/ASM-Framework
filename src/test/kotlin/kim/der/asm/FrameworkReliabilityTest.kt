@@ -4287,6 +4287,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectConstructorCallAcceptsAssignableSubtypeReturn() {
+        AsmRegistry.register(ConstructorRedirectAssignableReturnMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "RuntimeExceptionConstructorTarget",
+                runtimeExceptionConstructorTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("RuntimeExceptionConstructorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("message").invoke(instance)
+
+        assertEquals("child-raw", result)
+    }
+
+    @Test
     fun redirectConstructorCallWithMismatchedHandlerReturnFailsDuringTransform() {
         AsmRegistry.register(MismatchedConstructorRedirectMixin::class.java)
 
@@ -5161,6 +5178,19 @@ class FrameworkReliabilityTest {
             prefix: String,
             count: Int,
         ): StringBuilder = StringBuilder("$prefix-$count")
+    }
+
+    @AsmMixin("RuntimeExceptionConstructorTarget")
+    object ConstructorRedirectAssignableReturnMixin {
+        @Redirect(
+            method = "message()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/RuntimeException.<init>(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): IllegalArgumentException = IllegalArgumentException("child-$value")
     }
 
     @AsmMixin("ConstructorModifyArgTarget")
@@ -10779,6 +10809,37 @@ class FrameworkReliabilityTest {
             visitLdcInsn("raw")
             visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun runtimeExceptionConstructorTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RuntimeExceptionConstructorTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "message", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/RuntimeException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("raw")
+            visitMethodInsn(
+                Opcodes.INVOKESPECIAL,
+                "java/lang/RuntimeException",
+                "<init>",
+                "(Ljava/lang/String;)V",
+                false,
+            )
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/RuntimeException",
+                "getMessage",
+                "()Ljava/lang/String;",
+                false,
+            )
             visitInsn(Opcodes.ARETURN)
             visitMaxs(3, 1)
             visitEnd()
