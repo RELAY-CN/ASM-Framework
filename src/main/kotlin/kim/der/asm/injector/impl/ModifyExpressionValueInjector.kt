@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -116,7 +117,23 @@ class ModifyExpressionValueInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+            val callDesc =
+                when (insn) {
+                    is MethodInsnNode ->
+                        if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                            insn.desc
+                        } else {
+                            null
+                        }
+                    is InvokeDynamicInsnNode ->
+                        if (matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc)) {
+                            insn.desc
+                        } else {
+                            null
+                        }
+                    else -> null
+                }
+            if (callDesc == null) {
                 continue
             }
 
@@ -125,10 +142,10 @@ class ModifyExpressionValueInjector(
                 continue
             }
 
-            val callReturnType = Type.getReturnType(insn.desc)
+            val callReturnType = Type.getReturnType(callDesc)
             if (callReturnType == Type.VOID_TYPE) {
                 throw IllegalArgumentException(
-                    "@ModifyExpressionValue cannot modify void call ${insn.name}${insn.desc}",
+                    "@ModifyExpressionValue cannot modify void call ${callName(insn)}$callDesc",
                 )
             }
 
@@ -722,6 +739,28 @@ class ModifyExpressionValueInjector(
         }
         return targetDesc == null || insn.desc == targetDesc
     }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun callName(insn: AbstractInsnNode): String =
+        when (insn) {
+            is MethodInsnNode -> insn.name
+            is InvokeDynamicInsnNode -> insn.name
+            else -> "<unknown>"
+        }
 
     private fun findArrayFieldProducer(
         arrayInsn: AbstractInsnNode,
