@@ -890,6 +890,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsAtConstructorInvokeRewritesConstructorArguments() {
+        AsmRegistry.register(ConstructorModifyArgsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstructorModifyArgsTarget", constructorModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("bc", result)
+    }
+
+    @Test
     fun modifyArgsOrdinalSelectsSingleInvokeCall() {
         AsmRegistry.register(ModifyArgsOrdinalMixin::class.java)
 
@@ -5597,6 +5609,22 @@ class FrameworkReliabilityTest {
             args.set(0, "${args.get<String>(0)}-$suffix")
             args.set(1, "right")
             args.set(2, count)
+        }
+    }
+
+    @AsmMixin("ConstructorModifyArgsTarget")
+    object ConstructorModifyArgsMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.<init>([CII)V",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.set(1, 1)
+            args.set(2, 2)
         }
     }
 
@@ -10390,6 +10418,39 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun constructorModifyArgsTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorModifyArgsTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/String")
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_3)
+            visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_CHAR)
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_0)
+            visitIntInsn(Opcodes.BIPUSH, 'a'.code)
+            visitInsn(Opcodes.CASTORE)
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_1)
+            visitIntInsn(Opcodes.BIPUSH, 'b'.code)
+            visitInsn(Opcodes.CASTORE)
+            visitInsn(Opcodes.DUP)
+            visitInsn(Opcodes.ICONST_2)
+            visitIntInsn(Opcodes.BIPUSH, 'c'.code)
+            visitInsn(Opcodes.CASTORE)
+            visitInsn(Opcodes.ICONST_0)
+            visitInsn(Opcodes.ICONST_3)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/String", "<init>", "([CII)V", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(6, 1)
             visitEnd()
         }
         cw.visitEnd()
