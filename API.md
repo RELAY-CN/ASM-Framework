@@ -457,7 +457,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数，下一
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyReturnValue` handler 返回类型对 primitive 必须与目标方法返回类型一致；对象/数组返回值可以是目标类型的子类型。参数可选：第一个参数可接收原始返回值，后续参数可按目标方法声明顺序接收目标方法参数前缀；当原返回值或追加的目标方法参数是对象/数组类型时，对应 handler 参数可声明为 `Any` / `Object`。
+`@ModifyReturnValue` handler 返回类型对 primitive 必须与目标方法返回类型一致；对象/数组返回值可以是目标类型的子类型。参数可选：第一个参数可接收原始返回值，后续参数可按目标方法声明顺序接收目标方法参数前缀；当原返回值或追加的目标方法参数是对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`。
 
 `@ModifyReturnValue` 会按实际改写的非 void 返回点数量计数。未设置 `ordinal` 时命中全部非 void 返回点；
 设置 `ordinal` 时最多命中对应序号的 1 个返回点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际返回值修改数量校验契约，
