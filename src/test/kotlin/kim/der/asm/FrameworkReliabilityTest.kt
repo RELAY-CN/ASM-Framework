@@ -2383,6 +2383,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtNewCanCallOriginalConstructorWithChangedArguments() {
+        AsmRegistry.register(WrapOperationNewConstructorMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorModifyArgTarget", constructorModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstructorModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("new-raw", result)
+    }
+
+    @Test
     fun wrapOperationAtConstructorCanUseTargetMethodParameters() {
         AsmRegistry.register(WrapOperationConstructorWithTargetParamsMixin::class.java)
 
@@ -7377,6 +7390,22 @@ class FrameworkReliabilityTest {
             value: String,
             operation: Operation<StringBuilder>,
         ): StringBuilder = operation.call("wrapped-$value")
+    }
+
+    @AsmMixin("ConstructorModifyArgTarget")
+    object WrapOperationNewConstructorMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.NEW,
+                target = "java/lang/StringBuilder",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<StringBuilder>,
+        ): StringBuilder = operation.call("new-$value")
     }
 
     @AsmMixin("NewParamTarget")
