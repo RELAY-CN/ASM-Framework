@@ -297,6 +297,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueAcceptsAssignableObjectReturnType() {
+        AsmRegistry.register(ModifyReturnValueAssignableReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "CharSequenceReturnTarget",
+            charSequenceReturnTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("CharSequenceReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-subtype", result)
+    }
+
+    @Test
     fun modifyReturnValueWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyReturnParametersMixin::class.java)
 
@@ -5159,6 +5175,13 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "value()Ljava/lang/String;")
         @JvmStatic
         fun modify(original: Any): String = "$original-any"
+    }
+
+    @AsmMixin("CharSequenceReturnTarget")
+    object ModifyReturnValueAssignableReturnMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/CharSequence;")
+        @JvmStatic
+        fun modify(original: CharSequence): String = "$original-subtype"
     }
 
     @AsmMixin("ReturnTarget")
@@ -10094,6 +10117,21 @@ class FrameworkReliabilityTest {
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReturnTarget", null, "java/lang/Object", null)
         addDefaultConstructor(cw)
         cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("value")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun charSequenceReturnTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "CharSequenceReturnTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/CharSequence;", null, null).apply {
             visitCode()
             visitLdcInsn("value")
             visitInsn(Opcodes.ARETURN)
