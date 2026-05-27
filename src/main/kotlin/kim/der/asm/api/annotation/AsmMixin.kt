@@ -349,7 +349,8 @@ annotation class ModifyReceiver(
  * - 类型转换 handler 参数先接收待转换对象；`Operation.call(value)` 会执行原始 `CHECKCAST` 语义
  * - 类型判断 handler 参数先接收被判断对象；`Operation.call(value)` 会执行原始 `INSTANCEOF` 语义并返回 `Boolean`
  * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断
- * - handler 返回类型必须兼容原操作返回类型；原调用为 `void` 时 handler 必须返回 `void`，构造器调用必须返回 owner 类型兼容对象
+ * - handler 返回类型必须兼容原操作返回类型；基础类型需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
+ * - 原调用为 `void` 时 handler 必须返回 `void`，构造器调用必须返回 owner 类型兼容对象
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 必须为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  *   [InjectionPoint.NEW] 或 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]，并通过 [At.target]
@@ -681,7 +682,7 @@ annotation class ModifyConstant(
  * - 方法调用重定向的参数栈形态需先与原调用保持一致（包括实例方法的 `this`），后续参数可按顺序接收目标方法的部分参数
  * - 构造器重定向的参数栈形态需先与原构造器参数保持一致，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象
  * - 实例字段读取重定向的第一个参数为字段所属实例；静态字段读取重定向不需要接收者参数，后续参数可按顺序接收目标方法的部分参数
- * - 字段读取重定向的返回值类型需与字段类型兼容
+ * - 字段读取重定向的返回值类型需与字段类型兼容；基础类型需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - 实例字段写入重定向参数为字段所属实例与原写入值；静态字段写入重定向参数为原写入值，后续参数可按顺序接收目标方法的部分参数
  * - 字段写入重定向必须返回 `void`
  * - 数组读取重定向参数为数组引用与 `Int` 索引，返回元素值；数组写入重定向参数为数组引用、`Int` 索引与原元素值，返回 `void`
