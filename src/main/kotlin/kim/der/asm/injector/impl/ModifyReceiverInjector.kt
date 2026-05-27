@@ -366,6 +366,11 @@ class ModifyReceiverInjector(
         if (!receiverType.isReferenceType() || !handlerReturnType.isReferenceType()) {
             return false
         }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
         return runCatching {
             val receiverClass = loadReferenceClass(receiverType)
             receiverClass.isAssignableFrom(asmMethod.returnType)
