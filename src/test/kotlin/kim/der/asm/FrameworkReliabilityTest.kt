@@ -1794,6 +1794,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtThrowRewritesThrownException() {
+        AsmRegistry.register(ModifyExpressionValueThrowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ThrowPointTarget", throwPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("fail").invoke(instance)
+            }
+
+        assertEquals(true, exception.cause is IllegalArgumentException)
+        assertEquals("modified-failed", exception.cause?.message)
+    }
+
+    @Test
     fun modifyReceiverAtInvokeReplacesInstanceCallReceiver() {
         AsmRegistry.register(ModifyReceiverConcatMixin::class.java)
 
@@ -9307,6 +9323,16 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun inject() {
         }
+    }
+
+    @AsmMixin("ThrowPointTarget")
+    object ModifyExpressionValueThrowMixin {
+        @ModifyExpressionValue(
+            method = "fail()V",
+            at = At(value = InjectionPoint.THROW),
+        )
+        @JvmStatic
+        fun modify(original: Throwable): Throwable = IllegalArgumentException("modified-${original.message}")
     }
 
     @AsmMixin("SliceThrowInstructionTarget")
