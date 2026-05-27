@@ -23,7 +23,8 @@ import java.lang.reflect.Modifier
  *
  * 遍历目标方法中的常量加载指令，并用 ASM 方法返回值替换匹配常量。
  * 当 [constantValue] 为 `null` 时仅按常量类型匹配；指定值时会同时校验常量文本。
- * 支持 `LDC`、`ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
+ * 支持 `LDC` 字符串、数字、类字面量、方法类型字面量、方法句柄字面量，以及 `ACONST_NULL`、
+ * `ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
  * `BIPUSH` 与 `SIPUSH` 形式的常量加载。
  * ASM 方法的第一个参数接收原常量，后续参数可按顺序接收目标方法的部分参数；
  * 引用类型参数可声明为原值类型的父类、接口、`Any` 或 `Object`，基础类型仍需精确匹配。
