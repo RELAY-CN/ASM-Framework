@@ -283,7 +283,7 @@ annotation class ModifyArgs(
  * ASM 方法要求：
  *
  * - 第一个参数必须接收原 receiver
- * - 返回类型必须兼容原 receiver 类型
+ * - 返回类型对基础类型仍需精确匹配；对象或数组类型可返回可赋值给原 receiver 类型的子类型
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 为 [InjectionPoint.INVOKE] 时，通过 [At.target] 指定要匹配的实例方法调用
  * - [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice]
