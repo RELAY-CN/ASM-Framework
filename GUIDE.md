@@ -668,7 +668,7 @@ object ValidationMixin {
 `Operation<Int>`；类型转换模式通过 `CAST` 与类型目标指定，handler 接收待转换对象与 `Operation<T>`，
 `operation.call(value)` 会执行原始 `CHECKCAST` 语义；类型判断模式通过 `INSTANCEOF` 与类型目标指定，
 handler 接收被判断对象与 `Operation<Boolean>`，`operation.call(value)` 会执行原始 `INSTANCEOF` 语义。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
-参数前缀；基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
+参数前缀；handler 参数接收引用或数组栈值、目标方法参数时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
 `FIELD_ASSIGN`、`NEW`、`CAST`、`INSTANCEOF` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 

@@ -349,6 +349,7 @@ annotation class ModifyReceiver(
  * - 类型转换 handler 参数先接收待转换对象；`Operation.call(value)` 会执行原始 `CHECKCAST` 语义
  * - 类型判断 handler 参数先接收被判断对象；`Operation.call(value)` 会执行原始 `INSTANCEOF` 语义并返回 `Boolean`
  * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断
+ * - handler 参数接收引用或数组栈值、目标方法参数时，可声明为原值类型的父类、接口、`Any` 或 `Object`
  * - handler 返回类型必须兼容原操作返回类型；基础类型需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - 原调用为 `void` 时 handler 必须返回 `void`，构造器调用必须返回 owner 类型兼容对象
  * - 后续参数可按顺序接收目标方法参数前缀
