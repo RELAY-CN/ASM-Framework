@@ -113,7 +113,7 @@ val transformedBytes = processor.transform(
 - **@ModifyVariable** - 修改方法参数或局部变量
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
-- **@Redirect** - 重定向方法调用、构造器调用、字段访问、简单数组元素访问或数组长度读取
+- **@Redirect** - 重定向方法调用、构造器调用、字段访问、简单数组元素访问、数组长度读取、类型转换或类型判断
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
@@ -914,6 +914,13 @@ object RedirectMixin {
     }
 
     @Redirect(
+        method = "asName(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;",
+        at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+    )
+    fun redirectCast(value: Any, raw: Any, fallback: String): String =
+        (value as? CharSequence)?.toString() ?: fallback
+
+    @Redirect(
         method = "isLocal(Ljava/lang/Object;Z)Z",
         at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
     )
@@ -922,8 +929,8 @@ object RedirectMixin {
 }
 ```
 
-方法调用、构造器调用、字段读取、字段写入、简单数组元素访问、数组长度与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、构造器、字段访问、数组元素访问、数组长度或类型判断需要的栈参数，后续可按顺序接收目标方法参数前缀。构造器重定向使用 `INVOKE + <init>` 目标，handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`；类型判断使用 `at.value = InjectionPoint.INSTANCEOF`，handler 接收原被判断对象并返回 `Boolean`。
-方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度与类型判断重定向都可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的目标调用、字段访问、数组访问、数组长度或类型判断指令才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。关键重定向可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
+方法调用、构造器调用、字段读取、字段写入、简单数组元素访问、数组长度、类型转换与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、构造器、字段访问、数组元素访问、数组长度、类型转换或类型判断需要的栈参数，后续可按顺序接收目标方法参数前缀。构造器重定向使用 `INVOKE + <init>` 目标，handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`；类型转换使用 `at.value = InjectionPoint.CAST`，handler 接收原待转换对象并返回目标类型兼容对象；类型判断使用 `at.value = InjectionPoint.INSTANCEOF`，handler 接收原被判断对象并返回 `Boolean`。
+方法调用、构造器调用、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向都可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的目标调用、字段访问、数组访问、数组长度、类型转换或类型判断指令才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。关键重定向可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
 
 ### 场景 9: 条件取消执行
 
@@ -1030,7 +1037,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要替换 `CHECKCAST`，应使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`，如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要改写类型判断结果，应使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果，优先使用 `@Redirect`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
