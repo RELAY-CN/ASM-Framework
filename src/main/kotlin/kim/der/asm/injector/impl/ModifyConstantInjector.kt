@@ -233,7 +233,13 @@ class ModifyConstantInjector(
             is Float -> constant.toString() == value
             is Double -> constant.toString() == value
             is String -> constant == value
-            is Type -> constant.internalName == value.replace('.', '/')
+            is Type -> {
+                if (constant.sort == Type.METHOD) {
+                    constant.descriptor == value
+                } else {
+                    constant.internalName == value.replace('.', '/')
+                }
+            }
             else -> false
         }
     }

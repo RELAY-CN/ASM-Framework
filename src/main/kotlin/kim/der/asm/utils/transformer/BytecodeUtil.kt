@@ -130,7 +130,13 @@ object BytecodeUtil {
                     is Long -> Type.LONG_TYPE
                     is Double -> Type.DOUBLE_TYPE
                     is String -> Type.getType("Ljava/lang/String;")
-                    is Type -> Type.getType("Ljava/lang/Class;")
+                    is Type -> {
+                        if (cst.sort == Type.METHOD) {
+                            Type.getType("Ljava/lang/invoke/MethodType;")
+                        } else {
+                            Type.getType("Ljava/lang/Class;")
+                        }
+                    }
                     else -> null
                 }
             }
