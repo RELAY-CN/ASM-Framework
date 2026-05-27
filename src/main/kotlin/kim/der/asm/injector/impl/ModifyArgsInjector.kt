@@ -28,9 +28,10 @@ import java.lang.reflect.Modifier
 /**
  * ModifyArgs 注入器。
  *
- * 该注入器会匹配目标方法中的指定方法调用，把原调用参数保存到 [Args] 容器并传给 handler。
+ * 该注入器会匹配目标方法中的指定方法调用或构造器调用，把原调用参数保存到 [Args] 容器并传给 handler。
  * handler 可就地修改容器内容，注入器随后从容器中取回整组参数并恢复原方法调用。
- * 实例方法调用的 receiver 会被保存和恢复，但不会放入 [Args]。
+ * 实例方法调用的 receiver 会被保存和恢复，但不会放入 [Args]；构造器调用只把构造器描述符中的参数放入 [Args]，
+ * 不暴露未初始化 receiver。
  *
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
