@@ -2388,6 +2388,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodAcceptsAssignableTargetParameterType() {
+        AsmRegistry.register(WrapMethodAssignabilityTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapMethodAssignabilityTarget", wrapMethodAssignabilityTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapMethodAssignabilityTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java).invoke(null, "raw")
+
+        assertEquals("wrapped:raw!", result)
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
@@ -7583,6 +7594,16 @@ class FrameworkReliabilityTest {
         ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
     }
 
+    @AsmMixin("WrapMethodAssignabilityTarget")
+    object WrapMethodAssignabilityTargetMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun wrap(
+            prefix: CharSequence,
+            operation: Operation<String>,
+        ): String = "wrapped:${operation.call(prefix.toString())}"
+    }
+
     @AsmMixin("ModifyReceiverParamTarget")
     object WrapOperationWithTargetParamsMixin {
         @WrapOperation(
@@ -10802,6 +10823,35 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun wrapMethodAssignabilityTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapMethodAssignabilityTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "value",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("!")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
             visitEnd()
         }
         cw.visitEnd()
