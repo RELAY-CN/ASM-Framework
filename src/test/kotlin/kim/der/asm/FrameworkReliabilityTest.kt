@@ -3162,6 +3162,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantMatchesMethodTypeConstant() {
+        AsmRegistry.register(MethodTypeModifyConstantMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("MethodTypeConstantTarget", methodTypeConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MethodTypeConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(java.lang.invoke.MethodType.methodType(StringBuilder::class.java, Int::class.javaPrimitiveType), result)
+    }
+
+    @Test
     fun modifyConstantMatchesBipushIntConstant() {
         AsmRegistry.register(BipushModifyConstantMixin::class.java)
 
@@ -8472,6 +8485,14 @@ class FrameworkReliabilityTest {
         fun modify(original: Class<*>): Class<*> = StringBuilder::class.java
     }
 
+    @AsmMixin("MethodTypeConstantTarget")
+    object MethodTypeModifyConstantMixin {
+        @ModifyConstant(method = "value()Ljava/lang/invoke/MethodType;", constant = "(I)Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: java.lang.invoke.MethodType): java.lang.invoke.MethodType =
+            java.lang.invoke.MethodType.methodType(StringBuilder::class.java, Int::class.javaPrimitiveType)
+    }
+
     @AsmMixin("BipushConstantTarget")
     object BipushModifyConstantMixin {
         @ModifyConstant(method = "value()I", constant = "7")
@@ -13186,6 +13207,27 @@ class FrameworkReliabilityTest {
         cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/Class;", null, null).apply {
             visitCode()
             visitLdcInsn(org.objectweb.asm.Type.getType("Ljava/lang/String;"))
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun methodTypeConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MethodTypeConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "()Ljava/lang/invoke/MethodType;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn(org.objectweb.asm.Type.getMethodType("(I)Ljava/lang/String;"))
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
             visitEnd()
