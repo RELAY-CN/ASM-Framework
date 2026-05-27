@@ -361,7 +361,7 @@ class ModifyExpressionValueInjector(
             }
 
             val throwableType = Type.getType(Throwable::class.java)
-            val targetParamCount = validateHandlerSignature(target, throwableType)
+            val targetParamCount = validateHandlerSignature(target, throwableType, allowThrowableSubtypeReturn = true)
             val il = buildExpressionValueModification(target, throwableType, targetParamCount)
             target.instructions.insertBefore(insn, il)
             injectionCount++
@@ -398,6 +398,7 @@ class ModifyExpressionValueInjector(
     private fun validateHandlerSignature(
         target: MethodNode,
         expressionType: Type,
+        allowThrowableSubtypeReturn: Boolean = false,
     ): Int {
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
         if (asmParamTypes.isEmpty() || !isHandlerParameterCompatible(expressionType, asmParamTypes[0])) {
@@ -409,7 +410,7 @@ class ModifyExpressionValueInjector(
         }
 
         val asmReturnType = Type.getReturnType(asmMethod)
-        if (asmReturnType != expressionType) {
+        if (asmReturnType != expressionType && !isThrowableSubtypeReturnAllowed(allowThrowableSubtypeReturn)) {
             throw IllegalArgumentException(
                 "@ModifyExpressionValue handler ${asmMethod.name} return type $asmReturnType " +
                     "must match expression type $expressionType",
@@ -439,6 +440,9 @@ class ModifyExpressionValueInjector(
 
         return requestedTargetParamCount
     }
+
+    private fun isThrowableSubtypeReturnAllowed(allowThrowableSubtypeReturn: Boolean): Boolean =
+        allowThrowableSubtypeReturn && Throwable::class.java.isAssignableFrom(asmMethod.returnType)
 
     private fun isHandlerParameterCompatible(
         expected: Type,
