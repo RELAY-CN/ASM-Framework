@@ -11,6 +11,7 @@ import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
+import org.objectweb.asm.Handle
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -241,6 +242,7 @@ class ModifyConstantInjector(
                     constant.internalName == value.replace('.', '/')
                 }
             }
+            is Handle -> "${constant.owner}.${constant.name}${constant.desc}" == value
             else -> false
         }
     }

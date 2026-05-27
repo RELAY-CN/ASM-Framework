@@ -6,6 +6,7 @@ package kim.der.asm.utils.transformer
 
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
+import org.objectweb.asm.Handle
 import org.objectweb.asm.tree.*
 
 /**
@@ -137,6 +138,7 @@ object BytecodeUtil {
                             Type.getType("Ljava/lang/Class;")
                         }
                     }
+                    is Handle -> Type.getType("Ljava/lang/invoke/MethodHandle;")
                     else -> null
                 }
             }
