@@ -1408,10 +1408,7 @@ class RedirectInjector(
         constructedType: Type,
         handler: Type,
     ): Boolean {
-        if (handler == constructedType) {
-            return true
-        }
-        return handler.sort == Type.OBJECT && handler.internalName == "java/lang/Object"
+        return isReturnCompatible(constructedType, handler)
     }
 
     private fun addHandlerOwner(il: InsnList) {
