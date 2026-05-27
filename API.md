@@ -400,8 +400,8 @@ handler 参数必须先按目标方法声明顺序接收原方法参数，下一
 - `remap: Boolean = false` - 是否重映射
 
 `@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用 `Any` / `Object`
-接收，但返回类型仍必须与表达式类型一致。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。
-该注解不会替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断或抛异常指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组长度使用 `at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`INSTANCEOF` 模式会在匹配类型判断后接收 `Boolean` 结果，二者的 `At.target` 均为类型 internal name 或 binary name。`THROW` 模式会在 `ATHROW` 前接收即将抛出的 `Throwable`，handler 必须返回新的 `Throwable`。`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式可用 `slice.from` / `slice.to` 限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
+接收，但除 `THROW` 外返回类型仍必须与表达式类型一致；`THROW` 模式可返回 `Throwable` 或具体异常子类。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。
+该注解不会替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断或抛异常指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组长度使用 `at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`INSTANCEOF` 模式会在匹配类型判断后接收 `Boolean` 结果，二者的 `At.target` 均为类型 internal name 或 binary name。`THROW` 模式会在 `ATHROW` 前接收即将抛出的 `Throwable`。`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式可用 `slice.from` / `slice.to` 限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
 
 `@ModifyExpressionValue` 会按实际改写的表达式值数量计数。未设置 `ordinal` 时命中全部匹配表达式；
 设置 `ordinal` 时最多命中对应序号的 1 个表达式。显式设置 `require` / `allow` / 非默认 `expect` 时按实际表达式值修改数量校验契约，
@@ -939,7 +939,7 @@ At(
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD_ASSIGN)`、
-`@ModifyExpressionValue(at.value = InjectionPoint.INVOKE / InjectionPoint.INVOKE_ASSIGN / InjectionPoint.FIELD / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`、
+`@ModifyExpressionValue(at.value = InjectionPoint.INVOKE / InjectionPoint.INVOKE_ASSIGN / InjectionPoint.FIELD / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.THROW)`、
 `@ModifyVariable(at.value = InjectionPoint.LOAD / InjectionPoint.STORE)`、`@ModifyConstant`
 支持 `from` / `to` 为 `InjectionPoint.INVOKE`
 的边界切片；未在上面列出的注解当前不使用 `slice`。

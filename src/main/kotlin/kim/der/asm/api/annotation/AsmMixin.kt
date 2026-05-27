@@ -485,7 +485,7 @@ annotation class WrapWithCondition(
  * ASM 方法要求：
  *
  * - 第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用 `Any` / `Object` 接收
- * - 返回类型必须与匹配表达式的值类型一致
+ * - 除 [InjectionPoint.THROW] 外，返回类型必须与匹配表达式的值类型一致；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 方法调用目标的 [At.target] 必须指定调用签名，字段读取目标必须指定字段签名
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
@@ -493,7 +493,7 @@ annotation class WrapWithCondition(
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象
  * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象
  * - [InjectionPoint.INSTANCEOF] 的 [At.target] 为类型 internal name 或 binary name；handler 接收 `Boolean` 判断结果
- * - [InjectionPoint.THROW] 不需要 [At.target]；handler 接收即将抛出的 `Throwable` 并返回新的 `Throwable`
+ * - [InjectionPoint.THROW] 不需要 [At.target]；handler 接收即将抛出的 `Throwable` 并返回新的 `Throwable` 或具体异常子类
  * - [require] / [allow] 可约束实际表达式值修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望表达式值修改数量，不一致时只输出警告，不阻断转换
  *
