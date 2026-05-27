@@ -194,7 +194,7 @@ annotation class Unique
 /**
  * 修改参数注解。
  *
- * 用于修改目标方法参数或目标方法内某次方法调用的参数值（语义参考 Mixin 的 `@ModifyArg`）。
+ * 用于修改目标方法参数，或目标方法内某次方法调用/构造器调用的参数值（语义参考 Mixin 的 `@ModifyArg`）。
  * 默认在目标方法入口直接写回参数槽位；当 [at] 指向 [InjectionPoint.INVOKE] 时，会改写匹配调用点的指定参数。
  *
  * ASM 方法要求：
@@ -202,13 +202,13 @@ annotation class Unique
  * - 接收原始参数值并返回同类型的新值
  * - 第一个参数必须是被修改的原参数；后续参数可按顺序接收目标方法参数前缀
  * - 被修改参数或目标方法参数为对象/数组类型时，对应 handler 参数可声明为 `Any` / `Object`，但返回类型仍需保持被修改参数类型
- * - INVOKE 模式只把 [index] 选中的调用参数作为第一个参数，不会自动传入目标调用的其他参数
+ * - INVOKE 模式只把 [index] 选中的调用参数作为第一个参数，不会自动传入目标调用的其他参数；构造器调用不暴露未初始化 receiver
  * - [require] / [allow] 可约束实际参数修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
- * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标调用
+ * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用或构造器调用
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，当前仅在 INVOKE 模式下生效
  * @param slice 切片范围；当前 INVOKE 调用点参数修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围

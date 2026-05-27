@@ -21,12 +21,12 @@ import java.lang.reflect.Modifier
  *
  * 在目标方法开头读取指定参数槽位，调用 ASM 方法得到新值后写回原槽位。
  * 默认按参数索引直接修改方法入口处的参数值；当 [at] 指向 [InjectionPoint.INVOKE] 时，
- * 会改写匹配调用点的指定调用参数。
+ * 会改写匹配方法调用或构造器调用点的指定调用参数。
  * handler 的第一个参数是被修改的原参数；对象或数组参数可声明为 `Any` / `Object` 接收，
  * 但返回类型仍需保持实际参数类型。后续可按顺序接收目标方法参数前缀。
  *
  * @param argIndex 要修改的目标参数索引，从 0 开始
- * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标调用
+ * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标方法调用或构造器调用
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 调用点参数修改使用 INVOKE 边界缩小匹配范围
  *
