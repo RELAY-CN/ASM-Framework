@@ -1945,6 +1945,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverAtInvokeAcceptsAssignableParentParameter() {
+        AsmRegistry.register(ModifyReceiverParentParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("parent-call", result)
+    }
+
+    @Test
     fun modifyReceiverAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyReceiverWithTargetParamsMixin::class.java)
 
@@ -7161,6 +7173,22 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String {
             original.length
             return "changed"
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object ModifyReceiverParentParamMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: CharSequence): String {
+            original.length
+            return "parent"
         }
     }
 
