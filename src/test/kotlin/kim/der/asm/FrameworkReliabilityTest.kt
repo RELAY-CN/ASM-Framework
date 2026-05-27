@@ -2057,6 +2057,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverWithIncompatibleReturnTypeFailsDuringTransform() {
+        AsmRegistry.register(IncompatibleModifyReceiverReturnMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("return type") == true &&
+                exception.cause?.message?.contains("receiver type") == true,
+        )
+    }
+
+    @Test
     fun modifyReceiverAtFieldReadReplacesGetFieldReceiver() {
         AsmRegistry.register(ModifyReceiverFieldReadMixin::class.java)
 
@@ -7092,6 +7108,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object IncompatibleModifyReceiverReturnMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): StringBuilder = StringBuilder(original)
     }
 
     @AsmMixin("FieldPointTarget")
