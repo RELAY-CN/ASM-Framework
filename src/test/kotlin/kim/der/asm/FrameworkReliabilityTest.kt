@@ -2708,6 +2708,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationArrayReadAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(WrapOperationArrayReadObjectReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("object-raw", result)
+    }
+
+    @Test
     fun wrapOperationAtArrayReadCanCallOriginalPrimitiveArrayLoad() {
         AsmRegistry.register(WrapOperationPrimitiveArrayReadMixin::class.java)
 
@@ -4481,6 +4493,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
 
         assertEquals("redirected-raw", result)
+    }
+
+    @Test
+    fun redirectArrayReadAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(ArrayReadObjectReturnRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("object-raw", result)
     }
 
     @Test
@@ -7858,6 +7882,24 @@ class FrameworkReliabilityTest {
         ): String = "wrapped-${operation.call(array, index)}"
     }
 
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayReadObjectReturnMixin {
+        @WrapOperation(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            operation: Operation<String>,
+        ): Any = "object-${operation.call(array, index)}"
+    }
+
     @AsmMixin("PrimitiveArrayAccessTarget")
     object WrapOperationPrimitiveArrayReadMixin {
         @WrapOperation(
@@ -9217,6 +9259,23 @@ class FrameworkReliabilityTest {
             array: Array<String>,
             index: Int,
         ): String = "redirected-${array[index]}"
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ArrayReadObjectReturnRedirectMixin {
+        @Redirect(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+        ): Any = "object-${array[index]}"
     }
 
     @AsmMixin("ArrayAccessTarget")
