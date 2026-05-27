@@ -622,7 +622,7 @@ annotation class ModifyReturnValue(
  * 当前实现会遍历字节码中的常量指令，并在匹配时用 ASM 方法返回值替换原常量。
  * 支持 `LDC` 字符串、数字、类字面量（handler 使用 `Class<*>` / `java.lang.Class`）、
  * 方法类型字面量（handler 使用 `java.lang.invoke.MethodType`）
- * 与方法句柄字面量（handler 使用 `java.lang.invoke.MethodHandle`）、
+ * 与方法句柄字面量（handler 使用 `java.lang.invoke.MethodHandle`），以及动态常量、
  * `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`
  * 形式的常量加载；显式 [constant] 为 `"true"` 或 `"false"` 时，会将 `ICONST_1` 或 `ICONST_0`
  * 按 boolean 常量处理。
@@ -640,7 +640,8 @@ annotation class ModifyReturnValue(
  * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）；`"true"` / `"false"` 可匹配 boolean 常量；
  * 类字面量可使用 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`；
  * 方法类型常量可使用 JVM 方法描述符，例如 `(I)Ljava/lang/String;`；
- * 方法句柄常量可使用 `owner.name(desc)`，例如 `java/lang/String.valueOf(I)Ljava/lang/String;`
+ * 方法句柄常量可使用 `owner.name(desc)`，例如 `java/lang/String.valueOf(I)Ljava/lang/String;`；
+ * 动态常量可使用常量名或 `name:descriptor`，例如 `dynamicText:Ljava/lang/String;`
  * @param ordinal 匹配常量序号；`-1` 表示修改全部匹配常量，`0` 及以上表示只修改第 N 个匹配常量
  * @param slice 切片范围；当前常量修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
