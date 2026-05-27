@@ -319,9 +319,9 @@ annotation class ModifyReceiver(
 /**
  * 包裹原始操作注解。
  *
- * 用于把目标方法内匹配的方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取或类型转换替换为 handler 调用（语义参考
+ * 用于把目标方法内匹配的方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断替换为 handler 调用（语义参考
  * Mixin Extras 的 `@WrapOperation`）。handler 会接收原操作的 receiver（实例调用、实例字段读取与
- * 实例字段写入）、原调用参数、构造器参数、字段写入值、数组访问参数或类型转换输入值与 [Operation]，
+ * 实例字段写入）、原调用参数、构造器参数、字段写入值、数组访问参数或类型检查输入值与 [Operation]，
  * 可选择调用、跳过或多次调用原始操作。
  *
  * 当前实现支持 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
@@ -329,7 +329,8 @@ annotation class ModifyReceiver(
  * 包裹数组元素读取，通过 `args = ["array=length"]` 包裹数组长度读取；
  * [InjectionPoint.FIELD_ASSIGN] 可通过 `args = ["array=set"]` 包裹数组元素写入。
  * 构造器调用通过 [InjectionPoint.INVOKE] 与 `<init>` 目标指定，当前支持常见 `NEW/DUP/args/<init>` 形态。
- * 类型转换通过 [InjectionPoint.CAST] 与类型 internal name 或 binary name 指定。
+ * 类型转换通过 [InjectionPoint.CAST] 与类型 internal name 或 binary name 指定；
+ * 类型判断通过 [InjectionPoint.INSTANCEOF] 与类型 internal name 或 binary name 指定。
  *
  * ASM 方法要求：
  *
@@ -344,18 +345,19 @@ annotation class ModifyReceiver(
  * - 数组写入 handler 参数先接收数组引用、`Int` 索引与待写入元素值
  * - 数组长度 handler 参数先接收数组引用
  * - 类型转换 handler 参数先接收待转换对象；`Operation.call(value)` 会执行原始 `CHECKCAST` 语义
- * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取或类型转换
+ * - 类型判断 handler 参数先接收被判断对象；`Operation.call(value)` 会执行原始 `INSTANCEOF` 语义并返回 `Boolean`
+ * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断
  * - handler 返回类型必须兼容原操作返回类型；原调用为 `void` 时 handler 必须返回 `void`，构造器调用必须返回 owner 类型兼容对象
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 必须为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- *   或 [InjectionPoint.CAST]，并通过 [At.target] 指定要匹配的方法调用、字段读取、字段写入、产生数组引用的字段或类型转换目标类型
+ *   或 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]，并通过 [At.target] 指定要匹配的方法调用、字段读取、字段写入、产生数组引用的字段或类型目标
  *
  * @param method 目标方法签名
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- * 与 [InjectionPoint.CAST]
+ * 与 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]
  * @param ordinal 匹配操作点序号；`-1` 表示包裹全部匹配操作点，`0` 及以上表示只包裹第 N 个匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
- * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.CAST] 操作包裹支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
+ * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] 操作包裹支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际操作包裹数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际操作包裹数不能超过该值
