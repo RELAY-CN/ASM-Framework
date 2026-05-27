@@ -798,6 +798,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtInvokeRewritesInvokeDynamicArgument() {
+        AsmRegistry.register(InvokeDynamicModifyArgMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("changed-7", result)
+    }
+
+    @Test
     fun modifyArgOrdinalSelectsSingleInvokeCallArgument() {
         AsmRegistry.register(InvokeModifyArgOrdinalMixin::class.java)
 
@@ -5989,6 +6002,23 @@ class FrameworkReliabilityTest {
             suffix: String,
             count: Int,
         ): String = "$original-$suffix$count"
+    }
+
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object InvokeDynamicModifyArgMixin {
+        @ModifyArg(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
     }
 
     @AsmMixin("MultiInvokeModifyArgTarget")
