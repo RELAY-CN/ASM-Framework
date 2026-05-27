@@ -2975,6 +2975,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantAcceptsAssignableObjectReturnTypeForNullConstant() {
+        AsmRegistry.register(NullConstantAssignableReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NullConstantTarget", nullConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NullConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed", result)
+    }
+
+    @Test
     fun modifyConstantMatchesExplicitTrueBooleanConstant() {
         AsmRegistry.register(TrueBooleanModifyConstantMixin::class.java)
 
@@ -8029,6 +8041,13 @@ class FrameworkReliabilityTest {
         @ModifyConstant(method = "value()Ljava/lang/Object;", constant = "null")
         @JvmStatic
         fun modify(original: Any?): Any = "changed"
+    }
+
+    @AsmMixin("NullConstantTarget")
+    object NullConstantAssignableReturnMixin {
+        @ModifyConstant(method = "value()Ljava/lang/Object;", constant = "null")
+        @JvmStatic
+        fun modify(original: Any?): String = "changed"
     }
 
     @AsmMixin("TrueBooleanConstantTarget")
