@@ -1449,6 +1449,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInvokeRewritesInvokeDynamicReturnValue() {
+        AsmRegistry.register(ModifyExpressionValueInvokeDynamicMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("raw-7-dynamic-raw7", result)
+    }
+
+    @Test
     fun modifyExpressionValueOrdinalSelectsSingleInvokeReturnValue() {
         AsmRegistry.register(ModifyExpressionValueOrdinalMixin::class.java)
 
@@ -6779,6 +6792,23 @@ class FrameworkReliabilityTest {
         ): String = "$prefix-$original-$count"
     }
 
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object ModifyExpressionValueInvokeDynamicMixin {
+        @ModifyExpressionValue(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            prefix: String,
+            count: Int,
+        ): String = "$original-dynamic-$prefix$count"
+    }
+
     @AsmMixin("MultiExpressionValueTarget")
     object ModifyExpressionValueOrdinalMixin {
         @ModifyExpressionValue(
@@ -11794,6 +11824,35 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeDynamicExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;I)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;I)Ljava/lang/String;",
+                org.objectweb.asm.Handle(
+                    Opcodes.H_INVOKESTATIC,
+                    "java/lang/invoke/StringConcatFactory",
+                    "makeConcatWithConstants",
+                    "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                        "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                    false,
+                ),
+                "\u0001-\u0001",
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
