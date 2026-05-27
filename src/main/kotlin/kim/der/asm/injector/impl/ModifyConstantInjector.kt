@@ -24,7 +24,8 @@ import java.lang.reflect.Modifier
  * 当 [constantValue] 为 `null` 时仅按常量类型匹配；指定值时会同时校验常量文本。
  * 支持 `LDC`、`ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
  * `BIPUSH` 与 `SIPUSH` 形式的常量加载。
- * ASM 方法的第一个参数接收原常量，后续参数可按顺序接收目标方法的部分参数。
+ * ASM 方法的第一个参数接收原常量，后续参数可按顺序接收目标方法的部分参数；
+ * 引用类型参数可声明为原值类型的父类、接口、`Any` 或 `Object`，基础类型仍需精确匹配。
  * [injectCount] 会返回实际替换的常量数量，供上层执行 `@ModifyConstant` 的命中数契约校验。
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
@@ -445,11 +446,18 @@ class ModifyConstantInjector(
         if (expected == actual) {
             return true
         }
-        if (expected.sort == Type.OBJECT || expected.sort == Type.ARRAY) {
-            return actual.sort == Type.OBJECT &&
-                (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
         }
-        return false
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
     }
 
     /**
