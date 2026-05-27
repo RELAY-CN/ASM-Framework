@@ -719,6 +719,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtInvokeAcceptsAssignableObjectReturnType() {
+        AsmRegistry.register(InvokeModifyArgAssignableReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello missing", result)
+    }
+
+    @Test
     fun modifyArgAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(InvokeModifyArgWithTargetParamsMixin::class.java)
 
@@ -5570,6 +5582,20 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): String = "$original-any"
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object InvokeModifyArgAssignableReturnMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: CharSequence): StringBuilder = StringBuilder("raw")
     }
 
     @AsmMixin("InvokeModifyArgParamTarget")
