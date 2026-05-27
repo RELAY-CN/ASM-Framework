@@ -395,6 +395,7 @@ annotation class WrapOperation(
  * ASM 方法要求：
  *
  * - handler 参数先按目标方法声明顺序接收原方法参数
+ * - 对象/数组类型的目标方法参数可用其父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配
  * - 下一参数必须是 [Operation]，用于执行被包裹的原目标方法
  * - 实例目标方法不会把 `this` 作为 handler 参数；[Operation] 已绑定当前 receiver，[Operation.call] 只传目标方法参数
  * - handler 返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 必须返回 `Unit` / `void`
