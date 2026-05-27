@@ -727,6 +727,10 @@ object RulesMixin {
     @JvmStatic
     fun disableDefault(original: Boolean): Boolean = false
 
+    @ModifyConstant(method = "ruleType()Ljava/lang/Class;", constant = "com.example.LegacyRule")
+    @JvmStatic
+    fun rewriteRuleType(original: Class<*>): Class<*> = com.example.ModernRule::class.java
+
     @ModifyConstant(
         method = "messageInTrace(Ljava/lang/String;)Ljava/lang/String;",
         constant = "prefix-",
@@ -742,7 +746,7 @@ object RulesMixin {
 }
 ```
 
-`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类常量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。显式写 `constant = "true"` 或 `"false"` 时，`ICONST_1` / `ICONST_0` 会按 boolean 常量交给 `Boolean` handler；数字 `"1"` / `"0"` 仍按 int 常量匹配。当目标方法中有多个相同常量时，可用 `Slice` 限制常量匹配范围；`from` 边界之后、`to` 边界之前的常量才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。关键常量补丁可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
+`@ModifyConstant` 会把匹配到的常量值作为 handler 的第一个参数，并用 handler 返回值替换原常量。handler 后续参数可按顺序接收目标方法参数前缀，例如上面的 `name`。`ordinal` 可限定只修改第 N 个匹配常量，默认 `-1` 会修改全部匹配项。它支持 `LDC` 字符串、数字、类字面量，以及 JVM 短常量指令，包括 `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`。Java `.class` 或 Kotlin `SomeType::class.java` 生成的类字面量由 `Class<*>` / `java.lang.Class` handler 接收，`constant` 可写 `com.example.Type` 或 `com/example/Type`。显式写 `constant = "true"` 或 `"false"` 时，`ICONST_1` / `ICONST_0` 会按 boolean 常量交给 `Boolean` handler；数字 `"1"` / `"0"` 仍按 int 常量匹配。当目标方法中有多个相同常量时，可用 `Slice` 限制常量匹配范围；`from` 边界之后、`to` 边界之前的常量才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。关键常量补丁可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
 
 ### 场景 5: 完全替换方法
 

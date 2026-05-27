@@ -613,9 +613,10 @@ annotation class ModifyReturnValue(
  *
  * 用于修改目标方法中的常量值（语义参考 Mixin 的 `@ModifyConstant`）。
  * 当前实现会遍历字节码中的常量指令，并在匹配时用 ASM 方法返回值替换原常量。
- * 支持 `LDC`、`ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
- * `BIPUSH` 与 `SIPUSH` 形式的常量加载；显式 [constant] 为 `"true"` 或 `"false"` 时，
- * 会将 `ICONST_1` 或 `ICONST_0` 按 boolean 常量处理。
+ * 支持 `LDC` 字符串、数字与类字面量（handler 使用 `Class<*>` / `java.lang.Class`）、
+ * `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`
+ * 形式的常量加载；显式 [constant] 为 `"true"` 或 `"false"` 时，会将 `ICONST_1` 或 `ICONST_0`
+ * 按 boolean 常量处理。
  *
  * ASM 方法要求：
  *
@@ -627,7 +628,8 @@ annotation class ModifyReturnValue(
  * - [expect] 用于调试期望命中数，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
- * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）；`"true"` / `"false"` 可匹配 boolean 常量
+ * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）；`"true"` / `"false"` 可匹配 boolean 常量；
+ * 类字面量可使用 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
  * @param ordinal 匹配常量序号；`-1` 表示修改全部匹配常量，`0` 及以上表示只修改第 N 个匹配常量
  * @param slice 切片范围；当前常量修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
