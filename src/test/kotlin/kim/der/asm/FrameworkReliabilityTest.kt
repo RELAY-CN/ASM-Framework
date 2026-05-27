@@ -3187,6 +3187,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantMatchesMethodHandleConstant() {
+        AsmRegistry.register(MethodHandleModifyConstantMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("MethodHandleConstantTarget", methodHandleConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MethodHandleConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance) as java.lang.invoke.MethodHandle
+
+        assertEquals("1a", result.invokeWithArguments(26))
+    }
+
+    @Test
     fun modifyConstantMatchesBipushIntConstant() {
         AsmRegistry.register(BipushModifyConstantMixin::class.java)
 
@@ -8516,6 +8529,23 @@ class FrameworkReliabilityTest {
             java.lang.invoke.MethodType.methodType(StringBuilder::class.java, Int::class.javaPrimitiveType)
     }
 
+    @AsmMixin("MethodHandleConstantTarget")
+    object MethodHandleModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/invoke/MethodHandle;",
+            constant = "java/lang/String.valueOf(I)Ljava/lang/String;",
+        )
+        @JvmStatic
+        fun modify(original: java.lang.invoke.MethodHandle): java.lang.invoke.MethodHandle {
+            require(original.invokeWithArguments(10) == "10")
+            return java.lang.invoke.MethodHandles.publicLookup().findStatic(
+                Integer::class.java,
+                "toHexString",
+                java.lang.invoke.MethodType.methodType(String::class.java, Int::class.javaPrimitiveType),
+            )
+        }
+    }
+
     @AsmMixin("BipushConstantTarget")
     object BipushModifyConstantMixin {
         @ModifyConstant(method = "value()I", constant = "7")
@@ -13251,6 +13281,35 @@ class FrameworkReliabilityTest {
         ).apply {
             visitCode()
             visitLdcInsn(org.objectweb.asm.Type.getMethodType("(I)Ljava/lang/String;"))
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun methodHandleConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MethodHandleConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "()Ljava/lang/invoke/MethodHandle;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn(
+                org.objectweb.asm.Handle(
+                    Opcodes.H_INVOKESTATIC,
+                    "java/lang/String",
+                    "valueOf",
+                    "(I)Ljava/lang/String;",
+                    false,
+                ),
+            )
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
             visitEnd()
