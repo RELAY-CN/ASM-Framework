@@ -26,19 +26,20 @@ import java.lang.reflect.Modifier
 /**
  * ModifyExpressionValue 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、字段读取、数组元素读取、数组长度、对象构造、类型转换或
- * `INSTANCEOF` 判断，
+ * 该注入器会匹配目标方法内的指定方法调用、字段读取、数组元素读取、数组长度、对象构造、类型转换、
+ * `INSTANCEOF` 判断或 `ATHROW` 抛异常指令，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
- * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF]；[InjectionPoint.FIELD]
+ * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
  * 可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值，
- * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值，[InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果
+ * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值，[InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果，
+ * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
- * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST] 与
- * [InjectionPoint.INSTANCEOF] 表达式使用 INVOKE 边界缩小匹配范围
+ * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
+ * [InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
