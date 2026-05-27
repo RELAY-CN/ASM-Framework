@@ -165,6 +165,7 @@ object RemoveInterfacesMixin
 handler 首参可以是 `CallbackInfo`。普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `THROW`
 指令点注入，可在 `CallbackInfo` 后按顺序接收目标方法参数前缀。
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
+引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入。`Shift.REPLACE` 按替换原调用处理，
 handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
 

@@ -185,6 +185,9 @@ fun beforeTrim(value: String) {
 }
 ```
 
+普通 `@AsmInject(INVOKE)` 的 `Shift.BEFORE` / `Shift.AFTER` handler 会先接收匹配调用参数前缀，
+再接收目标方法参数前缀；引用或数组参数可用父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
+
 `from` 边界之后、`to` 边界之前的调用点、字段读写指令、局部变量读写指令、类型转换指令或抛异常指令才会参与匹配，边界调用本身不会被注入；
 `ordinal` 会在切片内重新计数。
 

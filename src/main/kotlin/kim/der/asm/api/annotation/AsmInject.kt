@@ -20,8 +20,9 @@ package kim.der.asm.api.annotation
  * ## Handler 参数
  *
  * - HEAD、TAIL、RETURN 与普通指令点注入可在 [CallbackInfo] 后按顺序接收目标方法参数前缀。
- * - INVOKE 的 BEFORE/AFTER 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；实例调用的 receiver
- *   会被框架保存和恢复，但不会作为普通 handler 参数传入。
+ * - INVOKE 的 BEFORE/AFTER 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；引用或数组参数
+ *   可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。实例调用的 receiver 会被框架保存和恢复，
+ *   但不会作为普通 handler 参数传入。
  * - INVOKE 的 REPLACE 注入按替换原调用处理，handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
  *
  * ## 命中数契约
