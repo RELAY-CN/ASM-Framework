@@ -2280,6 +2280,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtInvokeAcceptsAssignableParentParameter() {
+        AsmRegistry.register(WrapOperationParentParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("original-call-parent", result)
+    }
+
+    @Test
     fun wrapOperationAtCastCanCallOriginalCastWithChangedValue() {
         AsmRegistry.register(WrapOperationCastMixin::class.java)
 
@@ -7546,6 +7558,27 @@ class FrameworkReliabilityTest {
             target.length
             value.length
             return operation.call("$prefix$count", value)
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object WrapOperationParentParamMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: CharSequence,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            value.length
+            return "${operation.call(target.toString(), value)}-parent"
         }
     }
 
