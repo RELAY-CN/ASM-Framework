@@ -3566,6 +3566,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtHeadAcceptsAssignableObjectReturnType() {
+        AsmRegistry.register(ModifyVariableAssignableReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CharSequenceVariableTarget", charSequenceVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CharSequenceVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", CharSequence::class.java).invoke(instance, "value")
+
+        assertEquals("variable-value", result.toString())
+    }
+
+    @Test
     fun modifyVariableExposesCountContractParameters() {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
@@ -8433,6 +8445,17 @@ class FrameworkReliabilityTest {
         fun modify(original: Any): String = "$original-any"
     }
 
+    @AsmMixin("CharSequenceVariableTarget")
+    object ModifyVariableAssignableReturnMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/CharSequence;)Ljava/lang/CharSequence;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: CharSequence): StringBuilder = StringBuilder("variable-$original")
+    }
+
     @AsmMixin("StaticVariableTarget")
     object ModifyVariableStaticParamMixin {
         @ModifyVariable(
@@ -9906,6 +9929,21 @@ class FrameworkReliabilityTest {
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "VariableTarget", null, "java/lang/Object", null)
         addDefaultConstructor(cw)
         cw.visitMethod(Opcodes.ACC_PUBLIC, "echo", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun charSequenceVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "CharSequenceVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "echo", "(Ljava/lang/CharSequence;)Ljava/lang/CharSequence;", null, null).apply {
             visitCode()
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
