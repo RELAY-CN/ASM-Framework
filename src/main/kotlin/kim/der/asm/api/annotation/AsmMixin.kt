@@ -485,7 +485,7 @@ annotation class WrapWithCondition(
  * ASM 方法要求：
  *
  * - 第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用 `Any` / `Object` 接收
- * - 除 [InjectionPoint.THROW] 外，返回类型必须与匹配表达式的值类型一致；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
+ * - primitive 返回类型必须与匹配表达式的值类型一致；引用类型表达式可返回匹配类型的子类型；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 方法调用目标的 [At.target] 必须指定调用签名，字段读取目标必须指定字段签名
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
