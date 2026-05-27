@@ -35,7 +35,7 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
  * 可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值，
  * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值，[InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果，
- * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`
+ * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`，handler 可返回 `Throwable` 或其子类
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
