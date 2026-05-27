@@ -7,6 +7,7 @@ package kim.der.asm.utils.transformer
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.Handle
+import org.objectweb.asm.ConstantDynamic
 import org.objectweb.asm.tree.*
 
 /**
@@ -139,6 +140,7 @@ object BytecodeUtil {
                         }
                     }
                     is Handle -> Type.getType("Ljava/lang/invoke/MethodHandle;")
+                    is ConstantDynamic -> Type.getType(cst.descriptor)
                     else -> null
                 }
             }
