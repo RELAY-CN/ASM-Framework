@@ -165,9 +165,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、NEW、CAST 与 INSTANCEOF
+     * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、NEW、CAST、INSTANCEOF 与 THROW
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前调用返回、字段读取、数组读取、数组长度、NEW、CAST 与 INSTANCEOF
+     * @param slice 切片范围；当前调用返回、字段读取、数组读取、数组长度、NEW、CAST、INSTANCEOF 与 THROW
      * 表达式改写支持 INVOKE 边界切片
      * @return ModifyExpressionValue 注入器
      *

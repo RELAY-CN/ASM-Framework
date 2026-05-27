@@ -382,14 +382,14 @@ handler 参数必须先按目标方法声明顺序接收原方法参数，下一
 
 ### @ModifyExpressionValue
 
-修改目标方法内匹配表达式产生的值。当前实现支持修改方法调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、数组元素读取值、数组长度值、`NEW` 对象构造完成后的实例、`CHECKCAST` 类型转换完成后的对象值，以及 `INSTANCEOF` 判断后的 boolean 结果，适合保留原操作逻辑、只调整表达式结果的场景。
+修改目标方法内匹配表达式产生的值。当前实现支持修改方法调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、数组元素读取值、数组长度值、`NEW` 对象构造完成后的实例、`CHECKCAST` 类型转换完成后的对象值、`INSTANCEOF` 判断后的 boolean 结果，以及 `ATHROW` 前即将抛出的异常对象，适合保留原操作逻辑、只调整表达式结果的场景。
 
 **参数：**
 
 - `method: String = ""` - 目标方法签名
-- `at: At = At(value = InjectionPoint.INVOKE)` - 表达式定位；当前支持 `INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`NEW`、`CAST` 与 `INSTANCEOF`
+- `at: At = At(value = InjectionPoint.INVOKE)` - 表达式定位；当前支持 `INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW`
 - `ordinal: Int = -1` - 表达式匹配序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
-- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` / `INVOKE_ASSIGN` 调用返回、`FIELD` 字段读取、数组元素读取、数组长度、`NEW`、`CAST` 与 `INSTANCEOF` 表达式支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` / `INVOKE_ASSIGN` 调用返回、`FIELD` 字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 要求的最小命中数；`0` 表示使用默认至少 1 次的显式契约语义
 - `expect: Int = 1` - 期望命中数；非默认值不一致时输出警告
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
@@ -397,7 +397,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数，下一
 
 `@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用 `Any` / `Object`
 接收，但返回类型仍必须与表达式类型一致。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。
-该注解不会替换原调用、字段读取、数组读取、构造器调用、类型转换或类型判断指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组长度使用 `at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`INSTANCEOF` 模式会在匹配类型判断后接收 `Boolean` 结果，二者的 `At.target` 均为类型 internal name 或 binary name。`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST` 与 `INSTANCEOF` 表达式可用 `slice.from` / `slice.to` 限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
+该注解不会替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断或抛异常指令，也不会接收原调用参数；字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组长度使用 `at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`INSTANCEOF` 模式会在匹配类型判断后接收 `Boolean` 结果，二者的 `At.target` 均为类型 internal name 或 binary name。`THROW` 模式会在 `ATHROW` 前接收即将抛出的 `Throwable`，handler 必须返回新的 `Throwable`。`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式可用 `slice.from` / `slice.to` 限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
 
 `@ModifyExpressionValue` 会按实际改写的表达式值数量计数。未设置 `ordinal` 时命中全部匹配表达式；
 设置 `ordinal` 时最多命中对应序号的 1 个表达式。显式设置 `require` / `allow` / 非默认 `expect` 时按实际表达式值修改数量校验契约，
