@@ -1333,6 +1333,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInvokeAcceptsAssignableObjectReturnType() {
+        AsmRegistry.register(ModifyExpressionValueAssignableReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "CharSequenceExpressionValueTarget",
+            charSequenceExpressionValueTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("CharSequenceExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance).toString()
+
+        assertEquals("raw-builder", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueWithTargetParamsMixin::class.java)
 
@@ -6298,6 +6314,19 @@ class FrameworkReliabilityTest {
         fun modify(original: Any): String = "$original-object"
     }
 
+    @AsmMixin("CharSequenceExpressionValueTarget")
+    object ModifyExpressionValueAssignableReturnMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/CharSequence;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "CharSequenceExpressionValueTarget.sequence()Ljava/lang/CharSequence;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: CharSequence): StringBuilder = StringBuilder("$original-builder")
+    }
+
     @AsmMixin("ExpressionValueParamTarget")
     object ModifyExpressionValueWithTargetParamsMixin {
         @ModifyExpressionValue(
@@ -11003,6 +11032,35 @@ class FrameworkReliabilityTest {
             visitCode()
             visitLdcInsn(" raw ")
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun charSequenceExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "CharSequenceExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/CharSequence;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "CharSequenceExpressionValueTarget",
+                "sequence",
+                "()Ljava/lang/CharSequence;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "sequence", "()Ljava/lang/CharSequence;", null, null).apply {
+            visitCode()
+            visitLdcInsn("raw")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
             visitEnd()
