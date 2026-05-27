@@ -81,8 +81,9 @@ class ModifyExpressionValueInjector(
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST and INSTANCEOF",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST, INSTANCEOF and THROW",
             )
         }
     }
@@ -334,6 +335,34 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, Type.BOOLEAN_TYPE)
             val il = buildExpressionValueModification(target, Type.BOOLEAN_TYPE, targetParamCount)
             target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectThrow(target: MethodNode): Int {
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ATHROW) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val throwableType = Type.getType(Throwable::class.java)
+            val targetParamCount = validateHandlerSignature(target, throwableType)
+            val il = buildExpressionValueModification(target, throwableType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
             injectionCount++
         }
 
