@@ -1346,7 +1346,31 @@ class WrapOperationInjector(
         if (original == handler) {
             return true
         }
-        return (original.sort == Type.OBJECT || original.sort == Type.ARRAY) && handler.sort >= Type.ARRAY
+        if (!original.isReferenceType() || !handler.isReferenceType()) {
+            return false
+        }
+        if (handler.sort == Type.OBJECT &&
+            (handler.internalName == "java/lang/Object" || handler.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val originalClass = loadReferenceClass(original)
+            originalClass.isAssignableFrom(loadReferenceClass(handler))
+        }.getOrDefault(false)
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun loadTargetMethodParameters(
