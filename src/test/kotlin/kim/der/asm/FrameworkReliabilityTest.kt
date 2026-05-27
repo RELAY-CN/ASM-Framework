@@ -312,6 +312,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueAcceptsAssignableParentParameter() {
+        AsmRegistry.register(ModifyReturnValueAssignableParentMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-parent", result)
+    }
+
+    @Test
     fun modifyReturnValueAcceptsAssignableObjectReturnType() {
         AsmRegistry.register(ModifyReturnValueAssignableReturnMixin::class.java)
 
@@ -5379,6 +5391,13 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "value()Ljava/lang/String;")
         @JvmStatic
         fun modify(original: Any): String = "$original-any"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ModifyReturnValueAssignableParentMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: CharSequence): String = "$original-parent"
     }
 
     @AsmMixin("CharSequenceReturnTarget")
