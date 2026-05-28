@@ -3775,6 +3775,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAllMethodsEnforcesRedirectCountContractAcrossTargetClass() {
+        AsmRegistry.register(RedirectAllAllowOneTrimMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("RedirectAllMultiTarget", redirectAllMultiTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
+        )
+    }
+
+    @Test
     fun kotlinObjectHandlerForStaticTargetUsesInstanceCallWhenNotJvmStatic() {
         AsmRegistry.register(ObjectInstanceStaticHeadMixin::class.java)
 
@@ -9132,6 +9147,20 @@ class FrameworkReliabilityTest {
         fun redirect(value: String): String = value
     }
 
+    @AsmMixin("RedirectAllMultiTarget")
+    @RedirectAllMethods
+    object RedirectAllAllowOneTrimMixin {
+        @Redirect(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
+    }
+
     @AsmMixin("StaticHeadTarget")
     object ObjectInstanceStaticHeadMixin {
         @AsmInject(method = "run()V")
@@ -10656,6 +10685,30 @@ class FrameworkReliabilityTest {
         cw.visitMethod(Opcodes.ACC_PUBLIC, "call", "()Ljava/lang/String;", null, null).apply {
             visitCode()
             visitLdcInsn(" value ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun redirectAllMultiTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "RedirectAllMultiTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "first", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" first ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "second", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" second ")
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
