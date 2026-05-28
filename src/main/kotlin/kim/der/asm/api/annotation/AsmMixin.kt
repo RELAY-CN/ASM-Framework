@@ -288,6 +288,8 @@ annotation class ModifyArgs(
  *
  * 用于修改目标方法内某次实例方法调用、实例字段读取或实例字段写入的 receiver（语义参考 Mixin Extras 的 `@ModifyReceiver`）。
  * handler 接收原 receiver 并返回新的 receiver；原调用参数或字段写入值会保持原顺序继续传给目标操作。
+ * 可省略 [method]，框架会按 handler 方法名、[At.target] 匹配的调用点或字段访问、receiver 类型、handler 签名和
+ * 后续目标方法参数前缀，在目标类中推断唯一同名方法；若存在多个兼容重载，需要显式声明 [method]。
  *
  * ASM 方法要求：
  *
@@ -301,7 +303,7 @@ annotation class ModifyArgs(
  * - [require] / [allow] 可约束实际 receiver 修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望 receiver 修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；可省略并按 handler 名称、receiver 操作点和 handler 签名推断唯一兼容目标
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
