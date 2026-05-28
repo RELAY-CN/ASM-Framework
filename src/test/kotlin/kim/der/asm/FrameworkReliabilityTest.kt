@@ -2688,6 +2688,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtCastWithoutTargetUsesHandlerTypeCompatibleCheckcast() {
+        AsmRegistry.register(AnyCastWrapOperationMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiCastInstructionTarget", multiCastInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiCastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("cast", Any::class.java, Any::class.java)
+
+        assertEquals("wrapped-raw-true", method.invoke(instance, StringBuilder("ignored"), "raw"))
+    }
+
+    @Test
     fun wrapOperationAtInstanceofCanCallOriginalCheckWithChangedValue() {
         AsmRegistry.register(WrapOperationInstanceofMixin::class.java)
 
@@ -8429,6 +8441,24 @@ class FrameworkReliabilityTest {
             operation: Operation<String>,
             input: Any,
         ): String = "wrapped-${operation.call(value.toString())}-${value === input}"
+    }
+
+    @AsmMixin("MultiCastInstructionTarget")
+    object AnyCastWrapOperationMixin {
+        @WrapOperation(
+            method = "cast(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST),
+        )
+        @JvmStatic
+        fun wrap(
+            value: Any,
+            operation: Operation<String>,
+            ignored: Any,
+            raw: Any,
+        ): String {
+            ignored.hashCode()
+            return "wrapped-${operation.call(value)}-${value === raw}"
+        }
     }
 
     @AsmMixin("InstanceofTarget")
