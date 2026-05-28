@@ -2848,9 +2848,15 @@ class TargetClassContext(
         annotation: Overwrite,
         copyMethodNames: Map<String, String>,
     ): Boolean {
-        val targetMethod = findTargetMethod(annotation.method)
+        val methodSignature =
+            if (annotation.method.isEmpty()) {
+                buildMethodSignature(method)
+            } else {
+                annotation.method
+            }
+        val targetMethod = findTargetMethod(methodSignature)
         if (targetMethod == null) {
-            throw IllegalStateException(buildMissingTargetMethodMessage(annotation.method))
+            throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
         }
 
         // 覆写方法：清空原方法体并替换为 asm 方法的内容
