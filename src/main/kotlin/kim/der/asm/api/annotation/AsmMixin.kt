@@ -812,7 +812,7 @@ annotation class Shadow(
  * - 目标字段不存在时转换失败。
  * - getter 返回类型、setter 参数类型必须与目标字段类型一致。
  * - 静态字段要求访问器方法也是静态方法；Kotlin `object` 中通常需要配合 `@JvmStatic`。
- * - 接口字段按 JVM 规则作为静态字段读取，当前只支持 getter。
+ * - 接口字段按 JVM 规则作为静态字段读取，当前只支持 getter；setter 会在转换阶段失败。
  * - setter 标记 [Mutable] 时只会移除目标类自身字段的 `final` 标志；继承字段不会被改写修饰符。
  * - 生成的方法若与目标类已有同名同描述符方法冲突，转换会失败。
  *
