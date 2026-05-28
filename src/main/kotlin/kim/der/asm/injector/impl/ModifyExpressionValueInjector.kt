@@ -411,6 +411,7 @@ class ModifyExpressionValueInjector(
                 false,
             ),
         )
+        addExpressionCastIfNeeded(il, expressionType)
 
         return il
     }
@@ -499,6 +500,11 @@ class ModifyExpressionValueInjector(
         if (!expressionType.isReferenceType() || !handlerReturnType.isReferenceType()) {
             return false
         }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
         return runCatching {
             val expressionClass = loadReferenceClass(expressionType)
             expressionClass.isAssignableFrom(asmMethod.returnType)
@@ -506,6 +512,16 @@ class ModifyExpressionValueInjector(
     }
 
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun addExpressionCastIfNeeded(
+        il: InsnList,
+        expressionType: Type,
+    ) {
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (expressionType != handlerReturnType && expressionType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, expressionType.internalName))
+        }
+    }
 
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
