@@ -159,6 +159,8 @@ object LoggingMixin {
 等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
+除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD`、`TAIL`、`RETURN`、`INVOKE BEFORE/AFTER`
+和指令点注入的 handler 返回值会被丢弃，不会改写目标方法返回结果。
 
 只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
