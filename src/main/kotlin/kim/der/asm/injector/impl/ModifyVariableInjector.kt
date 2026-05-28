@@ -29,7 +29,8 @@ import java.lang.reflect.Modifier
  * 优先按 JVM 局部变量槽位索引定位；未显式指定槽位时，可按 handler 参数类型与 [ordinal] 选择同类型参数、读取点或写入点。
  * HEAD 模式未指定槽位与序号时，仅在同类型入口参数唯一时自动推断该参数；多候选仍需显式指定 [ordinal]。
  * handler 第一个参数接收原变量值；显式指定槽位时，对象或数组变量可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
- * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原变量类型的子类型。后续可按顺序接收目标方法参数前缀；
+ * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原变量类型的子类型，也可用 `Any` 或 `Object`
+ * 作为泛型引用返回类型。后续可按顺序接收目标方法参数前缀；
  * 调用后会把返回的新值写回同一个槽位。
  *
  * @param injectionPoint 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
