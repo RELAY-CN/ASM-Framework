@@ -820,7 +820,7 @@ object RulesMixin {
 ```kotlin
 @AsmMixin("com/example/LegacyClass")
 object ModernizeMixin {
-    @Overwrite(method = "oldMethod()V")
+    @Overwrite
     @JvmStatic
     fun oldMethod() = println("Modern implementation")
 
@@ -836,6 +836,7 @@ object ModernizeMixin {
 ```
 
 `@Overwrite` 会把 handler 方法体复制到目标方法中，目标方法不存在或签名无法适配时会在转换阶段失败。
+省略 `method` 时，框架会按 handler 方法名与 JVM 描述符匹配目标方法；若需要覆盖不同签名或不同名称的方法，应显式指定完整方法签名。
 如果需要先为整类建立默认实现，再保留少量关键方法，可以把 `@ReplaceAllMethods` 放在同一个 Mixin 类上，
 再用 `@Overwrite` 覆盖指定方法：
 
