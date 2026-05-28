@@ -4654,6 +4654,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun accessorCanReadInheritedStaticField() {
+        AsmRegistry.register(InheritedStaticFieldAccessorMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InheritedStaticAccessorTarget", inheritedStaticAccessorTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val accessorMethod = classNode.methods.single { it.name == "getEra" }
+        val fieldRead = accessorMethod.instructions.toArray()
+            .filterIsInstance<org.objectweb.asm.tree.FieldInsnNode>()
+            .single { it.name == "ERA" }
+
+        assertEquals("java/util/Calendar", fieldRead.owner)
+        assertEquals(Opcodes.GETSTATIC, fieldRead.opcode)
+    }
+
+    @Test
     fun invokerMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingInvokerMixin::class.java)
 
@@ -10365,6 +10381,13 @@ class FrameworkReliabilityTest {
         fun getModCount(): Int = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("InheritedStaticAccessorTarget")
+    object InheritedStaticFieldAccessorMixin {
+        @Accessor("ERA")
+        @JvmStatic
+        fun getEra(): Int = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("InvokerConflictTarget")
     class ConflictingInvokerMixin {
         @Invoker("target")
@@ -13938,6 +13961,20 @@ class FrameworkReliabilityTest {
             visitMaxs(1, 1)
             visitEnd()
         }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun inheritedStaticAccessorTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_ABSTRACT,
+            "InheritedStaticAccessorTarget",
+            null,
+            "java/util/Calendar",
+            null,
+        )
         cw.visitEnd()
         return cw.toByteArray()
     }
