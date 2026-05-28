@@ -29,7 +29,8 @@ import java.lang.reflect.Modifier
 /**
  * WrapWithCondition 注入器。
  *
- * 该注入器会匹配目标方法内的 `void` 方法调用、字段写入或简单数组元素写入，并在原指令前插入 boolean handler。
+ * 该注入器会匹配目标方法内的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或简单数组元素写入，
+ * 并在原指令前插入 boolean handler。
  * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段写入值或数组写入栈参数并继续执行原指令，
  * 返回 `false` 时跳过原指令。
  *
@@ -48,10 +49,10 @@ class WrapWithConditionInjector(
     private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 在匹配的 `void` 方法调用、字段写入或数组元素写入前插入条件包裹逻辑。
+     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入前插入条件包裹逻辑。
      *
      * @param target 目标方法
-     * @return 至少包裹一个调用点、字段写入点或数组元素写入点时返回 `true`
+     * @return 至少包裹一个调用点、动态调用点、字段写入点或数组元素写入点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -59,10 +60,10 @@ class WrapWithConditionInjector(
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
     /**
-     * 在匹配的 `void` 方法调用、字段写入或数组元素写入前插入条件包裹逻辑，并返回实际包裹数量。
+     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入前插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
-     * @return 实际包裹的调用点、字段写入点或数组元素写入点数量
+     * @return 实际包裹的调用点、动态调用点、字段写入点或数组元素写入点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24

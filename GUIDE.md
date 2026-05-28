@@ -108,7 +108,7 @@ val transformedBytes = processor.transform(
 - **@ModifyReceiver** - 修改实例方法调用或实例字段访问 receiver
 - **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断
 - **@WrapMethod** - 用可调用原方法的 handler 包裹整个目标方法体
-- **@WrapWithCondition** - 按条件跳过 `void` 调用、字段写入或数组元素写入
+- **@WrapWithCondition** - 按条件跳过 `void` 调用、`invokedynamic` 调用、字段写入或数组元素写入
 - **@ModifyExpressionValue** - 修改表达式值
 - **@ModifyVariable** - 修改方法参数或局部变量
 - **@ModifyReturnValue** - 修改返回值
@@ -1027,11 +1027,11 @@ object ConditionalMixin {
 `CallbackInfo.cancel()` 需要 `@AsmInject(cancellable = true)`；漏写时会在 handler 调用期间抛出异常，避免补丁静默失效。
 非 `void` 目标方法可直接在可取消 HEAD 注入中调用 `callback.setReturnValue(value)`，该调用会同时取消原方法体。
 
-`@WrapWithCondition` 可用于按条件跳过 `void` 调用、字段写入或数组元素写入。字段写入模式需要使用
+`@WrapWithCondition` 可用于按条件跳过 `void` 调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入。字段写入模式需要使用
 `At(value = InjectionPoint.FIELD_ASSIGN, target = "...")`，`PUTFIELD` handler 参数为字段 owner 与待写入值，
 `PUTSTATIC` handler 参数只包含待写入值，后续仍可追加目标方法参数前缀。数组元素写入使用
 `args = ["array=set"]`，handler 参数为数组引用、`Int` 索引与待写入元素值，返回 `false` 时跳过原 `xASTORE`。
-调用、字段写入和数组元素写入都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内。
+动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。调用、字段写入和数组元素写入都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内。
 
 ### 场景 10: 修改返回值
 
