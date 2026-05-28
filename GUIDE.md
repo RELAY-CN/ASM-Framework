@@ -880,6 +880,7 @@ class AccessMixin {
 `@Shadow()` 默认按声明名匹配目标字段或方法；如果 ASM 侧需要使用别名，可直接写目标名，例如
 `@Shadow("actualSecret") private val secretAlias: String? = null`。兼容 Mixin 风格的 `shadow_` 前缀：
 `@Shadow("shadow_privateField")` 会匹配目标成员 `privateField`。
+Shadow 字段会沿可加载父类查找可继承字段，但 `@Mutable` 只会改写目标类自身字段的 `final` 标志。
 
 `@Accessor` 可按方法形态生成 getter 或 setter。getter 必须无参数并返回字段类型，
 setter 必须接收一个字段类型参数并返回 `void`。
@@ -1314,6 +1315,7 @@ Shadow 目标名称解析规则：
 - `@Shadow()` 使用声明名匹配目标成员
 - `@Shadow("shadow_name")` 去掉 `shadow_` 前缀后匹配目标成员 `name`
 - `@Shadow("actualName")` 直接匹配显式目标成员 `actualName`
+- Shadow 字段可匹配目标类自身字段或可加载父类中的可继承字段
 
 ### 8. 性能考虑
 
