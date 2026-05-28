@@ -238,21 +238,23 @@ annotation class ModifyArg(
 /**
  * 修改调用参数组注解。
  *
- * 用于修改目标方法内某次方法调用或构造器调用的整组参数（语义参考 Mixin 的 `@ModifyArgs`）。当需要同时改写
+ * 用于修改目标方法内某次方法调用、构造器调用或 `invokedynamic` 调用的整组参数（语义参考 Mixin 的 `@ModifyArgs`）。当需要同时改写
  * 同一个调用点的多个参数时，优先使用该注解，而不是叠加多个 [ModifyArg]。
  *
  * ASM 方法要求：
  *
  * - 第一个参数必须是 [Args]，用于读取和写回匹配调用点的参数
  * - 构造器调用使用 `<init>` 目标，且 [Args] 只包含构造器参数，不包含未初始化 receiver
+ * - `invokedynamic` 调用没有 receiver，且 [Args] 只包含调用点描述符中的参数
  * - handler 必须返回 `void`
  * - 后续参数可按顺序接收目标方法参数前缀
- * - [At.value] 必须为 [InjectionPoint.INVOKE]，并通过 [At.target] 指定要匹配的方法调用或构造器调用
+ * - [At.value] 必须为 [InjectionPoint.INVOKE]，并通过 [At.target] 指定要匹配的方法调用、构造器调用或 `invokedynamic` 调用
+ * - `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配
  * - [require] / [allow] 可约束实际参数组修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数组修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
- * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
+ * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
  * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
