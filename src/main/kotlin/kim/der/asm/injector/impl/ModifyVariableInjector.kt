@@ -32,7 +32,8 @@ import java.lang.reflect.Modifier
  * handler 第一个参数接收原变量值；显式指定槽位时，对象或数组变量可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
  * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原变量类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型。后续可按顺序接收目标方法参数前缀；
- * 调用后会把返回的新值写回同一个槽位。
+ * 调用后会把返回的新值写回同一个槽位。显式槽位的引用变量会尽量通过目标方法参数、局部变量表与相邻字节码用途恢复真实槽位类型，
+ * 避免 handler 使用 `Any` / `Object` 接收时把局部变量栈图退化为 `Object`。
  *
  * @param injectionPoint 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param variableIndex 要修改的 JVM 局部变量槽位索引
