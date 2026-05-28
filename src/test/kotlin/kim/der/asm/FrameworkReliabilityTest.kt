@@ -4684,6 +4684,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokerCanCallInheritedMethod() {
+        AsmRegistry.register(InheritedMethodInvokerMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InheritedAccessorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getMethod("add", Any::class.java).invoke(instance, "entry")
+        val result = clazz.getMethod("callSize").invoke(instance)
+
+        assertEquals(1, result)
+    }
+
+    @Test
     fun invokerMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingInvokerMixin::class.java)
 
@@ -10414,6 +10428,12 @@ class FrameworkReliabilityTest {
         @Accessor("ERA")
         @JvmStatic
         fun getEra(): Int = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("InheritedAccessorTarget")
+    class InheritedMethodInvokerMixin {
+        @Invoker("size")
+        fun callSize(): Int = throw UnsupportedOperationException()
     }
 
     @AsmMixin("InvokerConflictTarget")
