@@ -4485,6 +4485,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtStoreAcceptsObjectHandlerParameterByLocalIndex() {
+        AsmRegistry.register(ModifyVariableStoreObjectParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("stored-object-local", result)
+    }
+
+    @Test
     fun modifyVariableAtStoreSelectsStoredLocalVariableByTypeOrdinal() {
         AsmRegistry.register(ModifyVariableStoreOrdinalMixin::class.java)
 
@@ -4583,6 +4595,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("loaded-local", result)
+    }
+
+    @Test
+    fun modifyVariableAtLoadAcceptsObjectHandlerParameterByLocalIndex() {
+        AsmRegistry.register(ModifyVariableLoadObjectParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("LoadVariableTarget", loadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("loaded-object-local", result)
     }
 
     @Test
@@ -10379,6 +10403,17 @@ class FrameworkReliabilityTest {
         fun modify(original: String): Any = "stored-generic-$original"
     }
 
+    @AsmMixin("StoreVariableTarget")
+    object ModifyVariableStoreObjectParameterMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): String = "stored-object-$original"
+    }
+
     @AsmMixin("StoreOrdinalVariableTarget")
     object ModifyVariableStoreOrdinalMixin {
         @ModifyVariable(
@@ -10462,6 +10497,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "loaded-$original"
+    }
+
+    @AsmMixin("LoadVariableTarget")
+    object ModifyVariableLoadObjectParameterMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): String = "loaded-object-$original"
     }
 
     @AsmMixin("LoadVariableParamTarget")
