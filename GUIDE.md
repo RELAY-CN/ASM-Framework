@@ -694,6 +694,7 @@ object ValidationMixin {
 通过 `FIELD_ASSIGN + args = ["array=set"]` 指定，handler 接收数组引用、`Int` 索引、待写入元素值与
 `Operation<Unit>`；数组长度模式通过 `FIELD + args = ["array=length"]` 指定，handler 接收数组引用与
 `Operation<Int>`；类型转换模式通过 `CAST` 与类型目标指定，handler 接收待转换对象与 `Operation<T>`，
+省略类型目标时会按 handler 返回类型筛选兼容的 `CHECKCAST`，不兼容目标不计入 `ordinal` 或命中数，
 `operation.call(value)` 会执行原始 `CHECKCAST` 语义；类型判断模式通过 `INSTANCEOF` 与类型目标指定，
 handler 接收被判断对象与 `Operation<Boolean>`，`operation.call(value)` 会执行原始 `INSTANCEOF` 语义。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
 参数前缀；handler 参数接收引用或数组栈值、目标方法参数时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
