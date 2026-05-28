@@ -364,6 +364,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueAcceptsZeroParameterInstanceHandler() {
+        AsmRegistry.register(ModifyReturnValueZeroParameterInstanceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("constant", result)
+    }
+
+    @Test
     fun modifyReturnValueInfersTargetWhenMethodIsOmitted() {
         AsmRegistry.register(InferredModifyReturnValueMixin::class.java)
 
@@ -6292,6 +6304,12 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "value()Ljava/lang/String;")
         @JvmStatic
         fun modify(original: Any): Any = "$original-object"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ModifyReturnValueZeroParameterInstanceMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/String;")
+        fun modify(): String = "constant"
     }
 
     @AsmMixin("ReturnTarget")
