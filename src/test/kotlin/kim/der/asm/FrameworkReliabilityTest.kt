@@ -1437,6 +1437,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionRejectsConstructorInvokeCall() {
+        AsmRegistry.register(WrapConditionConstructorCallMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("does not support constructor calls") == true,
+        )
+    }
+
+    @Test
     fun wrapWithConditionWithNonBooleanHandlerFailsDuringTransform() {
         AsmRegistry.register(WrapConditionNonBooleanHandlerMixin::class.java)
 
@@ -7534,6 +7549,22 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun shouldRun(target: String): Boolean {
+            target.length
+            return false
+        }
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object WrapConditionConstructorCallMixin {
+        @WrapWithCondition(
+            method = "create()Ljava/lang/StringBuilder;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/StringBuilder.<init>()V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(target: StringBuilder): Boolean {
             target.length
             return false
         }
