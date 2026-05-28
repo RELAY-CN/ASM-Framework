@@ -2546,6 +2546,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodInfersTargetWhenHandlerUsesGenericReferenceReturn() {
+        AsmRegistry.register(InferredWrapMethodGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapMethodAssignabilityTarget", wrapMethodAssignabilityTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapMethodAssignabilityTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java).invoke(null, "raw")
+
+        assertEquals("generic:raw!", result)
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
@@ -8121,6 +8132,16 @@ class FrameworkReliabilityTest {
             prefix: CharSequence,
             operation: Operation<String>,
         ): String = "inferred:${operation.call(prefix.toString())}"
+    }
+
+    @AsmMixin("WrapMethodAssignabilityTarget")
+    object InferredWrapMethodGenericReturnMixin {
+        @WrapMethod
+        @JvmStatic
+        fun value(
+            prefix: String,
+            operation: Operation<String>,
+        ): Any = "generic:${operation.call(prefix)}"
     }
 
     @AsmMixin("ModifyReceiverParamTarget")
