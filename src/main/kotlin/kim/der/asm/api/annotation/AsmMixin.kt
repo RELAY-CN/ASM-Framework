@@ -344,7 +344,8 @@ annotation class ModifyReceiver(
  * 与类型目标指定，当前支持常见 `NEW/DUP/args/<init>` 形态。
  * 类型转换通过 [InjectionPoint.CAST] 与类型 internal name 或 binary name 指定；省略 [At.target] 时会按
  * handler 返回类型筛选兼容的 `CHECKCAST`，不兼容目标不计入 [ordinal] 或命中数。
- * 类型判断通过 [InjectionPoint.INSTANCEOF] 与类型 internal name 或 binary name 指定。
+ * 类型判断通过 [InjectionPoint.INSTANCEOF] 与类型 internal name 或 binary name 指定；省略 [At.target] 时会匹配
+ * 切片内全部 `INSTANCEOF` 判断。
  *
  * ASM 方法要求：
  *
@@ -369,7 +370,8 @@ annotation class ModifyReceiver(
  * - [At.value] 必须为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  *   [InjectionPoint.NEW] 或 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]，并通过 [At.target]
  *   指定要匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、产生数组引用的字段、构造类型或类型目标；
- *   [InjectionPoint.CAST] 可省略 [At.target]，按 handler 返回类型筛选兼容 `CHECKCAST`
+ *   [InjectionPoint.CAST] 可省略 [At.target]，按 handler 返回类型筛选兼容 `CHECKCAST`；
+ *   [InjectionPoint.INSTANCEOF] 可省略 [At.target]，匹配切片内全部类型判断
  * - [method] 为空时会按 handler 名称、操作点和 [Operation] handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
  * @param method 目标方法签名；为空时按 handler 名称、操作点和 [Operation] 签名兼容规则推断唯一同名目标方法
