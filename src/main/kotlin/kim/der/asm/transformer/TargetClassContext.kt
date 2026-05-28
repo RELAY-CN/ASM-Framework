@@ -927,7 +927,7 @@ class TargetClassContext(
 
     private fun findAccessorTargetField(fieldName: String): AccessorTargetField? {
         classNode.fields.find { it.name == fieldName }?.let {
-            return AccessorTargetField(className, it)
+            return AccessorTargetField(className, it, isInterfaceOwner = false)
         }
         return findInheritedAccessorTargetField(fieldName)
     }
@@ -938,7 +938,7 @@ class TargetClassContext(
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             parentClass.fields.find { it.name == fieldName && isAccessorInheritedFieldVisible(it) }?.let {
-                return AccessorTargetField(parentClass.name, it)
+                return AccessorTargetField(parentClass.name, it, isInterfaceOwner = false)
             }
             interfaceNames += parentClass.interfaces
             parentName = parentClass.superName
@@ -957,7 +957,7 @@ class TargetClassContext(
             }
             val interfaceClass = loadParentClass(interfaceName) ?: continue
             interfaceClass.fields.find { it.name == fieldName && isAccessorInheritedInterfaceFieldVisible(it) }?.let {
-                return AccessorTargetField(interfaceName, it)
+                return AccessorTargetField(interfaceName, it, isInterfaceOwner = true)
             }
             findInterfaceAccessorTargetField(interfaceClass.interfaces, fieldName, visited)?.let { return it }
         }
@@ -1121,6 +1121,9 @@ class TargetClassContext(
                 throw IllegalStateException("Accessor getter return type ($returnType) must match field type ($fieldType)")
             }
         } else {
+            if (targetField.isInterfaceOwner) {
+                throw IllegalStateException("Accessor setter cannot target inherited interface field $fieldName")
+            }
             // Setter 必须返回 void 且有一个参数
             val returnType = Type.getReturnType(asmMethod)
             if (returnType != Type.VOID_TYPE) {
@@ -1190,6 +1193,7 @@ class TargetClassContext(
     private data class AccessorTargetField(
         val owner: String,
         val field: FieldNode,
+        val isInterfaceOwner: Boolean,
     )
 
     /**
