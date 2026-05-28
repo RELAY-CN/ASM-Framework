@@ -1246,7 +1246,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyVariable,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveModifyVariableTargetMethod(method, annotation)
         val injector =
             AsmInjectorFactory.createModifyVariableInjector(
                 method,
@@ -1262,15 +1262,206 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@ModifyVariable",
             method,
-            annotation.method,
+            methodSignature,
         )
+    }
+
+    private fun resolveModifyVariableTargetMethod(
+        method: Method,
+        annotation: ModifyVariable,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    isModifyVariableTargetCompatible(method, annotation, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@ModifyVariable handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun isModifyVariableTargetCompatible(
+        handlerMethod: Method,
+        annotation: ModifyVariable,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val variableType = resolveModifyVariableType(handlerMethod, annotation, targetMethod)
+            validateModifyVariableHandlerSignature(handlerMethod, targetMethod, variableType)
+        }.isSuccess
+
+    private fun resolveModifyVariableType(
+        handlerMethod: Method,
+        annotation: ModifyVariable,
+        targetMethod: MethodNode,
+    ): Type {
+        val handlerParams = Type.getArgumentTypes(handlerMethod)
+        if (handlerParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@ModifyVariable handler ${handlerMethod.name} must take at least one argument for the original variable value",
+            )
+        }
+
+        return when (annotation.at.value) {
+            InjectionPoint.HEAD -> resolveModifyVariableHeadType(annotation, targetMethod, handlerParams[0])
+            InjectionPoint.LOAD,
+            InjectionPoint.STORE,
+            -> handlerParams[0]
+            else -> throw IllegalArgumentException(
+                "@ModifyVariable currently supports only HEAD, LOAD and STORE injection points",
+            )
+        }
+    }
+
+    private fun resolveModifyVariableHeadType(
+        annotation: ModifyVariable,
+        targetMethod: MethodNode,
+        handlerVariableType: Type,
+    ): Type {
+        val variables = collectModifyVariableHeadParameters(targetMethod)
+        val variable =
+            if (annotation.index >= 0) {
+                variables.find { it.index == annotation.index }
+            } else {
+                val matchingVariables = variables.filter { it.type == handlerVariableType }
+                if (annotation.ordinal < 0) {
+                    matchingVariables.singleOrNull()
+                } else {
+                    matchingVariables.getOrNull(annotation.ordinal)
+                }
+            }
+        return variable?.type
+            ?: throw IllegalArgumentException(
+                "@ModifyVariable cannot resolve HEAD variable: index=${annotation.index}, " +
+                    "ordinal=${annotation.ordinal}, type=$handlerVariableType",
+            )
+    }
+
+    private fun collectModifyVariableHeadParameters(targetMethod: MethodNode): List<ModifyVariableHeadVariable> {
+        val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
+        var slot = if (isStatic) 0 else 1
+        return buildList {
+            for (argumentType in Type.getArgumentTypes(targetMethod.desc)) {
+                add(ModifyVariableHeadVariable(slot, argumentType))
+                slot += argumentType.size
+            }
+        }
+    }
+
+    private data class ModifyVariableHeadVariable(
+        val index: Int,
+        val type: Type,
+    )
+
+    private fun validateModifyVariableHandlerSignature(
+        handlerMethod: Method,
+        targetMethod: MethodNode,
+        variableType: Type,
+    ) {
+        val handlerParams = Type.getArgumentTypes(handlerMethod)
+        if (handlerParams.isEmpty() || !isModifyVariableParameterCompatible(variableType, handlerParams[0])) {
+            throw IllegalArgumentException(
+                "@ModifyVariable handler ${handlerMethod.name} first parameter must be $variableType " +
+                    "or compatible Object/Any, actual ${handlerParams.toList()}",
+            )
+        }
+
+        val handlerReturnType = Type.getReturnType(handlerMethod)
+        if (!isModifyVariableReturnCompatible(variableType, handlerReturnType, handlerMethod.returnType)) {
+            throw IllegalArgumentException(
+                "@ModifyVariable handler ${handlerMethod.name} return type $handlerReturnType " +
+                    "must match variable type $variableType",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        val requestedTargetParamCount = handlerParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@ModifyVariable handler ${handlerMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${targetMethod.name}${targetMethod.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = handlerParams[index + 1]
+            if (!isModifyVariableParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@ModifyVariable handler ${handlerMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+    }
+
+    private fun isModifyVariableParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
+        }
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
+    }
+
+    private fun isModifyVariableReturnCompatible(
+        variableType: Type,
+        handlerReturnType: Type,
+        handlerReturnClass: Class<*>,
+    ): Boolean {
+        if (variableType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (!variableType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val variableClass = loadReferenceClass(variableType)
+            variableClass.isAssignableFrom(handlerReturnClass)
+        }.getOrDefault(false)
     }
 
     /**
