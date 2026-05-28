@@ -638,6 +638,42 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun headInjectionDropsUnusedHandlerReturnValueOnNonVoidTarget() {
+        AsmRegistry.register(HeadReturningHandlerOnReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
+    fun tailInjectionDropsUnusedHandlerReturnValueOnNonVoidTarget() {
+        AsmRegistry.register(TailReturningHandlerOnReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
+    fun returnInjectionDropsUnusedHandlerReturnValueOnNonVoidTarget() {
+        AsmRegistry.register(ReturnReturningHandlerOnReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value", result)
+    }
+
+    @Test
     fun invokeBeforeInjectionMapsStaticCallArguments() {
         AsmRegistry.register(InvokeBeforeStaticCallArgumentMixin::class.java)
 
@@ -6422,6 +6458,27 @@ class FrameworkReliabilityTest {
     @AsmMixin("StrictTarget")
     object ReturnWideReturningHandlerMixin {
         @AsmInject(method = "keep()V", target = InjectionPoint.RETURN)
+        @JvmStatic
+        fun inject(): Long = 1L
+    }
+
+    @AsmMixin("ReturnTarget")
+    object HeadReturningHandlerOnReturnTargetMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.HEAD)
+        @JvmStatic
+        fun inject(): Long = 1L
+    }
+
+    @AsmMixin("ReturnTarget")
+    object TailReturningHandlerOnReturnTargetMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.TAIL)
+        @JvmStatic
+        fun inject(): Double = 1.0
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ReturnReturningHandlerOnReturnTargetMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
         @JvmStatic
         fun inject(): Long = 1L
     }
