@@ -1226,7 +1226,7 @@ class TargetClassContext(
         annotation: AsmInject,
         copyMethodNames: Map<String, String>,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveAsmInjectTargetMethod(method, annotation, copyMethodNames)
 
         // 如果设置了 inline=true，则内联 ASM 方法的字节码
         val injectionCount =
@@ -1242,9 +1242,56 @@ class TargetClassContext(
             injectionCount,
             annotation,
             method,
-            annotation.method,
+            methodSignature,
         )
     }
+
+    private fun resolveAsmInjectTargetMethod(
+        method: Method,
+        annotation: AsmInject,
+        copyMethodNames: Map<String, String>,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    hasCompatibleAsmInjectCandidate(method, annotation, copyMethodNames, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@AsmInject handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun hasCompatibleAsmInjectCandidate(
+        method: Method,
+        annotation: AsmInject,
+        copyMethodNames: Map<String, String>,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val clone = cloneTargetMethod(targetMethod)
+            if (annotation.inline) {
+                injectInlineCode(clone, method, annotation, copyMethodNames) > 0
+            } else {
+                val injector = AsmInjectorFactory.createInjector(annotation.target, method, asmInfo)
+                injector.injectCount(clone) > 0
+            }
+        }.getOrDefault(false)
 
     /**
      * 内联 ASM 方法的字节码到目标方法
