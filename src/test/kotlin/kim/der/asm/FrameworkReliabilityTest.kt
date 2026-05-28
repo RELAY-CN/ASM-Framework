@@ -3898,6 +3898,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtHeadInfersSingleParameterByHandlerType() {
+        AsmRegistry.register(ModifyVariableInferredHeadParamMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("inferred-value", result)
+    }
+
+    @Test
     fun modifyVariableExposesCountContractParameters() {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
@@ -9249,6 +9261,16 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: CharSequence): StringBuilder = StringBuilder("variable-$original")
+    }
+
+    @AsmMixin("VariableTarget")
+    object ModifyVariableInferredHeadParamMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "inferred-$original"
     }
 
     @AsmMixin("StaticVariableTarget")
