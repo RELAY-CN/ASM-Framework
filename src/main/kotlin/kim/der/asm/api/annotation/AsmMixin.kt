@@ -453,6 +453,7 @@ annotation class WrapMethod(
  * - 静态字段写入的 handler 参数接收待写入值
  * - 数组元素写入的 handler 参数先接收数组引用、`Int` 索引，再接收待写入元素值
  * - 后续参数可按顺序接收目标方法参数前缀
+ * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
  * - [At.target] 必须指定要匹配的方法调用、动态调用或字段签名
  *
  * @param method 目标方法签名

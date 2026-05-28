@@ -1038,7 +1038,7 @@ object ConditionalMixin {
 `At(value = InjectionPoint.FIELD_ASSIGN, target = "...")`，`PUTFIELD` handler 参数为字段 owner 与待写入值，
 `PUTSTATIC` handler 参数只包含待写入值，后续仍可追加目标方法参数前缀。数组元素写入使用
 `args = ["array=set"]`，handler 参数为数组引用、`Int` 索引与待写入元素值，返回 `false` 时跳过原 `xASTORE`。
-动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。调用、字段写入和数组元素写入都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内。
+动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。引用类型参数可使用精确类型、父类型或 `Any` / `Object`；原始类型参数仍按 JVM 栈类型匹配。调用、字段写入和数组元素写入都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内。
 
 ### 场景 10: 修改返回值
 
