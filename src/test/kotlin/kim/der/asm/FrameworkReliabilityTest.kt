@@ -662,6 +662,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun headInjectionEmitsPopForUnusedHandlerReturnValueOnNonVoidTarget() {
+        AsmRegistry.register(HeadReturningHandlerOnReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val method = readClass(transformed).methods.single { it.name == "value" && it.desc == "()Ljava/lang/String;" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(HeadReturningHandlerOnReturnTargetMixin::class.java)
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode && it.owner == mixinOwner && it.name == "inject"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(Opcodes.POP2, instructions[handlerCallIndex + 1].opcode)
+    }
+
+    @Test
     fun tailInjectionDropsUnusedHandlerReturnValueOnNonVoidTarget() {
         AsmRegistry.register(TailReturningHandlerOnReturnTargetMixin::class.java)
 
@@ -683,6 +699,22 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("value", result)
+    }
+
+    @Test
+    fun returnInjectionEmitsPopForUnusedHandlerReturnValueOnNonVoidTarget() {
+        AsmRegistry.register(ReturnReturningHandlerOnReturnTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val method = readClass(transformed).methods.single { it.name == "value" && it.desc == "()Ljava/lang/String;" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ReturnReturningHandlerOnReturnTargetMixin::class.java)
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode && it.owner == mixinOwner && it.name == "inject"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(Opcodes.POP2, instructions[handlerCallIndex + 1].opcode)
     }
 
     @Test
