@@ -1141,6 +1141,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredWrapConditionStaticTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionStaticTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertEquals(null, result)
+    }
+
+    @Test
     fun wrapWithConditionAtInvokeAllowsStaticVoidCallWhenTrue() {
         AsmRegistry.register(WrapConditionStaticAllowMixin::class.java)
 
@@ -6802,6 +6813,21 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun shouldRun(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object InferredWrapConditionStaticTargetMixin {
+        @WrapWithCondition(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun run(value: String): Boolean {
             value.length
             return false
         }
