@@ -2675,10 +2675,9 @@ class TargetClassContext(
         method: Method,
         annotation: Redirect,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
-
         // 组合 target 和 at.target 来构建完整的方法签名
         val redirectTarget = buildRedirectTarget(annotation.target, annotation.at.target)
+        val (targetMethod, methodSignature) = resolveRedirectTargetMethod(method, annotation, redirectTarget)
 
         val injector =
             AsmInjectorFactory.createRedirectInjector(
@@ -2696,16 +2695,67 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@Redirect",
             method,
-            annotation.method,
+            methodSignature,
         )
     }
+
+    private fun resolveRedirectTargetMethod(
+        method: Method,
+        annotation: Redirect,
+        redirectTarget: String,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    hasCompatibleRedirectCandidate(method, annotation, redirectTarget, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@Redirect handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun hasCompatibleRedirectCandidate(
+        method: Method,
+        annotation: Redirect,
+        redirectTarget: String,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val injector =
+                AsmInjectorFactory.createRedirectInjector(
+                    method,
+                    asmInfo,
+                    redirectTarget,
+                    annotation.at.value,
+                    annotation.ordinal,
+                    annotation.slice,
+                    annotation.at.args,
+                )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     /**
      * 构建 Redirect 目标方法签名
