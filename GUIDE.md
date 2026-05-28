@@ -721,6 +721,7 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`。
 `invokedynamic` 调用目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；字符串拼接可匹配
 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(...)`。
+省略 `method` 时，handler 名称必须与目标方法名一致，框架会按表达式定位、表达式值类型、返回类型和追加目标参数匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 `INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式值修改可用
 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断或抛异常候选点才会参与匹配，
 边界调用本身不会被改写，`ordinal` 会在切片内重新计数。
@@ -1237,12 +1238,11 @@ fun normalizeStoredLocal(value: String): String = value.trim()
 fun fallbackLookupResult(original: String?): String = original ?: "default"
 
 @ModifyExpressionValue(
-    method = "format(Ljava/lang/String;)Ljava/lang/String;",
     at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"),
     require = 1,
     allow = 1,
 )
-fun normalizeTrimResult(original: String): String = original.lowercase()
+fun format(original: String): String = original.lowercase()
 
 @ModifyConstant(method = "maxPlayers()I", constant = "20", require = 1, allow = 1)
 fun expandLimit(original: Int): Int = original * 2
