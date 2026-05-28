@@ -450,13 +450,12 @@ object ValidationMixin {
     ): String = operation.call(prefix.trim(), count + 1).uppercase()
 
     @WrapWithCondition(
-        method = "notify(Ljava/lang/String;I)V",
         at = At(
             value = InjectionPoint.INVOKE,
             target = "com/example/Audit.emit(Ljava/lang/String;)V",
         ),
     )
-    fun shouldEmitAudit(message: String, prefix: String, count: Int): Boolean =
+    fun notify(message: String, prefix: String, count: Int): Boolean =
         count > 0 && message.startsWith(prefix)
 
     @WrapWithCondition(
@@ -713,6 +712,7 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 数组写入模式通过 `args = ["array=set"]` 指定，并让 handler 接收数组引用、`Int` 索引与待写入元素值，
 后续都可接收目标方法参数前缀。`INVOKE`、`FIELD_ASSIGN` 与 `array=set` 条件包裹可用 `Slice` 限制匹配范围；`from` 边界之后、
 `to` 边界之前的调用、字段写入或数组元素写入才会参与匹配，边界调用本身不会被包裹，`ordinal` 会在切片内重新计数。关键条件包裹可设置 `require` / `allow` / `expect`，按实际插入条件判断的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
+省略 `method` 时，handler 名称必须与目标方法名一致，框架会按条件包裹操作点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 `@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断或抛异常指令但
 改写表达式结果的场景，handler 第一个参数接收匹配普通调用或 `invokedynamic` 调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象、转换后的对象、`INSTANCEOF` 判断结果或即将抛出的 `Throwable` 并
 返回同类型新值，后续参数可接收目标方法参数前缀；primitive 表达式的返回类型必须与表达式类型一致，引用类型表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类；对象或数组表达式的首参可声明为原值类型的父类、接口、`Any` 或 `Object`，
@@ -1213,12 +1213,11 @@ fun wrapRenderConcat(
 ): String = operation.call(receiver.trim(), value)
 
 @WrapWithCondition(
-    method = "notify(Ljava/lang/String;)V",
     at = At(value = InjectionPoint.INVOKE, target = "com/example/Audit.emit(Ljava/lang/String;)V"),
     require = 1,
     allow = 1,
 )
-fun shouldEmitAudit(message: String): Boolean = message.isNotBlank()
+fun notify(message: String): Boolean = message.isNotBlank()
 
 @ModifyVariable(
     method = "normalize(Ljava/lang/String;)Ljava/lang/String;",

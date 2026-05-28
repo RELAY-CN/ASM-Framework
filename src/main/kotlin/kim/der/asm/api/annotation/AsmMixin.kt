@@ -463,8 +463,9 @@ annotation class WrapMethod(
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
  * - [At.target] 必须指定要匹配的方法调用、动态调用或字段签名
+ * - [method] 为空时会按 handler 名称、条件包裹操作点和 handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN] 模式支持 INVOKE 边界切片
