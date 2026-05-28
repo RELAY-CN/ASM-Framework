@@ -3765,6 +3765,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantSkipsSameTextConstantWithIncompatibleJvmType() {
+        AsmRegistry.register(MixedNumericModifyConstantMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("MixedNumericConstantTarget", mixedNumericConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedNumericConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(42, result)
+    }
+
+    @Test
     fun shadowCanUseExplicitTargetNamesForOverwriteReferences() {
         AsmRegistry.register(ShadowAliasOverwriteMixin::class.java)
 
@@ -9874,6 +9887,13 @@ class FrameworkReliabilityTest {
         fun modify(original: Int): Int = original + 35
     }
 
+    @AsmMixin("MixedNumericConstantTarget")
+    object MixedNumericModifyConstantMixin {
+        @ModifyConstant(method = "value()I", constant = "1")
+        @JvmStatic
+        fun modify(original: Int): Int = original + 41
+    }
+
     @AsmMixin("MultiIntConstantTarget")
     object RequireThreeModifyConstantMixin {
         @ModifyConstant(method = "value()I", constant = "7", require = 3)
@@ -15179,6 +15199,23 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ILOAD, 1)
             visitVarInsn(Opcodes.ILOAD, 2)
             visitInsn(Opcodes.IADD)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun mixedNumericConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedNumericConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()I", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.LCONST_1)
+            visitVarInsn(Opcodes.LSTORE, 1)
+            visitInsn(Opcodes.ICONST_1)
             visitInsn(Opcodes.IRETURN)
             visitMaxs(2, 3)
             visitEnd()
