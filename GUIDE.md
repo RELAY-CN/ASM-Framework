@@ -721,13 +721,13 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 返回同类型新值，后续参数可接收目标方法参数前缀；primitive 表达式的返回类型必须与表达式类型一致，引用类型表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类；对象或数组表达式的首参可声明为原值类型的父类、接口、`Any` 或 `Object`，
 它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，数组读取模式通过 `args = ["array=get"]`
-指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`。
+指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`，且后续参数仍可接收目标方法参数前缀。
 `invokedynamic` 调用目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；字符串拼接可匹配
 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(...)`。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按表达式定位、表达式值类型、返回类型和追加目标参数匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 `INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式值修改可用
 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断或抛异常候选点才会参与匹配，
-边界调用本身不会被改写，`ordinal` 会在切片内重新计数。
+边界调用本身不会被改写，`THROW` 只会改写边界内的 `ATHROW` 候选，`ordinal` 会在切片内重新计数。
 关键表达式值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的表达式值数量计数。
 
 `@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`LOAD` / `STORE` 模式可用 `Slice` 限制读取点或写入点匹配范围；`from` 边界之后、`to` 边界之前的读取或写入才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象或数组变量可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。后续参数可继续接收目标方法参数前缀；对象或数组目标方法参数同样可声明为原值类型的父类、接口、`Any` 或 `Object`。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点；`HEAD` 模式同类型入口参数唯一时可自动推断，存在多个同类型入口参数或在 `LOAD` / `STORE` 模式选择同类型读写点时，用 `ordinal` 选择第 N 个同类型匹配项，因此应使用实际变量类型参与自动匹配。省略 `method` 时，handler 名称必须与目标方法名一致，框架会按变量类型、返回类型和追加目标参数匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。关键变量补丁可设置 `require` / `allow` / `expect`，`HEAD` 按入口改写计 1 次，`LOAD` / `STORE` 按实际改写的读写点数量计数。`HEAD` 当前不使用 `slice`。

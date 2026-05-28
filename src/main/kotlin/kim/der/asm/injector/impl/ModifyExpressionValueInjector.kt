@@ -34,6 +34,7 @@ import java.lang.reflect.Modifier
  * 对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收。
  * handler 返回类型对基础类型必须精确匹配，引用表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回表达式类型。
+ * [InjectionPoint.THROW] 会在目标 `ATHROW` 前改写即将抛出的异常，也可继续追加目标方法参数。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
  * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
