@@ -221,7 +221,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 **参数：**
 
-- `method: String = ""` - 目标方法签名
+- `method: String = ""` - 目标方法签名；入口参数模式可省略并按 handler 名称推断唯一兼容目标，`INVOKE` 调用点模式建议显式声明
 - `index: Int = -1` - 参数索引（从 0 开始）；默认入口模式下为目标方法参数索引，`INVOKE` 模式下为目标调用参数索引
 - `at: At = At()` - 注入位置；默认 `HEAD` 改写入口参数，`at.value = InjectionPoint.INVOKE` 时用 `at.target` 匹配目标方法调用、构造器调用或 `invokedynamic` 调用
 - `ordinal: Int = -1` - 调用点匹配序号；`-1` 表示修改全部匹配调用点，当前仅在 `INVOKE` 模式下生效
@@ -231,7 +231,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；当被修改参数或追加的目标方法参数是对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`，返回值则可为原参数类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原参数类型，基础类型仍需精确匹配。后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中的调用参数后按原顺序恢复并继续执行原调用；构造器调用使用 `<init>` 目标，只能修改构造器描述符内的参数，不暴露未初始化 receiver。`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。handler 不会自动接收目标调用的其他参数，可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；当被修改参数或追加的目标方法参数是对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`，返回值则可为原参数类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原参数类型，基础类型仍需精确匹配。入口参数模式省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `index` 指向的目标参数类型、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中的调用参数后按原顺序恢复并继续执行原调用；构造器调用使用 `<init>` 目标，只能修改构造器描述符内的参数，不暴露未初始化 receiver。`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。handler 不会自动接收目标调用的其他参数，可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `@ModifyArg` 会统计实际写入参数修改逻辑的数量。入口参数模式最多命中 1 次；`INVOKE` 模式按匹配调用点数量计数。
 显式设置 `require` / `allow` / 非默认 `expect` 时按实际参数修改数量校验契约，违反 `require` 或 `allow`
