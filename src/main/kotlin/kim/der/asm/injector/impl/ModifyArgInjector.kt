@@ -23,7 +23,8 @@ import java.lang.reflect.Modifier
  * 默认按参数索引直接修改方法入口处的参数值；当 [at] 指向 [InjectionPoint.INVOKE] 时，
  * 会改写匹配普通方法调用、构造器调用或 `invokedynamic` 调用点的指定调用参数。
  * handler 的第一个参数是被修改的原参数；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
- * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原参数类型的子类型。后续可按顺序接收目标方法参数前缀。
+ * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原参数类型的子类型，也可用 `Any` 或 `Object`
+ * 作为泛型引用返回类型，框架会在调用后转换回原参数类型。后续可按顺序接收目标方法参数前缀。
  *
  * @param argIndex 要修改的目标参数索引，从 0 开始
  * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标方法调用、构造器调用或 `invokedynamic` 调用
