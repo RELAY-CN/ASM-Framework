@@ -875,7 +875,7 @@ class TargetClassContext(
             }
 
         val targetField =
-            classNode.fields.find { it.name == targetFieldName }
+            findAccessorTargetField(targetFieldName)
                 ?: throw IllegalStateException("Accessor target field $targetFieldName not found in $className")
 
         // 生成访问器方法
@@ -885,6 +885,28 @@ class TargetClassContext(
 
         return true
     }
+
+    private fun findAccessorTargetField(fieldName: String): AccessorTargetField? {
+        classNode.fields.find { it.name == fieldName }?.let {
+            return AccessorTargetField(className, it)
+        }
+        return findInheritedAccessorTargetField(fieldName)
+    }
+
+    private fun findInheritedAccessorTargetField(fieldName: String): AccessorTargetField? {
+        var parentName = classNode.superName
+        while (parentName != null && parentName != "java/lang/Object") {
+            val parentClass = loadParentClass(parentName) ?: return null
+            parentClass.fields.find { it.name == fieldName && isAccessorInheritedFieldVisible(it) }?.let {
+                return AccessorTargetField(parentClass.name, it)
+            }
+            parentName = parentClass.superName
+        }
+        return null
+    }
+
+    private fun isAccessorInheritedFieldVisible(field: FieldNode): Boolean =
+        (field.access and (Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC)) == 0
 
     /**
      * 应用 @Invoker 调用器
@@ -959,12 +981,13 @@ class TargetClassContext(
      */
     private fun generateAccessorMethod(
         asmMethod: Method,
-        targetField: FieldNode,
+        targetField: AccessorTargetField,
         fieldName: String,
     ): MethodNode {
         val isGetter = asmMethod.parameterCount == 0
-        val isStatic = (targetField.access and Opcodes.ACC_STATIC) != 0
-        val fieldType = Type.getType(targetField.desc)
+        val fieldNode = targetField.field
+        val isStatic = (fieldNode.access and Opcodes.ACC_STATIC) != 0
+        val fieldType = Type.getType(fieldNode.desc)
         val asmMethodStatic =
             java.lang.reflect.Modifier
                 .isStatic(asmMethod.modifiers)
@@ -1010,27 +1033,27 @@ class TargetClassContext(
         if (isGetter) {
             // Getter: 加载字段值并返回
             if (isStatic) {
-                il.add(FieldInsnNode(Opcodes.GETSTATIC, className, fieldName, targetField.desc))
+                il.add(FieldInsnNode(Opcodes.GETSTATIC, targetField.owner, fieldName, fieldNode.desc))
             } else {
                 il.add(VarInsnNode(Opcodes.ALOAD, 0))
-                il.add(FieldInsnNode(Opcodes.GETFIELD, className, fieldName, targetField.desc))
+                il.add(FieldInsnNode(Opcodes.GETFIELD, targetField.owner, fieldName, fieldNode.desc))
             }
             il.add(InstructionUtil.makeReturn(fieldType))
         } else {
             // Setter: 接收参数并设置字段值
             // 如果字段是 final，需要先移除 final 标志（如果访问器方法有 @Mutable 注解）
             val mutable = asmMethod.isAnnotationPresent(Mutable::class.java)
-            if (mutable && (targetField.access and Opcodes.ACC_FINAL) != 0) {
-                targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
+            if (mutable && targetField.owner == className && (fieldNode.access and Opcodes.ACC_FINAL) != 0) {
+                fieldNode.access = fieldNode.access and Opcodes.ACC_FINAL.inv()
             }
 
             if (isStatic) {
                 il.add(InstructionUtil.loadParam(fieldType, 0))
-                il.add(FieldInsnNode(Opcodes.PUTSTATIC, className, fieldName, targetField.desc))
+                il.add(FieldInsnNode(Opcodes.PUTSTATIC, targetField.owner, fieldName, fieldNode.desc))
             } else {
                 il.add(VarInsnNode(Opcodes.ALOAD, 0))
                 il.add(InstructionUtil.loadParam(fieldType, 1))
-                il.add(FieldInsnNode(Opcodes.PUTFIELD, className, fieldName, targetField.desc))
+                il.add(FieldInsnNode(Opcodes.PUTFIELD, targetField.owner, fieldName, fieldNode.desc))
             }
             il.add(InsnNode(Opcodes.RETURN))
         }
@@ -1042,6 +1065,11 @@ class TargetClassContext(
 
         return methodNode
     }
+
+    private data class AccessorTargetField(
+        val owner: String,
+        val field: FieldNode,
+    )
 
     /**
      * 生成调用器方法
