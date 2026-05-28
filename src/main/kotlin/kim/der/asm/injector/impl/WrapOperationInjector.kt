@@ -334,9 +334,7 @@ class WrapOperationInjector(
 
     private fun injectCast(target: MethodNode): Int {
         val castTarget = at.target.replace('.', '/')
-        if (castTarget.isEmpty()) {
-            throw IllegalArgumentException("@WrapOperation CAST target type must not be empty")
-        }
+        val matchAnyTarget = castTarget.isEmpty()
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -346,7 +344,10 @@ class WrapOperationInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is TypeInsnNode || insn.opcode != Opcodes.CHECKCAST || insn.desc != castTarget) {
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.CHECKCAST || (!matchAnyTarget && insn.desc != castTarget)) {
+                continue
+            }
+            if (matchAnyTarget && !isCastReturnCompatible(Type.getObjectType(insn.desc))) {
                 continue
             }
 
@@ -364,6 +365,9 @@ class WrapOperationInjector(
 
         return injectionCount
     }
+
+    private fun isCastReturnCompatible(castType: Type): Boolean =
+        isReturnCompatible(castType, Type.getReturnType(asmMethod))
 
     private fun injectInstanceof(target: MethodNode): Int {
         val typeTarget = at.target.replace('.', '/')
