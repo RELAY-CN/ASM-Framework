@@ -2557,6 +2557,29 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodInferenceFailsWhenCompatibleOverloadsAreAmbiguous() {
+        AsmRegistry.register(AmbiguousWrapMethodInferenceMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform(
+                    "AmbiguousWrapMethodTarget",
+                    ambiguousWrapMethodTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("matches multiple target methods") == true,
+        )
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("Specify method explicitly to disambiguate") == true,
+        )
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
@@ -8144,6 +8167,16 @@ class FrameworkReliabilityTest {
         ): Any = "generic:${operation.call(prefix)}"
     }
 
+    @AsmMixin("AmbiguousWrapMethodTarget")
+    object AmbiguousWrapMethodInferenceMixin {
+        @WrapMethod
+        @JvmStatic
+        fun value(
+            prefix: CharSequence,
+            operation: Operation<String>,
+        ): String = operation.call(prefix)
+    }
+
     @AsmMixin("ModifyReceiverParamTarget")
     object WrapOperationWithTargetParamsMixin {
         @WrapOperation(
@@ -11539,6 +11572,47 @@ class FrameworkReliabilityTest {
             )
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun ambiguousWrapMethodTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "AmbiguousWrapMethodTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "value",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "value",
+            "(Ljava/lang/StringBuilder;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "toString",
+                "()Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
             visitEnd()
         }
         cw.visitEnd()
