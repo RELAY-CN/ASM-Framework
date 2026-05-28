@@ -404,6 +404,8 @@ annotation class WrapOperation(
  * - 下一参数必须是 [Operation]，用于执行被包裹的原目标方法
  * - 实例目标方法不会把 `this` 作为 handler 参数；[Operation] 已绑定当前 receiver，[Operation.call] 只传目标方法参数
  * - handler 返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler 必须返回 `Unit` / `void`
+ * - [method] 为空时先按 handler 名称与精确描述符推断目标方法；若 handler 使用父类型参数或泛型引用返回导致精确描述符不一致，
+ *   会继续按参数/返回兼容规则匹配唯一同名目标方法，多个兼容重载需要显式指定 [method]
  * - 不支持构造器 `<init>`、类初始化器 `<clinit>`、`abstract` 方法或 `native` 方法
  * - [require] / [allow] 可约束实际整方法包裹数量，目标方法漂移时会在转换阶段失败
  * - [expect] 用于调试期望整方法包裹数量，不一致时只输出警告，不阻断转换

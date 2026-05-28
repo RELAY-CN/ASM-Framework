@@ -344,6 +344,8 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 为目标方法返回类型。handler 返回类型必须兼容目标方法返回类型；目标方法为 `void` 时 handler
 必须返回 `Unit` / `void`。实例目标方法不会把 `this` 作为 handler 参数传入，框架会把当前 receiver
 绑定到 `Operation` 内部；因此静态目标方法和实例目标方法调用 `operation.call(...)` 时都只传目标方法参数。
+`method` 为空时，框架会先按 handler 名称与精确描述符推断目标方法；若 handler 使用父类型参数或 `Any` / `Object`
+泛型引用返回导致精确描述符不一致，会继续按参数与返回类型兼容规则匹配唯一同名目标方法。存在多个兼容重载时需要显式填写 `method`。
 
 转换时，框架会把原方法体迁移到私有 synthetic 方法，再用原方法名与原描述符生成 wrapper。`@WrapMethod`
 不支持构造器 `<init>`、类初始化器 `<clinit>`、abstract 方法或 native 方法。
