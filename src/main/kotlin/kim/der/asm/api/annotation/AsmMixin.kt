@@ -444,6 +444,8 @@ annotation class WrapMethod(
  * 相比 [Redirect]，该注解不替换原逻辑，只决定原指令是否继续执行，更适合“按条件跳过副作用调用或写入”的场景。
  *
  * [InjectionPoint.INVOKE] 模式要求目标普通调用或 `invokedynamic` 调用返回类型必须为 `void`。
+ * 构造器 `<init>` 不能作为条件包裹目标；跳过构造器会留下未初始化对象并生成不可验证字节码，转换阶段会失败。
+ * 如需控制构造过程，应使用 [Redirect] 或 [WrapOperation]。
  * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * [InjectionPoint.FIELD_ASSIGN] 模式匹配
  * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。

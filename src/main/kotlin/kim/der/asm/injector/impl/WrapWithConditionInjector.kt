@@ -33,6 +33,7 @@ import java.lang.reflect.Modifier
  * 并在原指令前插入 boolean handler。
  * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段写入值或数组写入栈参数并继续执行原指令，
  * 返回 `false` 时跳过原指令。
+ * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
