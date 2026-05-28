@@ -3656,6 +3656,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun shadowCanReferenceInterfaceDefaultMethod() {
+        AsmRegistry.register(InterfaceDefaultShadowMethodMixin::class.java)
+
+        AsmProcessor().transform("InterfaceDefaultInvokerTarget", interfaceDefaultInvokerTargetBytes(), javaClass.classLoader)
+    }
+
+    @Test
     fun mutableFieldOnlyTransformWritesModifiedClassBytes() {
         AsmRegistry.register(MutableFieldOnlyMixin::class.java)
 
@@ -9651,6 +9658,12 @@ class FrameworkReliabilityTest {
         private fun inheritedClear() {
             throw UnsupportedOperationException()
         }
+    }
+
+    @AsmMixin("InterfaceDefaultInvokerTarget")
+    class InterfaceDefaultShadowMethodMixin {
+        @Shadow("spliterator")
+        private fun inheritedSpliterator(): java.util.Spliterator<*> = throw UnsupportedOperationException()
     }
 
     @AsmMixin("FinalFieldTarget")
