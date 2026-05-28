@@ -10,8 +10,11 @@ import kim.der.asm.api.replace.RedirectionReplaceApi
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AsmInjectorFactory
 import kim.der.asm.injector.util.InlineCodeGenerator
+import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.ClassReader
+import org.objectweb.asm.ConstantDynamic
+import org.objectweb.asm.Handle
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -525,7 +528,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyConstant,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveModifyConstantTargetMethod(method, annotation)
         val injector =
             AsmInjectorFactory.createModifyConstantInjector(
                 method,
@@ -540,7 +543,7 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         if (annotation.constant.isEmpty()) {
@@ -550,9 +553,311 @@ class TargetClassContext(
             injectionCount > 0,
             "@ModifyConstant",
             method,
-            annotation.method,
+            methodSignature,
         )
     }
+
+    private fun resolveModifyConstantTargetMethod(
+        method: Method,
+        annotation: ModifyConstant,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    hasCompatibleModifyConstantCandidate(method, annotation, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@ModifyConstant handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun hasCompatibleModifyConstantCandidate(
+        handlerMethod: Method,
+        annotation: ModifyConstant,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val candidateTypes = collectModifyConstantCandidateTypes(targetMethod, annotation)
+            candidateTypes.any { candidate ->
+                validateModifyConstantHandlerSignature(handlerMethod, targetMethod, candidate.type, candidate.nullConstant)
+            }
+        }.getOrDefault(false)
+
+    private fun collectModifyConstantCandidateTypes(
+        targetMethod: MethodNode,
+        annotation: ModifyConstant,
+    ): List<ModifyConstantCandidate> {
+        val requestedValue = annotation.constant.ifEmpty { null }
+        val insns = targetMethod.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveModifyConstantSliceRange(insns, annotation.slice)
+        val candidates = mutableListOf<ModifyConstantCandidate>()
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (!BytecodeUtil.isConstant(insn)) {
+                continue
+            }
+            if (requestedValue != null && !matchesModifyConstantValue(insn, BytecodeUtil.getConstant(insn), requestedValue)) {
+                continue
+            }
+            val constantType = resolveModifyConstantType(insn, requestedValue) ?: continue
+            candidates.add(ModifyConstantCandidate(constantType, BytecodeUtil.getConstant(insn) == null))
+        }
+
+        return candidates
+    }
+
+    private fun resolveModifyConstantSliceRange(
+        insns: Array<AbstractInsnNode>,
+        slice: Slice,
+    ): Pair<Int, Int> {
+        val startIndex =
+            if (slice.from.target.isNotEmpty()) {
+                val fromIndex = findModifyConstantSliceBoundaryIndex(insns, slice.from, 0) ?: return insns.size to insns.size
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (slice.to.target.isNotEmpty()) {
+                findModifyConstantSliceBoundaryIndex(insns, slice.to, startIndex) ?: return insns.size to insns.size
+            } else {
+                insns.size
+            }
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun findModifyConstantSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @ModifyConstant: ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseModifyConstantTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid ModifyConstant slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (insn is MethodInsnNode && matchesModifyConstantTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+        }
+
+        return null
+    }
+
+    private fun parseModifyConstantTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun matchesModifyConstantTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesModifyConstantValue(
+        insn: AbstractInsnNode,
+        constant: Any?,
+        value: String,
+    ): Boolean {
+        if (constant == null) {
+            return value == "null"
+        }
+        if (value == "true" || value == "false") {
+            return isModifyConstantBooleanInsn(insn, value == "true")
+        }
+
+        return when (constant) {
+            is Int -> constant.toString() == value
+            is Long -> constant.toString() == value
+            is Float -> constant.toString() == value
+            is Double -> constant.toString() == value
+            is String -> constant == value
+            is Type -> {
+                if (constant.sort == Type.METHOD) {
+                    constant.descriptor == value
+                } else {
+                    constant.internalName == value.replace('.', '/')
+                }
+            }
+            is Handle -> "${constant.owner}.${constant.name}${constant.desc}" == value
+            is ConstantDynamic -> constant.name == value || "${constant.name}:${constant.descriptor}" == value
+            else -> false
+        }
+    }
+
+    private fun isModifyConstantBooleanInsn(
+        insn: AbstractInsnNode,
+        expected: Boolean,
+    ): Boolean =
+        (expected && insn.opcode == Opcodes.ICONST_1) ||
+            (!expected && insn.opcode == Opcodes.ICONST_0)
+
+    private fun resolveModifyConstantType(
+        insn: AbstractInsnNode,
+        requestedValue: String?,
+    ): Type? {
+        if (requestedValue != null &&
+            (requestedValue == "true" || requestedValue == "false") &&
+            isModifyConstantBooleanInsn(insn, requestedValue == "true")
+        ) {
+            return Type.BOOLEAN_TYPE
+        }
+        return BytecodeUtil.getConstantType(insn)
+    }
+
+    private fun validateModifyConstantHandlerSignature(
+        handlerMethod: Method,
+        targetMethod: MethodNode,
+        constantType: Type,
+        nullConstant: Boolean,
+    ): Boolean {
+        val handlerParamTypes = Type.getArgumentTypes(handlerMethod)
+        if (handlerParamTypes.isEmpty()) {
+            return false
+        }
+
+        val acceptsConstant =
+            if (nullConstant) {
+                handlerParamTypes[0].isReferenceType()
+            } else {
+                isModifyConstantParameterCompatible(constantType, handlerParamTypes[0])
+            }
+        if (!acceptsConstant) {
+            return false
+        }
+
+        val handlerReturnType = Type.getReturnType(handlerMethod)
+        if (!isModifyConstantReturnCompatible(constantType, handlerReturnType, handlerMethod.returnType)) {
+            return false
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        val requestedTargetParamCount = handlerParamTypes.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            return false
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = handlerParamTypes[index + 1]
+            if (!isModifyConstantParameterCompatible(expected, actual)) {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private fun isModifyConstantParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
+        }
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
+    }
+
+    private fun isModifyConstantReturnCompatible(
+        constantType: Type,
+        handlerReturnType: Type,
+        handlerReturnClass: Class<*>,
+    ): Boolean {
+        if (constantType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (!constantType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val constantClass = loadReferenceClass(constantType)
+            constantClass.isAssignableFrom(handlerReturnClass)
+        }.getOrDefault(false)
+    }
+
+    private data class ModifyConstantCandidate(
+        val type: Type,
+        val nullConstant: Boolean,
+    )
 
     /**
      * 应用 @Accessor 访问器
