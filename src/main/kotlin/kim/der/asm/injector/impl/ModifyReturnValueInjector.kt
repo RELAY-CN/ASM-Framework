@@ -89,6 +89,9 @@ class ModifyReturnValueInjector(
                 // 保存复制的返回值到局部变量
                 saveReturnValue(il, returnType, returnVar)
 
+                // 原返回值仍在栈顶；后续 handler 调用会生成新的返回值，需要先移除旧值。
+                il.add(InsnNode(if (returnType.size == 2) Opcodes.POP2 else Opcodes.POP))
+
                 // 检查 ASM 方法的参数
                 val asmParamTypes = Type.getArgumentTypes(asmMethod)
                 validateHandlerSignature(target, returnType, asmParamTypes)
@@ -162,9 +165,6 @@ class ModifyReturnValueInjector(
                         InstructionUtil.loadParam(paramType, paramVarIndex).let { il.add(it) }
                         paramVarIndex += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
                     }
-                } else if (!firstParamIsReturnValue && asmParamTypes.isEmpty()) {
-                    // 如果 ASM 方法没有参数，但需要返回值，加载返回值
-                    loadReturnValueForModification(il, returnType, returnVar)
                 }
 
                 // 调用 ASM 方法修改返回值
