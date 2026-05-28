@@ -184,6 +184,7 @@ class ModifyReturnValueInjector(
                         false,
                     ),
                 )
+                addReturnCastIfNeeded(il, returnType, asmReturnType)
 
                 // 修改后的返回值现在在栈顶，可以直接返回
                 // 替换原来的 RETURN（修改后的返回值已经在栈顶）
@@ -268,6 +269,11 @@ class ModifyReturnValueInjector(
         if (!targetReturnType.isReferenceType() || !handlerReturnType.isReferenceType()) {
             return false
         }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
         return runCatching {
             val targetClass = loadReferenceClass(targetReturnType)
             targetClass.isAssignableFrom(asmMethod.returnType)
@@ -275,6 +281,16 @@ class ModifyReturnValueInjector(
     }
 
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun addReturnCastIfNeeded(
+        il: InsnList,
+        returnType: Type,
+        handlerReturnType: Type,
+    ) {
+        if (returnType != handlerReturnType && returnType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, returnType.internalName))
+        }
+    }
 
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
