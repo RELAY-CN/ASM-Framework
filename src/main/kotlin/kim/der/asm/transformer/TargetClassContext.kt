@@ -2236,7 +2236,7 @@ class TargetClassContext(
         method: Method,
         annotation: WrapWithCondition,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveWrapWithConditionTargetMethod(method, annotation)
         val injector = AsmInjectorFactory.createWrapWithConditionInjector(
             method,
             asmInfo,
@@ -2250,16 +2250,62 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@WrapWithCondition",
             method,
-            annotation.method,
+            methodSignature,
         )
     }
+
+    private fun resolveWrapWithConditionTargetMethod(
+        method: Method,
+        annotation: WrapWithCondition,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    hasCompatibleWrapWithConditionCandidate(method, annotation, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@WrapWithCondition handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun hasCompatibleWrapWithConditionCandidate(
+        method: Method,
+        annotation: WrapWithCondition,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val injector = AsmInjectorFactory.createWrapWithConditionInjector(
+                method,
+                asmInfo,
+                annotation.at,
+                annotation.ordinal,
+                annotation.slice,
+            )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     /**
      * 应用 @ModifyExpressionValue 修改表达式值。
