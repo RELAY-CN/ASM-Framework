@@ -906,7 +906,7 @@ class TargetClassContext(
     }
 
     private fun isAccessorInheritedFieldVisible(field: FieldNode): Boolean =
-        (field.access and (Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC)) == 0
+        (field.access and Opcodes.ACC_PRIVATE) == 0
 
     /**
      * 应用 @Invoker 调用器
