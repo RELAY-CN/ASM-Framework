@@ -243,6 +243,8 @@ annotation class ModifyArg(
  *
  * 用于修改目标方法内某次方法调用、构造器调用或 `invokedynamic` 调用的整组参数（语义参考 Mixin 的 `@ModifyArgs`）。当需要同时改写
  * 同一个调用点的多个参数时，优先使用该注解，而不是叠加多个 [ModifyArg]。
+ * 可省略 [method]，框架会按 handler 方法名、[At.target] 匹配的调用点、[Args] handler 签名和后续目标方法参数前缀，
+ * 在目标类中推断唯一同名方法；若存在多个兼容重载，需要显式声明 [method]。
  *
  * ASM 方法要求：
  *
@@ -256,7 +258,7 @@ annotation class ModifyArg(
  * - [require] / [allow] 可约束实际参数组修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数组修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；可省略并按 handler 名称、调用点和 handler 签名推断唯一兼容目标
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
  * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持用 [Slice.from] / [Slice.to] 的
