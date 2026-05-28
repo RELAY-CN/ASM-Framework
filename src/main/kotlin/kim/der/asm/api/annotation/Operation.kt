@@ -4,6 +4,10 @@
 
 package kim.der.asm.api.annotation
 
+import java.lang.invoke.CallSite
+import java.lang.invoke.MethodHandle
+import java.lang.invoke.MethodHandles
+import java.lang.invoke.MethodType
 import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
@@ -41,6 +45,9 @@ class Operation<T> private constructor(
     private val kind: OperationKind,
     private val boundReceiver: Any? = null,
     private val receiverBound: Boolean = false,
+    private val dynamicReturnType: Class<*>? = null,
+    private val bootstrapHandle: MethodHandle? = null,
+    private val bootstrapArgs: Array<Any?> = emptyArray(),
 ) {
     /**
      * 创建方法调用操作句柄。
@@ -82,6 +89,40 @@ class Operation<T> private constructor(
         parameterTypes: Array<Class<*>>,
         receiver: Any?,
     ) : this(ownerClass, name, desc, false, parameterTypes, OperationKind.METHOD_CALL, receiver, true)
+
+    /**
+     * 创建动态调用操作句柄。
+     *
+     * 该构造器用于 [WrapOperation] 包裹 `invokedynamic` 调用点。handler 调用 [call] 时只传动态调用点描述符中的
+     * 参数，不传 receiver；[call] 会通过 [bootstrapHandle] 创建 [CallSite] 并执行其目标方法句柄。
+     *
+     * @param bootstrapHandle 原 `invokedynamic` 的 bootstrap 方法句柄
+     * @param dynamicName 动态调用点名称
+     * @param dynamicDesc 动态调用点描述符
+     * @param returnType 动态调用返回类型
+     * @param parameterTypes 动态调用参数类型
+     * @param bootstrapArgs bootstrap 静态参数
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    constructor(
+        bootstrapHandle: MethodHandle,
+        dynamicName: String,
+        dynamicDesc: String,
+        returnType: Class<*>,
+        parameterTypes: Array<Class<*>>,
+        bootstrapArgs: Array<Any?>,
+    ) : this(
+        MethodHandle::class.java,
+        dynamicName,
+        dynamicDesc,
+        true,
+        parameterTypes,
+        OperationKind.INVOKE_DYNAMIC,
+        dynamicReturnType = returnType,
+        bootstrapHandle = bootstrapHandle,
+        bootstrapArgs = bootstrapArgs,
+    )
 
     /**
      * 创建构造器调用操作句柄。
@@ -253,6 +294,9 @@ class Operation<T> private constructor(
         if (kind == OperationKind.CONSTRUCTOR_CALL) {
             return construct(args) as T
         }
+        if (kind == OperationKind.INVOKE_DYNAMIC) {
+            return invokeDynamic(args) as T
+        }
 
         val usesBoundReceiver = receiverBound && !staticCall
         val expectedArgumentCount = parameterTypes.size + if (staticCall || usesBoundReceiver) 0 else 1
@@ -275,6 +319,29 @@ class Operation<T> private constructor(
         val method = findMethod(ownerClass)
         method.isAccessible = true
         return method.invoke(receiver, *methodArgs) as T
+    }
+
+    private fun invokeDynamic(args: Array<out Any?>): Any? {
+        require(args.size == parameterTypes.size) {
+            "Operation invokedynamic $name$desc expects ${parameterTypes.size} argument(s), actual ${args.size}"
+        }
+
+        val returnType =
+            requireNotNull(dynamicReturnType) {
+                "Operation invokedynamic $name$desc has no return type"
+            }
+        val methodType = MethodType.methodType(returnType, parameterTypes.toList())
+        val callSite =
+            requireNotNull(bootstrapHandle) {
+                "Operation invokedynamic $name$desc has no bootstrap handle"
+            }.invokeWithArguments(
+                MethodHandles.lookup(),
+                name,
+                methodType,
+                *bootstrapArgs,
+            ) as CallSite
+
+        return callSite.dynamicInvoker().invokeWithArguments(*args)
     }
 
     private fun readField(args: Array<out Any?>): Any? {
@@ -392,6 +459,7 @@ class Operation<T> private constructor(
         ARRAY_LENGTH,
         CAST,
         INSTANCEOF,
+        INVOKE_DYNAMIC,
     }
 
     private companion object {

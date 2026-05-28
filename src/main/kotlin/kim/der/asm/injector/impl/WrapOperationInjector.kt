@@ -17,6 +17,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -134,31 +135,44 @@ class WrapOperationInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                continue
-            }
 
-            val currentOrdinal = matchedOrdinal++
-            if (!matchesOrdinal(currentOrdinal)) {
-                continue
-            }
-            if (insn.name == "<init>") {
-                val allocation = findConstructorAllocation(insn)
-                val targetParamCount = validateConstructorHandlerSignature(target, insn)
-                val il = buildConstructorWrapper(target, insn, targetParamCount)
-                target.instructions.insertBefore(insn, il)
-                target.instructions.remove(allocation.newInsn)
-                target.instructions.remove(allocation.dupInsn)
-                target.instructions.remove(insn)
-                injectionCount++
-                continue
-            }
+            when {
+                insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc) -> {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
+                    if (insn.name == "<init>") {
+                        val allocation = findConstructorAllocation(insn)
+                        val targetParamCount = validateConstructorHandlerSignature(target, insn)
+                        val il = buildConstructorWrapper(target, insn, targetParamCount)
+                        target.instructions.insertBefore(insn, il)
+                        target.instructions.remove(allocation.newInsn)
+                        target.instructions.remove(allocation.dupInsn)
+                        target.instructions.remove(insn)
+                        injectionCount++
+                        continue
+                    }
 
-            val targetParamCount = validateHandlerSignature(target, insn)
-            val il = buildOperationWrapper(target, insn, targetParamCount)
-            target.instructions.insertBefore(insn, il)
-            target.instructions.remove(insn)
-            injectionCount++
+                    val targetParamCount = validateHandlerSignature(target, insn)
+                    val il = buildOperationWrapper(target, insn, targetParamCount)
+                    target.instructions.insertBefore(insn, il)
+                    target.instructions.remove(insn)
+                    injectionCount++
+                }
+                insn is InvokeDynamicInsnNode && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc) -> {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
+
+                    val targetParamCount = validateInvokeDynamicHandlerSignature(target, insn)
+                    val il = buildInvokeDynamicOperationWrapper(target, insn, targetParamCount)
+                    target.instructions.insertBefore(insn, il)
+                    target.instructions.remove(insn)
+                    injectionCount++
+                }
+            }
         }
 
         return injectionCount
@@ -418,6 +432,56 @@ class WrapOperationInjector(
         if (receiverIndex != null) {
             il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
         }
+        for (index in callParamTypes.indices) {
+            loadFromVariable(il, callParamTypes[index], argSlots[index])
+        }
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        val callReturnType = Type.getReturnType(callInsn.desc)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (
+            callReturnType != Type.VOID_TYPE &&
+            callReturnType != handlerReturnType &&
+            callReturnType.sort >= Type.ARRAY
+        ) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, callReturnType.internalName))
+        }
+
+        return il
+    }
+
+    private fun buildInvokeDynamicOperationWrapper(
+        target: MethodNode,
+        callInsn: InvokeDynamicInsnNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val callParamTypes = Type.getArgumentTypes(callInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val argSlots =
+            callParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+        val operationIndex = nextTempIndex
+
+        for (index in callParamTypes.indices.reversed()) {
+            storeStackValue(il, callParamTypes[index], argSlots[index])
+        }
+
+        createInvokeDynamicOperation(il, callInsn, callParamTypes)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
         for (index in callParamTypes.indices) {
             loadFromVariable(il, callParamTypes[index], argSlots[index])
         }
@@ -752,6 +816,32 @@ class WrapOperationInjector(
         )
     }
 
+    private fun createInvokeDynamicOperation(
+        il: InsnList,
+        callInsn: InvokeDynamicInsnNode,
+        callParamTypes: Array<Type>,
+    ) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(LdcInsnNode(callInsn.bsm))
+        il.add(LdcInsnNode(callInsn.name))
+        il.add(LdcInsnNode(callInsn.desc))
+        il.add(InstructionUtil.loadType(Type.getReturnType(callInsn.desc)))
+        pushClassArray(il, callParamTypes)
+        pushBootstrapArgumentArray(il, callInsn.bsmArgs)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/invoke/MethodHandle;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Class;" +
+                    "[Ljava/lang/Class;[Ljava/lang/Object;)V",
+                false,
+            ),
+        )
+    }
+
     private fun createConstructorOperation(
         il: InsnList,
         constructorInsn: MethodInsnNode,
@@ -899,11 +989,89 @@ class WrapOperationInjector(
         )
     }
 
+    private fun pushClassArray(
+        il: InsnList,
+        types: Array<Type>,
+    ) {
+        il.add(LdcInsnNode(types.size))
+        il.add(TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Class"))
+        for (index in types.indices) {
+            il.add(InsnNode(Opcodes.DUP))
+            il.add(LdcInsnNode(index))
+            il.add(InstructionUtil.loadType(types[index]))
+            il.add(InsnNode(Opcodes.AASTORE))
+        }
+    }
+
+    private fun pushBootstrapArgumentArray(
+        il: InsnList,
+        bootstrapArgs: Array<Any>,
+    ) {
+        il.add(LdcInsnNode(bootstrapArgs.size))
+        il.add(TypeInsnNode(Opcodes.ANEWARRAY, "java/lang/Object"))
+        for (index in bootstrapArgs.indices) {
+            il.add(InsnNode(Opcodes.DUP))
+            il.add(LdcInsnNode(index))
+            pushBootstrapArgument(il, bootstrapArgs[index])
+            il.add(InsnNode(Opcodes.AASTORE))
+        }
+    }
+
+    private fun pushBootstrapArgument(
+        il: InsnList,
+        value: Any,
+    ) {
+        il.add(LdcInsnNode(value))
+        when (value) {
+            is Int -> InstructionUtil.box(Type.INT_TYPE)?.let { il.add(it) }
+            is Long -> InstructionUtil.box(Type.LONG_TYPE)?.let { il.add(it) }
+            is Float -> InstructionUtil.box(Type.FLOAT_TYPE)?.let { il.add(it) }
+            is Double -> InstructionUtil.box(Type.DOUBLE_TYPE)?.let { il.add(it) }
+        }
+    }
+
     private fun validateHandlerSignature(
         target: MethodNode,
         callInsn: MethodInsnNode,
     ): Int {
         val expectedStackParams = buildExpectedStackParams(callInsn)
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val callReturnType = Type.getReturnType(callInsn.desc)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(callReturnType, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original $callReturnType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateInvokeDynamicHandlerSignature(
+        target: MethodNode,
+        callInsn: InvokeDynamicInsnNode,
+    ): Int {
+        val expectedStackParams = Type.getArgumentTypes(callInsn.desc)
         val operationType = Type.getType(Operation::class.java)
         val actualParams = Type.getArgumentTypes(asmMethod)
         val operationIndex = expectedStackParams.size
@@ -1496,7 +1664,16 @@ class WrapOperationInjector(
 
         for (index in startIndex until insns.size) {
             val insn = insns[index]
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+            if (
+                insn is MethodInsnNode &&
+                matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
                 return index
             }
         }
@@ -1541,6 +1718,21 @@ class WrapOperationInjector(
             return false
         }
         if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
             return false
         }
         return targetDesc == null || insn.desc == targetDesc
