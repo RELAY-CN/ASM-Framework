@@ -476,10 +476,26 @@ class TargetClassContext(
         val targetMethodName = resolveShadowTargetName(annotation.method, methodName)
 
         // 验证目标方法是否存在（Shadow 方法只是引用，不需要转换）
-        val targetMethod = findTargetMethod("$targetMethodName${Type.getMethodDescriptor(method)}")
+        val methodSignature = "$targetMethodName${Type.getMethodDescriptor(method)}"
+        val targetMethod = findShadowTargetMethod(methodSignature)
         if (targetMethod == null) {
-            throw IllegalStateException("Shadow method $targetMethodName${Type.getMethodDescriptor(method)} not found in $className")
+            throw IllegalStateException("Shadow method $methodSignature not found in $className")
         }
+    }
+
+    private fun findShadowTargetMethod(methodSignature: String): MethodNode? =
+        findTargetMethod(methodSignature) ?: findInheritedShadowTargetMethod(methodSignature)
+
+    private fun findInheritedShadowTargetMethod(methodSignature: String): MethodNode? {
+        var parentName = classNode.superName
+        while (parentName != null && parentName != "java/lang/Object") {
+            val parentClass = loadParentClass(parentName) ?: return null
+            parentClass.methods.find {
+                "${it.name}${it.desc}" == methodSignature && (it.access and Opcodes.ACC_PRIVATE) == 0
+            }?.let { return it }
+            parentName = parentClass.superName
+        }
+        return null
     }
 
     private fun resolveShadowTargetName(
