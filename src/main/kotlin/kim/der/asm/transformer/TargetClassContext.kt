@@ -945,7 +945,9 @@ class TargetClassContext(
                 findTargetMethod(constructorSignature)
                     ?: throw IllegalStateException("Invoker target constructor $constructorSignature not found in $className")
             } else {
-                findTargetMethod("$targetMethodName${Type.getMethodDescriptor(method)}")
+                val methodSignature = "$targetMethodName${Type.getMethodDescriptor(method)}"
+                findTargetMethod(methodSignature)
+                    ?: findInheritedInvokerTargetMethod(methodSignature)
                     ?: throw IllegalStateException("Invoker target method $targetMethodName not found in $className")
             }
 
@@ -991,6 +993,22 @@ class TargetClassContext(
             else -> methodName
         }
     }
+
+    private fun findInheritedInvokerTargetMethod(methodSignature: String): MethodNode? {
+        var parentName = classNode.superName
+        while (parentName != null && parentName != "java/lang/Object") {
+            val parentClass = loadParentClass(parentName) ?: return null
+            val parentMethod = parentClass.methods.find { "${it.name}${it.desc}" == methodSignature }
+            if (parentMethod != null && isInvokerInheritedMethodVisible(parentMethod)) {
+                return parentMethod
+            }
+            parentName = parentClass.superName
+        }
+        return null
+    }
+
+    private fun isInvokerInheritedMethodVisible(method: MethodNode): Boolean =
+        (method.access and Opcodes.ACC_PRIVATE) == 0
 
     /**
      * 生成访问器方法
