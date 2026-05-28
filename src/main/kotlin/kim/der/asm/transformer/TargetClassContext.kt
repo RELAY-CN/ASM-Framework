@@ -942,12 +942,13 @@ class TargetClassContext(
         val targetMethod =
             if (targetMethodName == "<init>") {
                 val constructorSignature = buildConstructorSignature(method)
-                findTargetMethod(constructorSignature)
+                findTargetMethod(constructorSignature)?.let {
+                    InvokerTargetMethod(className, it, isInterfaceOwner = false)
+                }
                     ?: throw IllegalStateException("Invoker target constructor $constructorSignature not found in $className")
             } else {
                 val methodSignature = "$targetMethodName${Type.getMethodDescriptor(method)}"
-                findTargetMethod(methodSignature)
-                    ?: findInheritedInvokerTargetMethod(methodSignature)
+                findInvokerTargetMethod(methodSignature)
                     ?: throw IllegalStateException("Invoker target method $targetMethodName not found in $className")
             }
 
@@ -994,21 +995,60 @@ class TargetClassContext(
         }
     }
 
-    private fun findInheritedInvokerTargetMethod(methodSignature: String): MethodNode? {
+    private fun findInvokerTargetMethod(methodSignature: String): InvokerTargetMethod? =
+        findTargetMethod(methodSignature)?.let {
+            InvokerTargetMethod(
+                owner = className,
+                method = it,
+                isInterfaceOwner = (classNode.access and Opcodes.ACC_INTERFACE) != 0,
+            )
+        } ?: findInheritedInvokerTargetMethod(methodSignature)
+
+    private fun findInheritedInvokerTargetMethod(methodSignature: String): InvokerTargetMethod? {
         var parentName = classNode.superName
+        val interfaceNames = classNode.interfaces.toMutableList()
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             val parentMethod = parentClass.methods.find { "${it.name}${it.desc}" == methodSignature }
             if (parentMethod != null && isInvokerInheritedMethodVisible(parentMethod)) {
-                return parentMethod
+                return InvokerTargetMethod(parentName, parentMethod, isInterfaceOwner = false)
             }
+            interfaceNames += parentClass.interfaces
             parentName = parentClass.superName
+        }
+        return findInterfaceInvokerTargetMethod(interfaceNames, methodSignature)
+    }
+
+    private fun findInterfaceInvokerTargetMethod(
+        interfaceNames: List<String>,
+        methodSignature: String,
+        visited: MutableSet<String> = mutableSetOf(),
+    ): InvokerTargetMethod? {
+        for (interfaceName in interfaceNames) {
+            if (!visited.add(interfaceName)) {
+                continue
+            }
+            val interfaceClass = loadParentClass(interfaceName) ?: continue
+            val interfaceMethod = interfaceClass.methods.find { "${it.name}${it.desc}" == methodSignature }
+            if (interfaceMethod != null && isInvokerInheritedInterfaceMethodVisible(interfaceMethod)) {
+                return InvokerTargetMethod(interfaceName, interfaceMethod, isInterfaceOwner = true)
+            }
+            findInterfaceInvokerTargetMethod(interfaceClass.interfaces, methodSignature, visited)?.let { return it }
         }
         return null
     }
 
     private fun isInvokerInheritedMethodVisible(method: MethodNode): Boolean =
         (method.access and Opcodes.ACC_PRIVATE) == 0
+
+    private fun isInvokerInheritedInterfaceMethodVisible(method: MethodNode): Boolean =
+        (method.access and (Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC)) == 0
+
+    private data class InvokerTargetMethod(
+        val owner: String,
+        val method: MethodNode,
+        val isInterfaceOwner: Boolean,
+    )
 
     /**
      * 生成访问器方法
@@ -1110,22 +1150,23 @@ class TargetClassContext(
      */
     private fun generateInvokerMethod(
         asmMethod: Method,
-        targetMethod: MethodNode,
+        targetMethod: InvokerTargetMethod,
         methodName: String,
     ): MethodNode {
         if (methodName == "<init>") {
-            return generateConstructorInvokerMethod(asmMethod, targetMethod)
+            return generateConstructorInvokerMethod(asmMethod, targetMethod.method)
         }
 
-        val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
+        val targetMethodNode = targetMethod.method
+        val isStatic = (targetMethodNode.access and Opcodes.ACC_STATIC) != 0
         val asmMethodStatic =
             java.lang.reflect.Modifier
                 .isStatic(asmMethod.modifiers)
-        val paramTypes = Type.getArgumentTypes(targetMethod.desc)
-        val returnType = Type.getReturnType(targetMethod.desc)
-        val isInterface = (classNode.access and Opcodes.ACC_INTERFACE) != 0
-        val isPrivate = (targetMethod.access and Opcodes.ACC_PRIVATE) != 0
-        val isSynthetic = (targetMethod.access and Opcodes.ACC_SYNTHETIC) != 0
+        val paramTypes = Type.getArgumentTypes(targetMethodNode.desc)
+        val returnType = Type.getReturnType(targetMethodNode.desc)
+        val isInterface = targetMethod.isInterfaceOwner
+        val isPrivate = (targetMethodNode.access and Opcodes.ACC_PRIVATE) != 0
+        val isSynthetic = (targetMethodNode.access and Opcodes.ACC_SYNTHETIC) != 0
 
         // 验证方法签名匹配
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
@@ -1176,9 +1217,9 @@ class TargetClassContext(
         il.add(
             MethodInsnNode(
                 opcode,
-                className,
+                targetMethod.owner,
                 methodName,
-                targetMethod.desc,
+                targetMethodNode.desc,
                 isInterface,
             ),
         )
