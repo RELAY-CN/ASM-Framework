@@ -800,13 +800,14 @@ annotation class Shadow(
  *
  * 无参数且返回字段类型的方法会生成 getter；一个参数且返回 `void` 的方法会生成 setter。
  * 当 [value] 为空时，会按 `getXxx`、`setXxx` 或 `isXxx` 方法名推断目标字段名。
+ * 目标类自身没有该字段时，会沿可加载父类查找可继承的非静态字段，并在生成指令时使用字段实际 owner。
  *
  * ## 使用边界
  *
  * - 目标字段不存在时转换失败。
  * - getter 返回类型、setter 参数类型必须与目标字段类型一致。
  * - 静态字段要求访问器方法也是静态方法；Kotlin `object` 中通常需要配合 `@JvmStatic`。
- * - setter 标记 [Mutable] 时会移除目标字段的 `final` 标志。
+ * - setter 标记 [Mutable] 时只会移除目标类自身字段的 `final` 标志；继承字段不会被改写修饰符。
  * - 生成的方法若与目标类已有同名同描述符方法冲突，转换会失败。
  *
  * @param value 目标字段名；为空时从方法名推断
