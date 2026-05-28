@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -124,17 +125,27 @@ class RedirectInjector(
                 continue
             }
 
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                val currentOrdinal = matchedOrdinal++
-                if (!matchesOrdinal(currentOrdinal)) {
-                    continue
+            when {
+                insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc) -> {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
+                    if (insn.name == "<init>") {
+                        replaceConstructorCall(target, instructions, insn)
+                    } else {
+                        replaceMethodCall(target, instructions, insn)
+                    }
+                    injectionCount++
                 }
-                if (insn.name == "<init>") {
-                    replaceConstructorCall(target, instructions, insn)
-                } else {
-                    replaceMethodCall(target, instructions, insn)
+                insn is InvokeDynamicInsnNode && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc) -> {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
+                    replaceInvokeDynamicCall(target, instructions, insn)
+                    injectionCount++
                 }
-                injectionCount++
             }
         }
 
@@ -184,7 +195,16 @@ class RedirectInjector(
 
         for (index in startIndex until insns.size) {
             val insn = insns[index]
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+            if (
+                insn is MethodInsnNode &&
+                matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
                 return index
             }
         }
@@ -458,6 +478,21 @@ class RedirectInjector(
         return targetDesc.isEmpty() || insn.desc == targetDesc
     }
 
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return targetDesc.isEmpty() || insn.desc == targetDesc
+    }
+
     private fun parseFieldTarget(signature: String): FieldTarget {
         if (signature.isEmpty()) {
             return FieldTarget(null, null, null)
@@ -507,6 +542,33 @@ class RedirectInjector(
             addStaticHandlerCall(il)
         } else {
             addObjectHandlerCall(target, originalInsn, il, targetParamCount)
+        }
+
+        val originalReturnType = Type.getReturnType(originalInsn.desc)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (originalReturnType == Type.VOID_TYPE && handlerReturnType != Type.VOID_TYPE) {
+            il.add(InsnNode(if (handlerReturnType.size == 2) Opcodes.POP2 else Opcodes.POP))
+        } else if (originalReturnType != handlerReturnType && originalReturnType.sort >= Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, originalReturnType.internalName))
+        }
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(originalInsn)
+    }
+
+    private fun replaceInvokeDynamicCall(
+        target: MethodNode,
+        instructions: InsnList,
+        originalInsn: InvokeDynamicInsnNode,
+    ) {
+        val targetParamCount = validateInvokeDynamicHandlerSignature(target, originalInsn)
+
+        val il = InsnList()
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectInvokeDynamicHandlerCall(target, originalInsn, il, targetParamCount)
         }
 
         val originalReturnType = Type.getReturnType(originalInsn.desc)
@@ -624,6 +686,41 @@ class RedirectInjector(
         if (receiverIndex != null) {
             il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))
         }
+        for (index in callParamTypes.indices) {
+            loadFromVariable(il, callParamTypes[index], argSlots[index])
+        }
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun addObjectInvokeDynamicHandlerCall(
+        target: MethodNode,
+        originalInsn: InvokeDynamicInsnNode,
+        il: InsnList,
+        targetParamCount: Int,
+    ) {
+        val callParamTypes = Type.getArgumentTypes(originalInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val argSlots =
+            callParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+
+        for (index in callParamTypes.indices.reversed()) {
+            storeStackValue(il, callParamTypes[index], argSlots[index])
+        }
+
+        addHandlerOwner(il)
         for (index in callParamTypes.indices) {
             loadFromVariable(il, callParamTypes[index], argSlots[index])
         }
@@ -1021,6 +1118,48 @@ class RedirectInjector(
             throw IllegalStateException(
                 "Redirect constructor handler ${asmMethod.name} return type mismatch: " +
                     "original $constructedType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateInvokeDynamicHandlerSignature(
+        target: MethodNode,
+        originalInsn: InvokeDynamicInsnNode,
+    ): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val expectedParams = Type.getArgumentTypes(originalInsn.desc)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedParams.size) {
+            throw IllegalStateException(
+                "Redirect invokedynamic handler ${asmMethod.name} parameter count mismatch: " +
+                    "expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalStateException(
+                    "Redirect invokedynamic handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected stack type $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+
+        val originalReturnType = Type.getReturnType(originalInsn.desc)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(originalReturnType, handlerReturnType)) {
+            throw IllegalStateException(
+                "Redirect invokedynamic handler ${asmMethod.name} return type mismatch: " +
+                    "original $originalReturnType, handler $handlerReturnType",
             )
         }
         return targetParamCount
