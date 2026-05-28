@@ -428,7 +428,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 **参数：**
 
-- `method: String = ""` - 目标方法签名
+- `method: String = ""` - 目标方法签名；为空时按 handler 名称、变量类型、返回类型和追加目标参数兼容规则推断唯一同名目标方法
 - `at: At = At(value = InjectionPoint.HEAD)` - 修改位置；当前支持 `HEAD`、`LOAD` 与 `STORE`
 - `index: Int = -1` - JVM 局部变量槽位索引；大于等于 0 时优先使用
 - `ordinal: Int = -1` - 未指定 `index` 时，同类型入口参数、读取点或写入点的序号；`HEAD` 模式同类型入口参数唯一时可保持默认值
@@ -440,7 +440,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 `@ModifyVariable` 的 `LOAD` / `STORE` 模式可用 `slice.from` / `slice.to` 把候选 `xLOAD` 读取点或 `xSTORE` 写入点限制在一段 `INVOKE` 边界之间；边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。`HEAD` 当前不使用 `slice`。
 
-`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象/数组变量或追加的目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。未指定 `index` 时，框架仍按 handler 第一个参数类型筛选入口参数、读取点或写入点，因此需要用实际变量类型参与匹配。`HEAD` 模式下若同类型入口参数唯一，可省略 `ordinal`；存在多个同类型入口参数时仍需用 `ordinal` 明确选择。
+`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象/数组变量或追加的目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。未指定 `index` 时，框架仍按 handler 第一个参数类型筛选入口参数、读取点或写入点，因此需要用实际变量类型参与匹配。`HEAD` 模式下若同类型入口参数唯一，可省略 `ordinal`；存在多个同类型入口参数时仍需用 `ordinal` 明确选择。省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个签名兼容的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
 `@ModifyVariable` 会统计实际写入变量修改逻辑的数量。`HEAD` 模式最多命中 1 次；`LOAD` / `STORE`
 模式按匹配读取点或写入点数量计数。显式设置 `require` / `allow` / 非默认 `expect` 时按实际变量修改数量校验契约，
