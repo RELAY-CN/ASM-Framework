@@ -2580,6 +2580,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodRequireGreaterThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(RequireTwoWrapMethodMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("WrapMethodStaticTarget", wrapMethodStaticTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("requires at least 2 injection(s), actual 1") == true,
+        )
+    }
+
+    @Test
+    fun wrapMethodAllowLessThanMatchedCountFailsDuringTransform() {
+        AsmRegistry.register(AllowZeroWrapMethodMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("WrapMethodStaticTarget", wrapMethodStaticTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("allows at most 0 injection(s), actual 1") == true,
+        )
+    }
+
+    @Test
+    fun wrapMethodExpectMismatchReportsWarningWithoutFailingTransform() {
+        AsmRegistry.register(ExpectTwoWrapMethodMixin::class.java)
+        val originalErr = System.err
+        val output = ByteArrayOutputStream()
+
+        try {
+            PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                System.setErr(capture)
+                AsmProcessor().transform("WrapMethodStaticTarget", wrapMethodStaticTargetBytes(), javaClass.classLoader)
+            }
+        } finally {
+            System.setErr(originalErr)
+        }
+
+        assertEquals(
+            true,
+            output.toString(Charsets.UTF_8.name()).contains("expected 2 injection(s), actual 1"),
+        )
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
@@ -8175,6 +8226,39 @@ class FrameworkReliabilityTest {
             prefix: CharSequence,
             operation: Operation<String>,
         ): String = operation.call(prefix)
+    }
+
+    @AsmMixin("WrapMethodStaticTarget")
+    object RequireTwoWrapMethodMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;I)Ljava/lang/String;", require = 2)
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            count: Int,
+            operation: Operation<String>,
+        ): String = operation.call(prefix, count)
+    }
+
+    @AsmMixin("WrapMethodStaticTarget")
+    object AllowZeroWrapMethodMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;I)Ljava/lang/String;", allow = 0)
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            count: Int,
+            operation: Operation<String>,
+        ): String = operation.call(prefix, count)
+    }
+
+    @AsmMixin("WrapMethodStaticTarget")
+    object ExpectTwoWrapMethodMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;I)Ljava/lang/String;", expect = 2)
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            count: Int,
+            operation: Operation<String>,
+        ): String = operation.call(prefix, count)
     }
 
     @AsmMixin("ModifyReceiverParamTarget")
