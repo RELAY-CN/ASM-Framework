@@ -370,6 +370,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 - `remap: Boolean = false` - 是否重映射
 
 `@WrapWithCondition` handler 必须返回 `Boolean`。返回 `true` 时恢复原 receiver/参数、字段写入值或数组写入栈参数并继续执行原指令；返回 `false` 时跳过该指令。
+handler 的引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`；原始类型参数仍必须按 JVM 栈类型匹配。
 
 `INVOKE` 模式只支持返回 `void` 的目标调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；`invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数。动态调用目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。后续参数可按目标方法声明顺序接收目标方法参数前缀。遇到非 `void` 调用会在转换阶段失败。
 可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
