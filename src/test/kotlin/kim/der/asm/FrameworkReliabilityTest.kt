@@ -2116,6 +2116,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredModifyReceiverTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("inferred-call", result)
+    }
+
+    @Test
     fun modifyReceiverAtInvokeAcceptsAssignableParentParameter() {
         AsmRegistry.register(ModifyReceiverParentParamMixin::class.java)
 
@@ -7907,6 +7919,21 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String {
             original.length
             return "changed"
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object InferredModifyReceiverTargetMixin {
+        @ModifyReceiver(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun value(original: String): String {
+            original.length
+            return "inferred"
         }
     }
 
