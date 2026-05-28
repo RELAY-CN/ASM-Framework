@@ -490,21 +490,26 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 
 ### @Redirect
 
-重定向目标方法中的方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度读取、类型转换或 `INSTANCEOF` 类型判断。
+重定向目标方法中的方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度读取、类型转换或 `INSTANCEOF` 类型判断。
 
-方法调用重定向会替换匹配的调用指令。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，也可使用 `NEW` 与类型目标直接匹配构造表达式；两种形式都会替换常见 `NEW/DUP/args/INVOKESPECIAL <init>` 构造表达式。字段读取重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD`，
+方法调用重定向会替换匹配的调用指令。`invokedynamic` 重定向同样使用 `at.value = InjectionPoint.INVOKE`，
+按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配；handler 不接收 receiver，
+只接收动态调用点描述符中的参数。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，
+也可使用 `NEW` 与类型目标直接匹配构造表达式；两种形式都会替换常见 `NEW/DUP/args/INVOKESPECIAL <init>` 构造表达式。
+字段读取重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD`，
 会替换匹配的 `GETFIELD` / `GETSTATIC` 指令。字段写入重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD_ASSIGN`，
 会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问与数组长度重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
 并通过 `at.args = ["array=get"]`、`at.args = ["array=set"]` 或 `at.args = ["array=length"]` 区分数组读取、写入与长度读取。
 类型转换重定向使用 `at.value = InjectionPoint.CAST` 与类型 `at.target` 匹配 `CHECKCAST` 指令，handler 接收原待转换对象并返回目标类型兼容对象。
 类型判断重定向使用 `at.value = InjectionPoint.INSTANCEOF` 与类型 `at.target` 匹配 `INSTANCEOF` 指令，handler 接收原被判断对象并返回新的 `Boolean` 结果。
 
-方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
 
 方法调用重定向的 handler 参数形态：
 
 - 实例方法调用：原调用 receiver、原调用参数，并可继续追加目标方法参数前缀
 - 静态方法调用：原调用参数，并可继续追加目标方法参数前缀
+- `invokedynamic` 调用：动态调用点描述符中的参数，并可继续追加目标方法参数前缀
 - 构造器调用或 `NEW` 构造表达式：原构造器参数，并可继续追加目标方法参数前缀；handler 必须返回构造器 owner 类型兼容对象，对象或数组返回值可为原 owner 类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
 
 handler 参数接收引用或数组栈值时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型参数仍需精确匹配。
@@ -524,22 +529,22 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 **参数：**
 
 - `method: String = ""` - 目标方法签名
-- `target: String = ""` - 要重定向的方法调用、构造器调用、字段访问、构造类型或类型签名
+- `target: String = ""` - 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型或类型签名
 - `at: At = At()` - 注入位置；`at.value = InjectionPoint.FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配
-- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向中生效
-- `slice: Slice = Slice()` - 切片范围；当前方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持用 `INVOKE` 边界缩小查找范围
+- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向中生效
+- `slice: Slice = Slice()` - 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际重定向数必须不少于该值
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点。
 重定向返回值的兼容规则与操作包裹一致：基础类型需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。
 这些模式均支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界；框架只在起始边界之后、
-结束边界之前查找目标调用、NEW 构造表达式、字段访问、数组访问、数组长度、类型转换或类型判断指令，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+结束边界之前查找目标调用、动态调用、NEW 构造表达式、字段访问、数组访问、数组长度、类型转换或类型判断指令，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 指定的边界未命中时，切片按空范围处理。
 
-`@Redirect` 会统计实际替换的调用点、构造器调用点、NEW 构造表达式、字段访问点、数组元素访问点、数组长度读取点、类型转换点或类型判断点数量；显式设置
+`@Redirect` 会统计实际替换的调用点、动态调用点、构造器调用点、NEW 构造表达式、字段访问点、数组元素访问点、数组长度读取点、类型转换点或类型判断点数量；显式设置
 `require` / `allow` / 非默认 `expect` 时按实际重定向数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，
 `expect` 不一致只输出警告。
 

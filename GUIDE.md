@@ -113,7 +113,7 @@ val transformedBytes = processor.transform(
 - **@ModifyVariable** - 修改方法参数或局部变量
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
-- **@Redirect** - 重定向方法调用、构造器调用、字段访问、简单数组元素访问、数组长度读取、类型转换或类型判断
+- **@Redirect** - 重定向方法调用、`invokedynamic` 调用、构造器调用、字段访问、简单数组元素访问、数组长度读取、类型转换或类型判断
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
@@ -935,6 +935,16 @@ object RedirectMixin {
         StringBuilder("new:$profile:$value")
 
     @Redirect(
+        method = "format(Ljava/lang/String;I)Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+        ),
+    )
+    fun redirectDynamicConcat(prefix: String, count: Int, profile: String): String =
+        "$profile:${prefix.uppercase()}-${count + 1}"
+
+    @Redirect(
         method = "getEndpoint(Ljava/lang/String;)Ljava/lang/String;",
         at = At(value = InjectionPoint.FIELD, target = "endpoint"),
     )
@@ -997,8 +1007,8 @@ object RedirectMixin {
 }
 ```
 
-方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度、类型转换与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、构造器、字段访问、数组元素访问、数组长度、类型转换或类型判断需要的栈参数，后续可按顺序接收目标方法参数前缀。基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，也可使用 `NEW` 与类型目标直接匹配构造表达式；handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象，对象或数组返回值可为原 owner 类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。handler 参数接收引用或数组栈值时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型参数仍需精确匹配。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`；类型转换使用 `at.value = InjectionPoint.CAST`，handler 接收原待转换对象并返回目标类型兼容对象；类型判断使用 `at.value = InjectionPoint.INSTANCEOF`，handler 接收原被判断对象并返回 `Boolean`。
-方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向都可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的目标调用、NEW 构造表达式、字段访问、数组访问、数组长度、类型转换或类型判断指令才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。关键重定向可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度、类型转换与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、动态调用、构造器、字段访问、数组元素访问、数组长度、类型转换或类型判断需要的栈参数，后续可按顺序接收目标方法参数前缀。`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配；handler 不接收 receiver。基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，也可使用 `NEW` 与类型目标直接匹配构造表达式；handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象，对象或数组返回值可为原 owner 类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。handler 参数接收引用或数组栈值时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型参数仍需精确匹配。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`；类型转换使用 `at.value = InjectionPoint.CAST`，handler 接收原待转换对象并返回目标类型兼容对象；类型判断使用 `at.value = InjectionPoint.INSTANCEOF`，handler 接收原被判断对象并返回 `Boolean`。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向都可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的目标调用、动态调用、NEW 构造表达式、字段访问、数组访问、数组长度、类型转换或类型判断指令才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。关键重定向可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
 
 ### 场景 9: 条件取消执行
 
@@ -1229,6 +1239,9 @@ fun redirectConnect(socket: Socket, address: SocketAddress, timeout: Int) {
     socket.connect(address, timeout)
 }
 ```
+
+`@Redirect(INVOKE)` 可匹配普通方法调用、构造器 `<init>` 调用和 `invokedynamic` 调用。动态调用没有 receiver，
+handler 先接收调用点描述符中的参数，再按需接收目标方法参数前缀；目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及调用点描述符匹配。
 
 `require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。
 
