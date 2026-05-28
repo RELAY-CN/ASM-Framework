@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.MethodInsnNode
@@ -104,27 +105,46 @@ class WrapWithConditionInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                continue
-            }
+            when {
+                insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc) -> {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
 
-            val currentOrdinal = matchedOrdinal++
-            if (!matchesOrdinal(currentOrdinal)) {
-                continue
-            }
+                    if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
+                        throw IllegalArgumentException(
+                            "@WrapWithCondition only supports void method calls, target ${insn.name}${insn.desc}",
+                        )
+                    }
 
-            if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
-                throw IllegalArgumentException(
-                    "@WrapWithCondition only supports void method calls, target ${insn.name}${insn.desc}",
-                )
-            }
+                    val targetParamCount = validateHandlerSignature(target, insn)
+                    val skipOriginalLabel = LabelNode()
+                    val il = buildConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
+                    target.instructions.insertBefore(insn, il)
+                    target.instructions.insert(insn, skipOriginalLabel)
+                    injectionCount++
+                }
+                insn is InvokeDynamicInsnNode && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc) -> {
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
 
-            val targetParamCount = validateHandlerSignature(target, insn)
-            val skipOriginalLabel = LabelNode()
-            val il = buildConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
-            target.instructions.insertBefore(insn, il)
-            target.instructions.insert(insn, skipOriginalLabel)
-            injectionCount++
+                    if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
+                        throw IllegalArgumentException(
+                            "@WrapWithCondition only supports void invokedynamic calls, target ${insn.name}${insn.desc}",
+                        )
+                    }
+
+                    val targetParamCount = validateInvokeDynamicHandlerSignature(target, insn)
+                    val skipOriginalLabel = LabelNode()
+                    val il = buildInvokeDynamicConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
+                    target.instructions.insertBefore(insn, il)
+                    target.instructions.insert(insn, skipOriginalLabel)
+                    injectionCount++
+                }
+            }
         }
 
         return injectionCount
@@ -258,6 +278,47 @@ class WrapWithConditionInjector(
         return il
     }
 
+    private fun buildInvokeDynamicConditionWrapper(
+        target: MethodNode,
+        callInsn: InvokeDynamicInsnNode,
+        targetParamCount: Int,
+        skipOriginalLabel: LabelNode,
+    ): InsnList {
+        val il = InsnList()
+        val callParamTypes = Type.getArgumentTypes(callInsn.desc)
+        var nextTempIndex = nextLocalIndex(target)
+        val argSlots =
+            callParamTypes.map { paramType ->
+                nextTempIndex.also { nextTempIndex += paramType.size }
+            }
+
+        for (index in callParamTypes.indices.reversed()) {
+            storeStackValue(il, callParamTypes[index], argSlots[index])
+        }
+
+        addHandlerOwner(il)
+        for (index in callParamTypes.indices) {
+            loadFromVariable(il, callParamTypes[index], argSlots[index])
+        }
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        il.add(JumpInsnNode(Opcodes.IFEQ, skipOriginalLabel))
+
+        for (index in callParamTypes.indices) {
+            loadFromVariable(il, callParamTypes[index], argSlots[index])
+        }
+
+        return il
+    }
+
     private fun buildFieldAssignConditionWrapper(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -358,6 +419,60 @@ class WrapWithConditionInjector(
         }
 
         val expectedCallParams = buildExpectedHandlerParams(callInsn)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedCallParams.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} parameter count mismatch: " +
+                    "expected at least ${expectedCallParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedCallParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - expectedCallParams.size
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[expectedCallParams.size + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    private fun validateInvokeDynamicHandlerSignature(
+        target: MethodNode,
+        callInsn: InvokeDynamicInsnNode,
+    ): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val expectedCallParams = Type.getArgumentTypes(callInsn.desc)
         val actualParams = Type.getArgumentTypes(asmMethod)
         if (actualParams.size < expectedCallParams.size) {
             throw IllegalArgumentException(
@@ -686,7 +801,16 @@ class WrapWithConditionInjector(
 
         for (index in startIndex until insns.size) {
             val insn = insns[index]
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+            if (
+                insn is MethodInsnNode &&
+                matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
                 return index
             }
         }
@@ -731,6 +855,21 @@ class WrapWithConditionInjector(
             return false
         }
         if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
             return false
         }
         return targetDesc == null || insn.desc == targetDesc
