@@ -444,11 +444,11 @@ class TargetClassContext(
         val targetFieldName = resolveShadowTargetName(annotation.method, fieldName)
 
         // 查找目标字段
-        val targetField = classNode.fields.find { it.name == targetFieldName }
+        val targetField = findAccessorTargetField(targetFieldName)
             ?: throw IllegalStateException("Shadow field $targetFieldName not found in $className")
 
         val shadowFieldType = Type.getType(field.type)
-        val targetFieldType = Type.getType(targetField.desc)
+        val targetFieldType = Type.getType(targetField.field.desc)
         if (shadowFieldType != targetFieldType) {
             throw IllegalStateException(
                 "Shadow field $targetFieldName type ($shadowFieldType) must match target field type ($targetFieldType)",
@@ -456,10 +456,10 @@ class TargetClassContext(
         }
 
         // 如果字段存在，应用 Mutable 修饰符
-        if (field.isAnnotationPresent(Mutable::class.java)) {
-            val originalAccess = targetField.access
-            targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
-            return targetField.access != originalAccess
+        if (field.isAnnotationPresent(Mutable::class.java) && targetField.owner == className) {
+            val originalAccess = targetField.field.access
+            targetField.field.access = targetField.field.access and Opcodes.ACC_FINAL.inv()
+            return targetField.field.access != originalAccess
         }
 
         return false
