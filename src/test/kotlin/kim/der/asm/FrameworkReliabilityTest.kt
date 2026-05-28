@@ -376,6 +376,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyReturnValueWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectParamTarget", redirectParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 4)
+
+        assertEquals("base-suffix4", result)
+    }
+
+    @Test
     fun modifyReturnValueInfersTargetWhenMethodIsOmitted() {
         AsmRegistry.register(InferredModifyReturnValueMixin::class.java)
 
@@ -6342,6 +6354,17 @@ class FrameworkReliabilityTest {
     object ModifyReturnValueZeroParameterInstanceMixin {
         @ModifyReturnValue(method = "value()Ljava/lang/String;")
         fun modify(): String = "constant"
+    }
+
+    @AsmMixin("RedirectParamTarget")
+    object ModifyReturnValueWithTargetParamsMixin {
+        @ModifyReturnValue(method = "value(Ljava/lang/String;I)Ljava/lang/String;")
+        @JvmStatic
+        fun modify(
+            original: String,
+            suffix: String,
+            count: Int,
+        ): String = "$original-$suffix$count"
     }
 
     @AsmMixin("ReturnTarget")
