@@ -751,7 +751,7 @@ object CacheMixin {
 }
 ```
 
-`@ModifyReturnValue` 默认会修改目标方法的全部非 void 返回点；`ordinal` 可限定只修改第 N 个返回点。
+`@ModifyReturnValue` 默认会修改目标方法的全部非 void 返回点；`ordinal` 可限定只修改第 N 个返回点，`at` 参数当前仅预留，不能把修改位置改到其他表达式。
 handler 返回类型对 primitive 必须与目标方法返回类型一致；对象或数组返回值可为目标类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回目标返回类型。handler 可以不声明参数并直接返回新值；对象或数组返回值可用原值类型的父类、接口、`Any` 或 `Object` 接收原返回值，后续也可接收目标方法参数前缀。省略 `method` 时会按 handler 名称和签名兼容性推断唯一同名目标方法；多个兼容重载需要显式写出目标签名。
 关键返回值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的非 void 返回点数量计数。
 
