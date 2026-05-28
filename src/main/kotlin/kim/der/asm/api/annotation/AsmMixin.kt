@@ -635,11 +635,11 @@ annotation class ModifyReturnValue(
  * 与方法句柄字面量（handler 使用 `java.lang.invoke.MethodHandle`），以及动态常量、
  * `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、`BIPUSH` 与 `SIPUSH`
  * 形式的常量加载；显式 [constant] 为 `"true"` 或 `"false"` 时，会将 `ICONST_1` 或 `ICONST_0`
- * 按 boolean 常量处理。
+ * 按 boolean 常量处理；显式 [constant] 为 `"null"` 时，handler 的第一个参数可声明为任意引用类型接收原始 `null`。
  *
  * ASM 方法要求：
  *
- * - 第一个参数接收原始常量值，后续参数可按顺序接收目标方法的部分参数
+ * - 第一个参数接收原始常量值，后续参数可按顺序接收目标方法的部分参数；`"null"` 常量可由任意引用类型接收
  * - 返回类型必须与被修改常量的类型一致；当常量类型为引用或数组时，返回值可为该常量类型的可赋值子类型
  * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
  *   边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
@@ -647,7 +647,7 @@ annotation class ModifyReturnValue(
  * - [expect] 用于调试期望命中数，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
- * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）；`"true"` / `"false"` 可匹配 boolean 常量；
+ * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）；`"true"` / `"false"` 可匹配 boolean 常量；`"null"` 可由任意引用类型 handler 参数接收；
  * 类字面量可使用 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`；
  * 方法类型常量可使用 JVM 方法描述符，例如 `(I)Ljava/lang/String;`；
  * 方法句柄常量可使用 `owner.name(desc)`，例如 `java/lang/String.valueOf(I)Ljava/lang/String;`；
