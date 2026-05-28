@@ -2231,6 +2231,40 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtThrowCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueThrowWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ThrowPointTarget", throwPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("failWithParams", String::class.java, Int::class.javaPrimitiveType)
+                    .invoke(instance, "prefix", 7)
+            }
+
+        assertEquals(true, exception.cause is IllegalArgumentException)
+        assertEquals("prefix-7-failed", exception.cause?.message)
+    }
+
+    @Test
+    fun modifyExpressionValueThrowSliceLimitsThrowsAfterFrom() {
+        AsmRegistry.register(ModifyExpressionValueThrowSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceThrowInstructionTarget", sliceThrowInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceThrowInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("failSelected").invoke(instance)
+            }
+
+        assertEquals(true, exception.cause is IllegalArgumentException)
+        assertEquals("modified-inside", exception.cause?.message)
+    }
+
+    @Test
     fun modifyReceiverAtInvokeReplacesInstanceCallReceiver() {
         AsmRegistry.register(ModifyReceiverConcatMixin::class.java)
 
@@ -11542,6 +11576,35 @@ class FrameworkReliabilityTest {
             IllegalArgumentException("specific-${original.message}")
     }
 
+    @AsmMixin("ThrowPointTarget")
+    object ModifyExpressionValueThrowWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "failWithParams(Ljava/lang/String;I)V",
+            at = At(value = InjectionPoint.THROW),
+        )
+        @JvmStatic
+        fun modify(
+            original: Throwable,
+            prefix: String,
+            count: Int,
+        ): Throwable = IllegalArgumentException("$prefix-$count-${original.message}")
+    }
+
+    @AsmMixin("SliceThrowInstructionTarget")
+    object ModifyExpressionValueThrowSliceMixin {
+        @ModifyExpressionValue(
+            method = "failSelected()V",
+            at = At(value = InjectionPoint.THROW),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Throwable): Throwable = IllegalArgumentException("modified-${original.message}")
+    }
+
     @AsmMixin("SliceThrowInstructionTarget")
     object ThrowInstructionSliceMixin {
         @AsmInject(
@@ -14288,6 +14351,16 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
             visitInsn(Opcodes.ATHROW)
             visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "failWithParams", "(Ljava/lang/String;I)V", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/IllegalStateException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("failed")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ATHROW)
+            visitMaxs(3, 3)
             visitEnd()
         }
         cw.visitEnd()
