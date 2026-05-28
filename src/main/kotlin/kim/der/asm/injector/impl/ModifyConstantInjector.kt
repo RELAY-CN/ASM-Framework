@@ -116,7 +116,8 @@ class ModifyConstantInjector(
             }
 
             // 注入常量修改
-            if (injectConstantModifier(instructions, insn, target, constantType)) {
+            val replacementType = resolveReplacementType(insn, constantType, asmReturnType)
+            if (injectConstantModifier(instructions, insn, target, constantType, replacementType)) {
                 injectionCount++
             }
         }
@@ -259,11 +260,12 @@ class ModifyConstantInjector(
         constNode: AbstractInsnNode,
         target: MethodNode,
         constantType: Type,
+        replacementType: Type,
     ): Boolean {
         val il = InsnList()
 
         // 调用 ASM 方法修改常量
-        generateConstantModifierCall(il, constNode, target, constantType)
+        generateConstantModifierCall(il, constNode, target, constantType, replacementType)
 
         // 替换原始常量指令
         instructions.insertBefore(constNode, il)
@@ -277,6 +279,7 @@ class ModifyConstantInjector(
         constNode: AbstractInsnNode,
         target: MethodNode,
         constantType: Type,
+        replacementType: Type,
     ) {
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
         validateHandlerParameters(target, constantType, asmParamTypes, isNullConstant(constNode))
@@ -301,6 +304,7 @@ class ModifyConstantInjector(
                 false,
             ),
         )
+        addConstantCastIfNeeded(il, replacementType)
     }
 
     private fun validateHandlerParameters(
@@ -371,6 +375,11 @@ class ModifyConstantInjector(
         if (!constantType.isReferenceType() || !handlerReturnType.isReferenceType()) {
             return false
         }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
         return runCatching {
             val constantClass = loadReferenceClass(constantType)
             constantClass.isAssignableFrom(asmMethod.returnType)
@@ -378,6 +387,33 @@ class ModifyConstantInjector(
     }
 
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun resolveReplacementType(
+        insn: AbstractInsnNode,
+        constantType: Type,
+        handlerReturnType: Type,
+    ): Type {
+        if (isNullConstant(insn)) {
+            val firstParamType = Type.getArgumentTypes(asmMethod).firstOrNull()
+            if (firstParamType?.isReferenceType() == true) {
+                return firstParamType
+            }
+        }
+        if (constantType.sort == Type.OBJECT && constantType.internalName == "java/lang/Object") {
+            return handlerReturnType
+        }
+        return constantType
+    }
+
+    private fun addConstantCastIfNeeded(
+        il: InsnList,
+        replacementType: Type,
+    ) {
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (replacementType != handlerReturnType && replacementType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, replacementType.internalName))
+        }
+    }
 
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
