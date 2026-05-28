@@ -3178,6 +3178,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantAcceptsGenericObjectReturnTypeForStringConstant() {
+        AsmRegistry.register(StringConstantGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("generic-original", result)
+    }
+
+    @Test
     fun modifyConstantSliceLimitsConstantsBetweenFromAndTo() {
         AsmRegistry.register(SliceModifyConstantMixin::class.java)
 
@@ -3234,6 +3246,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("changed", result)
+    }
+
+    @Test
+    fun modifyConstantAcceptsGenericObjectReturnTypeForTypedNullConstant() {
+        AsmRegistry.register(TypedNullConstantGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("TypedNullConstantTarget", typedNullConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("TypedNullConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("generic-null", result)
     }
 
     @Test
@@ -8795,6 +8819,13 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "changed"
     }
 
+    @AsmMixin("MixedConstantTarget")
+    object StringConstantGenericReturnMixin {
+        @ModifyConstant(method = "value()Ljava/lang/String;", constant = "original")
+        @JvmStatic
+        fun modify(original: String): Any = "generic-$original"
+    }
+
     @AsmMixin("SliceConstantTarget")
     object SliceModifyConstantMixin {
         @ModifyConstant(
@@ -8854,6 +8885,13 @@ class FrameworkReliabilityTest {
         @ModifyConstant(method = "value()Ljava/lang/Object;", constant = "null")
         @JvmStatic
         fun modify(original: Any?): String = "changed"
+    }
+
+    @AsmMixin("TypedNullConstantTarget")
+    object TypedNullConstantGenericReturnMixin {
+        @ModifyConstant(method = "value()Ljava/lang/String;", constant = "null")
+        @JvmStatic
+        fun modify(original: String?): Any = "generic-null"
     }
 
     @AsmMixin("NullConstantTarget")
@@ -13742,6 +13780,21 @@ class FrameworkReliabilityTest {
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NullConstantTarget", null, "java/lang/Object", null)
         addDefaultConstructor(cw)
         cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/Object;", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun typedNullConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "TypedNullConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
             visitCode()
             visitInsn(Opcodes.ACONST_NULL)
             visitInsn(Opcodes.ARETURN)
