@@ -5364,6 +5364,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtCastWithoutTargetUsesHandlerTypeCompatibleCheckcast() {
+        AsmRegistry.register(AnyCastRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiCastInstructionTarget", multiCastInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiCastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("cast", Any::class.java, Any::class.java)
+
+        assertEquals("any-raw", method.invoke(instance, StringBuilder("ignored"), "raw"))
+    }
+
+    @Test
     fun redirectAtInstanceofReplacesTypeCheckResult() {
         AsmRegistry.register(InstanceofRedirectMixin::class.java)
 
@@ -8389,6 +8401,20 @@ class FrameworkReliabilityTest {
             value: Any,
             input: Any,
         ): String = "redirect-$value-${value === input}"
+    }
+
+    @AsmMixin("MultiCastInstructionTarget")
+    object AnyCastRedirectMixin {
+        @Redirect(
+            method = "cast(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST),
+        )
+        @JvmStatic
+        fun redirect(
+            value: Any,
+            ignored: Any,
+            raw: Any,
+        ): String = "any-$value"
     }
 
     @AsmMixin("CastInstructionTarget")
@@ -14782,6 +14808,25 @@ class FrameworkReliabilityTest {
             visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiCastInstructionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiCastInstructionTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "cast", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.CHECKCAST, "java/lang/StringBuilder")
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
             visitEnd()
         }
         cw.visitEnd()
