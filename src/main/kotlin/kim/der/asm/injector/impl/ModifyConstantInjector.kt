@@ -28,7 +28,8 @@ import java.lang.reflect.Modifier
  * `ACONST_NULL`、`ICONST_*`、`LCONST_*`、`FCONST_*`、`DCONST_*`、
  * `BIPUSH` 与 `SIPUSH` 形式的常量加载。
  * ASM 方法的第一个参数接收原常量，后续参数可按顺序接收目标方法的部分参数；
- * 引用类型参数可声明为原值类型的父类、接口、`Any` 或 `Object`，基础类型仍需精确匹配。
+ * 引用类型参数可声明为原值类型的父类、接口、`Any` 或 `Object`，基础类型仍需精确匹配；
+ * 显式 `constant = "null"` 时，`ACONST_NULL` 允许任意引用类型参数接收原始 `null`。
  * [injectCount] 会返回实际替换的常量数量，供上层执行 `@ModifyConstant` 的命中数契约校验。
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
