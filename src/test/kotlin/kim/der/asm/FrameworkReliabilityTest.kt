@@ -340,6 +340,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(ModifyReturnValueGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-object", result)
+    }
+
+    @Test
     fun modifyReturnValueWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyReturnParametersMixin::class.java)
 
@@ -5684,6 +5696,13 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "value()Ljava/lang/CharSequence;")
         @JvmStatic
         fun modify(original: CharSequence): String = "$original-subtype"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ModifyReturnValueGenericReturnMixin {
+        @ModifyReturnValue(method = "value()Ljava/lang/String;")
+        @JvmStatic
+        fun modify(original: Any): Any = "$original-object"
     }
 
     @AsmMixin("ReturnTarget")
