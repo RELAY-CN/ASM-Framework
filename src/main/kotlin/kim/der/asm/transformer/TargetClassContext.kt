@@ -2268,7 +2268,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyExpressionValue,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveModifyExpressionValueTargetMethod(method, annotation)
         val injector = AsmInjectorFactory.createModifyExpressionValueInjector(
             method,
             asmInfo,
@@ -2282,15 +2282,73 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@ModifyExpressionValue",
             method,
-            annotation.method,
+            methodSignature,
         )
+    }
+
+    private fun resolveModifyExpressionValueTargetMethod(
+        method: Method,
+        annotation: ModifyExpressionValue,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    hasCompatibleModifyExpressionValueCandidate(method, annotation, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@ModifyExpressionValue handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun hasCompatibleModifyExpressionValueCandidate(
+        method: Method,
+        annotation: ModifyExpressionValue,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val injector = AsmInjectorFactory.createModifyExpressionValueInjector(
+                method,
+                asmInfo,
+                annotation.at,
+                annotation.ordinal,
+                annotation.slice,
+            )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
+
+    private fun cloneTargetMethod(method: MethodNode): MethodNode {
+        val clone = MethodNode(
+            method.access,
+            method.name,
+            method.desc,
+            method.signature,
+            method.exceptions?.toTypedArray(),
+        )
+        method.accept(clone)
+        return clone
     }
 
     /**
