@@ -208,6 +208,7 @@ class ModifyArgInjector(
                 false,
             ),
         )
+        addArgumentCastIfNeeded(il, selectedParamType)
         storeStackValue(il, selectedParamType, argSlots[argIndex])
 
         if (receiverIndex != null) {
@@ -296,6 +297,7 @@ class ModifyArgInjector(
                 false,
             ),
         )
+        addArgumentCastIfNeeded(il, paramType)
 
         // 保存修改后的值回参数位置（ASM 方法的返回值现在在栈顶）
         when (paramType.sort) {
@@ -468,6 +470,11 @@ class ModifyArgInjector(
         if (!targetParamType.isReferenceType() || !handlerReturnType.isReferenceType()) {
             return false
         }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
         return runCatching {
             val targetParamClass = loadReferenceClass(targetParamType)
             targetParamClass.isAssignableFrom(asmMethod.returnType)
@@ -475,6 +482,16 @@ class ModifyArgInjector(
     }
 
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun addArgumentCastIfNeeded(
+        il: InsnList,
+        paramType: Type,
+    ) {
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (paramType != handlerReturnType && paramType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, paramType.internalName))
+        }
+    }
 
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
