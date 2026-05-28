@@ -649,10 +649,11 @@ annotation class ModifyReturnValue(
  * - 返回类型必须与被修改常量的类型一致；当常量类型为引用或数组时，返回值可为该常量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
  *   边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
+ * - [method] 为空时会按 handler 名称、常量过滤、常量类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际替换的常量数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望命中数，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；为空时按 handler 名称和签名兼容规则推断唯一同名目标方法
  * @param constant 常量匹配过滤；为空时不做值过滤（仅按类型匹配）；`"true"` / `"false"` 可匹配 boolean 常量；`"null"` 可匹配 `ACONST_NULL`；
  * 类字面量可使用 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`；
  * 方法类型常量可使用 JVM 方法描述符，例如 `(I)Ljava/lang/String;`；
