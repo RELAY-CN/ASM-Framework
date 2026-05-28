@@ -172,7 +172,8 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 需要在 `HEAD` 注入中提前返回时，必须设置 `cancellable = true`。未声明可取消的 `CallbackInfo` 调用 `cancel()` 会抛出
 `IllegalStateException`，避免配置错误被静默忽略。对于非 `void` 目标方法，可取消回调调用 `setReturnValue(...)`
-会同时标记取消，并提前返回该值。
+会同时标记取消，并提前返回该值。普通 `RETURN` 注入会先把原始返回值预置到 `CallbackInfo`，handler 调用
+`setReturnValue(null)` 时，引用类型返回值会被明确替换为 `null`，不会被当作未修改。
 
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
@@ -837,6 +838,7 @@ val value = callback.getReturnValue<String>()
 
 设置返回值（仅在支持返回值修改的注入点有效）。当回调来自 `cancellable = true` 的 `HEAD` 注入时，
 该方法也会标记取消，使目标方法提前返回该值；普通 `RETURN` 注入中的非可取消回调只会改写当前返回点。
+引用类型返回值可以设置为 `null`，并会作为明确的新返回值写回。
 
 **参数：**
 

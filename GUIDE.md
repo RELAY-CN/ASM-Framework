@@ -162,6 +162,7 @@ object LoggingMixin {
 
 只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
+普通 `RETURN` 注入会把原始返回值预置到 `CallbackInfo`，handler 可调用 `setReturnValue(null)` 把引用类型返回值明确替换为 `null`。
 
 当目标方法内有多个相同调用、字段读写点、局部变量读写点、类型转换点、类型判断点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CAST`、`INSTANCEOF` 或 `THROW`
 注入限制在一段调用边界内：
@@ -1088,7 +1089,7 @@ object MultiInjectMixin {
 ```
 
 在 `RETURN` 注入中，`setReturnValue` 只修改当前返回点；在 `cancellable = true` 的 `HEAD` 注入中，
-`setReturnValue` 会同时取消原方法体并作为提前返回值。
+`setReturnValue` 会同时取消原方法体并作为提前返回值。引用类型返回值可以被设置为 `null`，并会作为明确的新返回值写回。
 
 ### 场景 12: 指令点注入
 
