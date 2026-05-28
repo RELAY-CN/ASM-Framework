@@ -3946,6 +3946,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtHeadAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(ModifyVariableGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("generic-value", result)
+    }
+
+    @Test
     fun modifyVariableAtHeadInfersSingleParameterByHandlerType() {
         AsmRegistry.register(ModifyVariableInferredHeadParamMixin::class.java)
 
@@ -4034,6 +4046,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("stored-local", result)
+    }
+
+    @Test
+    fun modifyVariableAtStoreAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(ModifyVariableStoreGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("stored-generic-local", result)
     }
 
     @Test
@@ -9353,6 +9377,17 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("VariableTarget")
+    object ModifyVariableGenericReturnMixin {
+        @ModifyVariable(
+            method = "echo(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): Any = "generic-$original"
+    }
+
+    @AsmMixin("VariableTarget")
     object ModifyVariableInferredHeadParamMixin {
         @ModifyVariable(
             method = "echo(Ljava/lang/String;)Ljava/lang/String;",
@@ -9435,6 +9470,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("StoreVariableTarget")
+    object ModifyVariableStoreGenericReturnMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            index = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): Any = "stored-generic-$original"
     }
 
     @AsmMixin("StoreOrdinalVariableTarget")
