@@ -341,9 +341,7 @@ class RedirectInjector(
 
     private fun injectCastCount(target: MethodNode): Int {
         val typeTarget = redirectTarget.replace('.', '/')
-        if (typeTarget.isEmpty()) {
-            throw IllegalArgumentException("Redirect CAST target type must not be empty")
-        }
+        val matchAnyTarget = typeTarget.isEmpty()
 
         val instructions = target.instructions
         var injectionCount = 0
@@ -355,7 +353,10 @@ class RedirectInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn is TypeInsnNode && insn.opcode == Opcodes.CHECKCAST && insn.desc == typeTarget) {
+            if (insn is TypeInsnNode && insn.opcode == Opcodes.CHECKCAST && (matchAnyTarget || insn.desc == typeTarget)) {
+                if (matchAnyTarget && !isCastReturnCompatible(Type.getObjectType(insn.desc))) {
+                    continue
+                }
                 val currentOrdinal = matchedOrdinal++
                 if (!matchesOrdinal(currentOrdinal)) {
                     continue
@@ -367,6 +368,9 @@ class RedirectInjector(
 
         return injectionCount
     }
+
+    private fun isCastReturnCompatible(castType: Type): Boolean =
+        isReturnCompatible(castType, Type.getReturnType(asmMethod))
 
     private fun injectFieldReadCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
