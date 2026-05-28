@@ -368,8 +368,9 @@ annotation class ModifyReceiver(
  * - [At.value] 必须为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  *   [InjectionPoint.NEW] 或 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]，并通过 [At.target]
  *   指定要匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、产生数组引用的字段、构造类型或类型目标
+ * - [method] 为空时会按 handler 名称、操作点和 [Operation] handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；为空时按 handler 名称、操作点和 [Operation] 签名兼容规则推断唯一同名目标方法
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW] 与 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]
  * @param ordinal 匹配操作点序号；`-1` 表示包裹全部匹配操作点，`0` 及以上表示只包裹第 N 个匹配操作点

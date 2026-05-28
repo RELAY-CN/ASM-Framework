@@ -308,13 +308,12 @@ object ValidationMixin {
         selectWritablePlayer(player, name, source)
 
     @WrapOperation(
-        method = "decorate(Ljava/lang/String;I)Ljava/lang/String;",
         at = At(
             value = InjectionPoint.INVOKE,
             target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
         ),
     )
-    fun wrapConcat(
+    fun decorate(
         receiver: String,
         value: String,
         operation: Operation<String>,
@@ -697,6 +696,7 @@ handler 接收被判断对象与 `Operation<Boolean>`，`operation.call(value)` 
 参数前缀；handler 参数接收引用或数组栈值、目标方法参数时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
 `FIELD_ASSIGN`、`NEW`、`CAST`、`INSTANCEOF` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
+省略 `method` 时，handler 名称必须与目标方法名一致，框架会按操作点和 `Operation` handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
 `@WrapMethod` 用于包裹整个目标方法，而不是某一个调用点或字段访问点。handler 先按目标方法声明顺序接收原方法参数；
 对象/数组参数可用其父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。下一参数必须是 `Operation<R>`，
@@ -1201,12 +1201,11 @@ fun normalizeArguments(args: Args) {
 fun replaceReceiver(original: String): String = original.trim()
 
 @WrapOperation(
-    method = "render(Ljava/lang/String;)Ljava/lang/String;",
     at = At(value = InjectionPoint.INVOKE, target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;"),
     require = 1,
     allow = 1,
 )
-fun wrapRenderConcat(
+fun render(
     receiver: String,
     value: String,
     operation: Operation<String>,
