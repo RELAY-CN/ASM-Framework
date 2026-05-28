@@ -488,15 +488,38 @@ class TargetClassContext(
 
     private fun findInheritedShadowTargetMethod(methodSignature: String): MethodNode? {
         var parentName = classNode.superName
+        val interfaceNames = classNode.interfaces.toMutableList()
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             parentClass.methods.find {
                 "${it.name}${it.desc}" == methodSignature && (it.access and Opcodes.ACC_PRIVATE) == 0
             }?.let { return it }
+            interfaceNames += parentClass.interfaces
             parentName = parentClass.superName
+        }
+        return findInterfaceShadowTargetMethod(interfaceNames, methodSignature)
+    }
+
+    private fun findInterfaceShadowTargetMethod(
+        interfaceNames: List<String>,
+        methodSignature: String,
+        visited: MutableSet<String> = mutableSetOf(),
+    ): MethodNode? {
+        for (interfaceName in interfaceNames) {
+            if (!visited.add(interfaceName)) {
+                continue
+            }
+            val interfaceClass = loadParentClass(interfaceName) ?: continue
+            interfaceClass.methods.find {
+                "${it.name}${it.desc}" == methodSignature && isShadowInheritedInterfaceMethodVisible(it)
+            }?.let { return it }
+            findInterfaceShadowTargetMethod(interfaceClass.interfaces, methodSignature, visited)?.let { return it }
         }
         return null
     }
+
+    private fun isShadowInheritedInterfaceMethodVisible(method: MethodNode): Boolean =
+        (method.access and (Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC)) == 0
 
     private fun resolveShadowTargetName(
         declaredName: String,
