@@ -4707,6 +4707,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun accessorSetterForInheritedInterfaceFieldFailsDuringTransform() {
+        AsmRegistry.register(InterfaceFieldSetterAccessorMixin::class.java)
+
+        assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("InheritedInterfaceAccessorTarget", inheritedInterfaceAccessorTargetBytes(), javaClass.classLoader)
+        }
+    }
+
+    @Test
     fun invokerCanCallInheritedMethod() {
         AsmRegistry.register(InheritedMethodInvokerMixin::class.java)
 
@@ -10488,6 +10497,15 @@ class FrameworkReliabilityTest {
         @Accessor("INTEGER")
         @JvmStatic
         fun getSqlIntegerType(): Int = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("InheritedInterfaceAccessorTarget")
+    object InterfaceFieldSetterAccessorMixin {
+        @Accessor("INTEGER")
+        @JvmStatic
+        fun setSqlIntegerType(value: Int) {
+            throw UnsupportedOperationException()
+        }
     }
 
     @AsmMixin("InheritedAccessorTarget")
