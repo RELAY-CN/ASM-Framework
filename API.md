@@ -199,7 +199,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 **参数：**
 
-- `method: String = ""` - 目标方法签名
+- `method: String = ""` - 目标方法签名；为空时按 ASM handler 方法名与 JVM 描述符匹配目标方法
 - `remap: Boolean = false` - 是否重映射
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
