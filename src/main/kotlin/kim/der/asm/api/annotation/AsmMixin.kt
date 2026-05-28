@@ -661,6 +661,7 @@ annotation class ModifyReturnValue(
  * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
  *   边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
  * - [method] 为空时会按 handler 名称、常量过滤、常量类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
+ * - 常量文本匹配后仍会按 handler 返回类型筛选候选；同一文本对应多个 JVM 类型时，不兼容类型不会计入 [ordinal] 或命中数
  * - [require] / [allow] 可约束实际替换的常量数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望命中数，不一致时只输出警告，不阻断转换
  *
