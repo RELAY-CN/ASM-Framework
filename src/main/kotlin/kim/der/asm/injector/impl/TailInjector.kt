@@ -62,8 +62,8 @@ class TailInjector(
             callbackVarIndex,
         )
 
-        // 如果方法有返回值且目标方法是 void，需要弹出
-        if (AsmMethodCallGenerator.needsPopReturnValue(asmMethod, target)) {
+        // TAIL handler 的返回值不参与目标方法返回，必须始终丢弃以保持返回值栈顶不变。
+        if (Type.getReturnType(asmMethod) != Type.VOID_TYPE) {
             AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
         }
 
