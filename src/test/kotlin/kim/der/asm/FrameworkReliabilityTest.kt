@@ -1518,6 +1518,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredModifyExpressionValueTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-inferred", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeAcceptsObjectHandlerParameter() {
         AsmRegistry.register(ModifyExpressionValueObjectParamMixin::class.java)
 
@@ -7287,6 +7299,18 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object InferredModifyExpressionValueTargetMixin {
+        @ModifyExpressionValue(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun value(original: String): String = "$original-inferred"
     }
 
     @AsmMixin("ExpressionValueTarget")
