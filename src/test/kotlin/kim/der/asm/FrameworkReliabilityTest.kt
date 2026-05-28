@@ -3671,6 +3671,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun overwriteInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredOverwriteTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("inferred-overwrite", result)
+    }
+
+    @Test
     fun overwriteCanReplaceMethodAfterReplaceAllMethodsInSameMixin() {
         AsmRegistry.register(ReplaceAllThenOverwriteMixin::class.java)
 
@@ -9504,6 +9516,13 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun missing() {
         }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object InferredOverwriteTargetMixin {
+        @Overwrite
+        @JvmStatic
+        fun value(): String = "inferred-overwrite"
     }
 
     @ReplaceAllMethods
