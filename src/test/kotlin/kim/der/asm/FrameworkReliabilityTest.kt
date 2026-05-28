@@ -4638,6 +4638,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun accessorCanReadInheritedProtectedField() {
+        AsmRegistry.register(InheritedProtectedFieldAccessorMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val accessorMethod = classNode.methods.single { it.name == "getModCount" }
+        val fieldRead = accessorMethod.instructions.toArray()
+            .filterIsInstance<org.objectweb.asm.tree.FieldInsnNode>()
+            .single { it.name == "modCount" }
+
+        assertEquals("java/util/AbstractList", fieldRead.owner)
+        assertEquals(Opcodes.GETFIELD, fieldRead.opcode)
+    }
+
+    @Test
     fun invokerMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingInvokerMixin::class.java)
 
@@ -10343,6 +10359,12 @@ class FrameworkReliabilityTest {
         fun getName(): String = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("InheritedAccessorTarget")
+    class InheritedProtectedFieldAccessorMixin {
+        @Accessor("modCount")
+        fun getModCount(): Int = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("InvokerConflictTarget")
     class ConflictingInvokerMixin {
         @Invoker("target")
@@ -13898,6 +13920,21 @@ class FrameworkReliabilityTest {
             visitCode()
             visitLdcInsn("existing")
             visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun inheritedAccessorTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InheritedAccessorTarget", null, "java/util/ArrayList", null)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false)
+            visitInsn(Opcodes.RETURN)
             visitMaxs(1, 1)
             visitEnd()
         }
