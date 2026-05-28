@@ -2535,6 +2535,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapMethodInfersTargetWhenHandlerUsesAssignableParameterType() {
+        AsmRegistry.register(InferredWrapMethodAssignabilityTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapMethodAssignabilityTarget", wrapMethodAssignabilityTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapMethodAssignabilityTarget", transformed)
+        val result = clazz.getMethod("value", String::class.java).invoke(null, "raw")
+
+        assertEquals("inferred:raw!", result)
+    }
+
+    @Test
     fun wrapOperationRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeWrapOperationMixin::class.java)
 
@@ -8100,6 +8111,16 @@ class FrameworkReliabilityTest {
             prefix: CharSequence,
             operation: Operation<String>,
         ): String = "wrapped:${operation.call(prefix.toString())}"
+    }
+
+    @AsmMixin("WrapMethodAssignabilityTarget")
+    object InferredWrapMethodAssignabilityTargetMixin {
+        @WrapMethod
+        @JvmStatic
+        fun value(
+            prefix: CharSequence,
+            operation: Operation<String>,
+        ): String = "inferred:${operation.call(prefix.toString())}"
     }
 
     @AsmMixin("ModifyReceiverParamTarget")
