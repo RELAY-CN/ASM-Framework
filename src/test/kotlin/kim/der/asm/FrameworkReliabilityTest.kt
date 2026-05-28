@@ -3988,6 +3988,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeInjectInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredInvokeInjectTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "call" }
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(InferredInvokeInjectTargetMixin::class.java)
+        val handlerCalls = method.instructions.toArray().filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>().filter {
+            it.owner == mixinOwner && it.name == "call"
+        }
+
+        assertEquals(1, handlerCalls.size)
+    }
+
+    @Test
     fun invokeInjectOrdinalSelectsSingleMatchedCall() {
         AsmRegistry.register(InvokeOrdinalMixin::class.java)
 
@@ -9746,6 +9761,20 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun inject() {
+        }
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InferredInvokeInjectTargetMixin {
+        @AsmInject(
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun call() {
         }
     }
 
