@@ -4113,6 +4113,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredModifyVariableTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("VariableTarget", variableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("VariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("target-value", result)
+    }
+
+    @Test
     fun modifyVariableExposesCountContractParameters() {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
@@ -9660,6 +9672,16 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "inferred-$original"
+    }
+
+    @AsmMixin("VariableTarget")
+    object InferredModifyVariableTargetMixin {
+        @ModifyVariable(
+            at = At(value = InjectionPoint.HEAD),
+            index = 1,
+        )
+        @JvmStatic
+        fun echo(original: String): String = "target-$original"
     }
 
     @AsmMixin("StaticVariableTarget")
