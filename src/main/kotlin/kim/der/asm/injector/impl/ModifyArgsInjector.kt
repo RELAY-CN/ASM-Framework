@@ -17,6 +17,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -28,10 +29,10 @@ import java.lang.reflect.Modifier
 /**
  * ModifyArgs 注入器。
  *
- * 该注入器会匹配目标方法中的指定方法调用或构造器调用，把原调用参数保存到 [Args] 容器并传给 handler。
+ * 该注入器会匹配目标方法中的指定方法调用、构造器调用或 `invokedynamic` 调用，把原调用参数保存到 [Args] 容器并传给 handler。
  * handler 可就地修改容器内容，注入器随后从容器中取回整组参数并恢复原方法调用。
  * 实例方法调用的 receiver 会被保存和恢复，但不会放入 [Args]；构造器调用只把构造器描述符中的参数放入 [Args]，
- * 不暴露未初始化 receiver。
+ * 不暴露未初始化 receiver；`invokedynamic` 调用按调用点描述符读取和写回参数，不存在 receiver。
  *
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
@@ -86,16 +87,14 @@ class ModifyArgsInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                continue
-            }
+            val callSite = describeMatchedCallSite(insn, targetOwner, targetName, targetDesc) ?: continue
 
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {
                 continue
             }
 
-            val il = buildArgsModification(target, insn, Type.getArgumentTypes(insn.desc), targetParamCount)
+            val il = buildArgsModification(target, callSite, Type.getArgumentTypes(callSite.desc), targetParamCount)
             target.instructions.insertBefore(insn, il)
             injectionCount++
         }
@@ -105,7 +104,7 @@ class ModifyArgsInjector(
 
     private fun buildArgsModification(
         target: MethodNode,
-        callInsn: MethodInsnNode,
+        callSite: CallSite,
         callParamTypes: Array<Type>,
         targetParamCount: Int,
     ): InsnList {
@@ -113,7 +112,7 @@ class ModifyArgsInjector(
         val firstTempIndex = nextLocalIndex(target)
         var nextTempIndex = firstTempIndex
         val receiverIndex =
-            if (callInsn.opcode == Opcodes.INVOKESTATIC) {
+            if (!callSite.hasReceiver) {
                 null
             } else {
                 nextTempIndex.also { nextTempIndex += 1 }
@@ -441,6 +440,46 @@ class ModifyArgsInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    private fun describeMatchedCallSite(
+        insn: AbstractInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): CallSite? =
+        when (insn) {
+            is MethodInsnNode ->
+                if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                    CallSite(
+                        desc = insn.desc,
+                        hasReceiver = insn.opcode != Opcodes.INVOKESTATIC,
+                    )
+                } else {
+                    null
+                }
+            is InvokeDynamicInsnNode ->
+                if (matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc)) {
+                    CallSite(desc = insn.desc, hasReceiver = false)
+                } else {
+                    null
+                }
+            else -> null
+        }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
@@ -461,4 +500,9 @@ class ModifyArgsInjector(
         }
         return maxIndex
     }
+
+    private data class CallSite(
+        val desc: String,
+        val hasReceiver: Boolean,
+    )
 }
