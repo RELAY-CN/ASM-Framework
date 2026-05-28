@@ -15,6 +15,7 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
+import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -124,13 +125,16 @@ class ModifyVariableInjector(
                 continue
             }
 
+            val variableType =
+                resolveIndexedVariableType(target, insn.`var`, handlerVariableType)
+                    ?: handlerVariableType
             val currentOrdinal = matchedOrdinal++
             if (variableIndex < 0 && ordinal >= 0 && currentOrdinal != ordinal) {
                 continue
             }
 
-            val targetParamCount = validateHandlerSignature(target, handlerVariableType)
-            val il = buildModificationCall(target, handlerVariableType, insn.`var`, targetParamCount)
+            val targetParamCount = validateHandlerSignature(target, variableType)
+            val il = buildModificationCall(target, variableType, insn.`var`, targetParamCount)
             target.instructions.insertBefore(insn, il)
             injectionCount++
         }
@@ -159,13 +163,16 @@ class ModifyVariableInjector(
                 continue
             }
 
+            val variableType =
+                resolveIndexedVariableType(target, insn.`var`, handlerVariableType)
+                    ?: handlerVariableType
             val currentOrdinal = matchedOrdinal++
             if (variableIndex < 0 && ordinal >= 0 && currentOrdinal != ordinal) {
                 continue
             }
 
-            val targetParamCount = validateHandlerSignature(target, handlerVariableType)
-            val il = buildModificationCall(target, handlerVariableType, insn.`var`, targetParamCount)
+            val targetParamCount = validateHandlerSignature(target, variableType)
+            val il = buildModificationCall(target, variableType, insn.`var`, targetParamCount)
             target.instructions.insert(insn, il)
             injectionCount++
         }
@@ -211,6 +218,128 @@ class ModifyVariableInjector(
             )
         }
         return handlerParams[0]
+    }
+
+    private fun resolveIndexedVariableType(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? {
+        if (variableIndex < 0 || !fallbackType.isReferenceType()) {
+            return null
+        }
+
+        val headVariable = collectHeadParameters(target).firstOrNull { it.index == index }
+        if (headVariable != null) {
+            return headVariable.type
+        }
+
+        val localVariable = target.localVariables
+            .filter { it.index == index }
+            .mapNotNull { runCatching { Type.getType(it.desc) }.getOrNull() }
+            .firstOrNull { it.isReferenceType() && isHandlerParameterCompatible(it, fallbackType) }
+        if (localVariable != null) {
+            return localVariable
+        }
+
+        return referencedTypeFromSlotInstructions(target, index, fallbackType)
+    }
+
+    private fun referencedTypeFromSlotInstructions(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? =
+        target.instructions.toArray()
+            .asSequence()
+            .filterIsInstance<VarInsnNode>()
+            .filter { it.`var` == index && it.opcode in SLOT_REFERENCE_OPS }
+            .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
+            .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
+
+    private fun inferReferenceTypeAroundSlotInstruction(
+        target: MethodNode,
+        insn: VarInsnNode,
+    ): Type? {
+        if (insn.opcode == Opcodes.ASTORE) {
+            val previous = previousRealInstruction(insn)
+            if (previous is TypeInsnNode && previous.opcode == Opcodes.CHECKCAST) {
+                return Type.getObjectType(previous.desc)
+            }
+            if (previous is LdcInsnNode && previous.cst is String) {
+                return Type.getType(String::class.java)
+            }
+            inferReferenceTypeFromNextLoadConsumer(target, insn)?.let { return it }
+            return null
+        }
+
+        val next = nextRealInstruction(insn)
+        return when (next) {
+            is MethodInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.INVOKEVIRTUAL || next.opcode == Opcodes.INVOKEINTERFACE) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is FieldInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.GETFIELD || next.opcode == Opcodes.PUTFIELD) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is TypeInsnNode ->
+                if (next.opcode == Opcodes.CHECKCAST) {
+                    Type.getObjectType(next.desc)
+                } else {
+                    null
+                }
+            else ->
+                if (next?.opcode == Opcodes.ARETURN) {
+                    val returnType = Type.getReturnType(target.desc)
+                    if (returnType.isReferenceType()) returnType else null
+                } else {
+                    null
+                }
+        }
+    }
+
+    private fun inferReferenceTypeFromNextLoadConsumer(
+        target: MethodNode,
+        storeInsn: VarInsnNode,
+    ): Type? {
+        var current = storeInsn.next
+        while (current != null) {
+            if (current is VarInsnNode && current.`var` == storeInsn.`var`) {
+                if (current.opcode == Opcodes.ALOAD) {
+                    return inferReferenceTypeAroundSlotInstruction(target, current)
+                }
+                if (current.opcode in STORE_OPS) {
+                    return null
+                }
+            }
+            current = current.next
+        }
+        return null
+    }
+
+    private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.previous
+        while (current != null && current.opcode < 0) {
+            current = current.previous
+        }
+        return current
+    }
+
+    private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.next
+        while (current != null && current.opcode < 0) {
+            current = current.next
+        }
+        return current
     }
 
     private fun buildModificationCall(
@@ -542,6 +671,7 @@ class ModifyVariableInjector(
     private companion object {
         private val LOAD_OPS = setOf(Opcodes.ILOAD, Opcodes.LLOAD, Opcodes.FLOAD, Opcodes.DLOAD, Opcodes.ALOAD)
         private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
+        private val SLOT_REFERENCE_OPS = setOf(Opcodes.ALOAD, Opcodes.ASTORE)
         private val INT_VARIABLE_TYPE_SORTS = setOf(Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR)
     }
 }
