@@ -1903,7 +1903,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyReturnValue,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveModifyReturnValueTargetMethod(method, annotation)
         val injector = AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo, annotation.ordinal)
         val injectionCount = injector.injectCount(targetMethod)
         if (annotation.require > 0 || annotation.allow >= 0 || annotation.expect != 1) {
@@ -1911,15 +1911,135 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@ModifyReturnValue",
             method,
-            annotation.method,
+            methodSignature,
         )
+    }
+
+    private fun resolveModifyReturnValueTargetMethod(
+        method: Method,
+        annotation: ModifyReturnValue,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    runCatching {
+                        validateModifyReturnValueHandlerSignature(method, candidate)
+                    }.isSuccess
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@ModifyReturnValue handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun validateModifyReturnValueHandlerSignature(
+        handlerMethod: Method,
+        targetMethod: MethodNode,
+    ) {
+        val targetReturnType = Type.getReturnType(targetMethod.desc)
+        if (targetReturnType == Type.VOID_TYPE) {
+            throw IllegalArgumentException("@ModifyReturnValue cannot modify void target ${targetMethod.name}${targetMethod.desc}")
+        }
+
+        val handlerReturnType = Type.getReturnType(handlerMethod)
+        if (!isModifyReturnValueReturnCompatible(targetReturnType, handlerReturnType, handlerMethod.returnType)) {
+            throw IllegalArgumentException(
+                "@ModifyReturnValue handler ${handlerMethod.name} return type $handlerReturnType " +
+                    "must be compatible with target return type $targetReturnType",
+            )
+        }
+
+        val handlerParamTypes = Type.getArgumentTypes(handlerMethod)
+        val firstParamIsReturnValue =
+            handlerParamTypes.isNotEmpty() && isModifyReturnValueParameterCompatible(targetReturnType, handlerParamTypes[0])
+        val targetParamStart = if (firstParamIsReturnValue) 1 else 0
+        val requestedTargetParamCount = handlerParamTypes.size - targetParamStart
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@ModifyReturnValue handler ${handlerMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${targetMethod.name}${targetMethod.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = handlerParamTypes[targetParamStart + index]
+            if (!isModifyReturnValueParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@ModifyReturnValue handler ${handlerMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+    }
+
+    private fun isModifyReturnValueParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
+        }
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
+    }
+
+    private fun isModifyReturnValueReturnCompatible(
+        targetReturnType: Type,
+        handlerReturnType: Type,
+        handlerReturnClass: Class<*>,
+    ): Boolean {
+        if (targetReturnType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (!targetReturnType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val targetClass = loadReferenceClass(targetReturnType)
+            targetClass.isAssignableFrom(handlerReturnClass)
+        }.getOrDefault(false)
     }
 
     /**
