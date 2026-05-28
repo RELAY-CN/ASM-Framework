@@ -19,7 +19,8 @@ import java.lang.reflect.Method
  * HEAD 注入器。
  *
  * 在目标方法第一条指令前插入 ASM 方法调用；当 ASM 方法需要 [kim.der.asm.api.annotation.CallbackInfo] 时，
- * 会创建回调对象并在取消分支生成提前返回逻辑。
+ * 会创建回调对象并在取消分支生成提前返回逻辑。普通 HEAD handler 的返回值不会替换目标方法结果，
+ * 插入后会立即丢弃，以保持目标方法入口栈为空。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
