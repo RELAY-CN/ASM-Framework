@@ -3297,6 +3297,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredModifyConstantTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("inferred-original", result)
+    }
+
+    @Test
     fun modifyConstantAcceptsGenericObjectReturnTypeForStringConstant() {
         AsmRegistry.register(StringConstantGenericReturnMixin::class.java)
 
@@ -9056,6 +9068,13 @@ class FrameworkReliabilityTest {
         @ModifyConstant(method = "value()Ljava/lang/String;")
         @JvmStatic
         fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("MixedConstantTarget")
+    object InferredModifyConstantTargetMixin {
+        @ModifyConstant(constant = "original")
+        @JvmStatic
+        fun value(original: String): String = "inferred-$original"
     }
 
     @AsmMixin("MixedConstantTarget")
