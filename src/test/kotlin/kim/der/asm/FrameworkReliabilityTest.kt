@@ -4619,6 +4619,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectMethodCallAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(GenericObjectReturnRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("object-value", result)
+    }
+
+    @Test
     fun redirectMethodCallCanUseTargetMethodParameters() {
         AsmRegistry.register(RedirectWithTargetParamsMixin::class.java)
 
@@ -5521,6 +5533,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: CharSequence): String = "parent-${value.trim()}"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object GenericObjectReturnRedirectMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): Any = "object-${value.trim()}"
     }
 
     @AsmMixin("RedirectParamTarget")
