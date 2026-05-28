@@ -113,6 +113,11 @@ class WrapWithConditionInjector(
                         continue
                     }
 
+                    if (insn.name == "<init>") {
+                        throw IllegalArgumentException(
+                            "@WrapWithCondition does not support constructor calls, target ${insn.owner}.${insn.name}${insn.desc}",
+                        )
+                    }
                     if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
                         throw IllegalArgumentException(
                             "@WrapWithCondition only supports void method calls, target ${insn.name}${insn.desc}",
