@@ -182,11 +182,12 @@ class ModifyVariableInjector(
             return variables.find { it.index == index }
         }
 
+        val matchingVariables = variables.filter { it.type == expectedType }
         if (ordinal < 0) {
-            return null
+            return matchingVariables.singleOrNull()
         }
 
-        return variables.filter { it.type == expectedType }.getOrNull(ordinal)
+        return matchingVariables.getOrNull(ordinal)
     }
 
     private fun collectHeadParameters(target: MethodNode): List<HeadVariable> {
