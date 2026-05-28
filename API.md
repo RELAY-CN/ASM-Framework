@@ -362,7 +362,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 
 **参数：**
 
-- `method: String = ""` - 目标方法签名
+- `method: String = ""` - 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
 - `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前支持 `INVOKE` 与 `FIELD_ASSIGN`
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
 - `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 与 `FIELD_ASSIGN` 模式支持用 `INVOKE` 边界缩小查找范围
@@ -376,6 +376,8 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 `INVOKE` 模式只支持返回 `void` 的目标调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；`invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数。动态调用目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。后续参数可按目标方法声明顺序接收目标方法参数前缀。遇到非 `void` 调用会在转换阶段失败。
 可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+
+省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容条件包裹操作点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
 `FIELD_ASSIGN` 模式默认匹配 `PUTFIELD` / `PUTSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。实例字段写入 handler 先接收字段 owner，再接收待写入值；静态字段写入 handler 接收待写入值；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。
 
