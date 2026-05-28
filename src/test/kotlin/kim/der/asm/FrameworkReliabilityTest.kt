@@ -270,6 +270,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun returnInjectionCanReplaceReferenceReturnValueWithNull() {
+        AsmRegistry.register(ReturnSetNullMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(null, result)
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -6177,6 +6189,15 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun inject(callback: CallbackInfo) {
             callback.setReturnValue("set-only")
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ReturnSetNullMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.setReturnValue(null)
         }
     }
 
