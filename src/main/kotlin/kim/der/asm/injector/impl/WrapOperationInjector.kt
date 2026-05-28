@@ -40,7 +40,8 @@ import java.lang.reflect.Modifier
  * 通过 `array=length` 包裹数组长度读取；[InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；
  * [InjectionPoint.INVOKE] 可通过 `<init>` 目标包裹常见 `NEW/DUP/args/INVOKESPECIAL` 构造器调用，
  * [InjectionPoint.NEW] 可通过类型目标直接包裹同一构造表达式；
- * [InjectionPoint.CAST] 可包裹 `CHECKCAST` 类型转换；[InjectionPoint.INSTANCEOF] 可包裹类型判断。
+ * [InjectionPoint.CAST] 可包裹 `CHECKCAST` 类型转换；省略类型目标时会按 handler 返回类型筛选兼容转换目标，
+ * 不兼容目标不会计入 [WrapOperation.ordinal] 或命中数。[InjectionPoint.INSTANCEOF] 可包裹类型判断。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
  * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]
