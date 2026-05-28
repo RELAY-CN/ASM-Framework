@@ -20,7 +20,8 @@ import java.lang.reflect.Method
  *
  * 在目标方法的返回指令前插入 ASM 方法调用。默认处理全部返回点；当 [AsmInject.ordinal] 为非负数时，
  * 只处理对应序号的返回点。返回值方法会先把原始返回值保存到局部变量，以便 CallbackInfo 或 ASM 方法
- * 能够读取并替换返回结果。
+ * 能够读取并替换返回结果。普通 RETURN handler 自身的返回值会被丢弃，目标方法结果只来自
+ * [CallbackInfo.setReturnValue] 或保存的原始返回值。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
