@@ -1080,6 +1080,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAtInvokeControlsInvokeDynamicVoidCall() {
+        AsmRegistry.register(WrapConditionInvokeDynamicMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("WrapConditionInvokeDynamicTarget", wrapConditionInvokeDynamicTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionInvokeDynamicTarget", transformed)
+        val method = clazz.getMethod("run", String::class.java, Int::class.javaPrimitiveType)
+
+        assertEquals(null, method.invoke(null, "skip", 7))
+        assertEquals("raw7", method.invoke(null, "raw", 7))
+    }
+
+    @Test
     fun wrapWithConditionAtInvokeReceivesInstanceReceiverAndCallArguments() {
         AsmRegistry.register(WrapConditionInstanceCallMixin::class.java)
 
@@ -6400,6 +6413,24 @@ class FrameworkReliabilityTest {
         fun shouldRun(value: String): Boolean = value == "raw"
     }
 
+    @AsmMixin("WrapConditionInvokeDynamicTarget")
+    object WrapConditionInvokeDynamicMixin {
+        @WrapWithCondition(
+            method = "run(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "kim/der/asm/FrameworkReliabilityTest.record(Ljava/lang/String;I)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(
+            value: String,
+            count: Int,
+            targetValue: String,
+            targetCount: Int,
+        ): Boolean = value != "skip" && value == targetValue && count == targetCount
+    }
+
     @AsmMixin("WrapConditionInstanceTarget")
     object WrapConditionInstanceCallMixin {
         @WrapWithCondition(
@@ -11651,6 +11682,53 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun wrapConditionInvokeDynamicTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapConditionInvokeDynamicTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "run",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInvokeDynamicInsn(
+                "record",
+                "(Ljava/lang/String;I)V",
+                org.objectweb.asm.Handle(
+                    Opcodes.H_INVOKESTATIC,
+                    "kim/der/asm/FrameworkReliabilityTest",
+                    "bootstrapVoidInvokeDynamic",
+                    "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;)" +
+                        "Ljava/lang/invoke/CallSite;",
+                    false,
+                ),
+            )
+            visitFieldInsn(Opcodes.GETSTATIC, "WrapConditionInvokeDynamicTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "record", "(Ljava/lang/String;I)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitFieldInsn(Opcodes.PUTSTATIC, "WrapConditionInvokeDynamicTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun wrapConditionParamTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapConditionParamTarget", null, "java/lang/Object", null)
@@ -13635,6 +13713,16 @@ class FrameworkReliabilityTest {
             visitMaxs(1, 1)
             visitEnd()
         }
+    }
+
+    companion object {
+        @JvmStatic
+        fun bootstrapVoidInvokeDynamic(
+            lookup: java.lang.invoke.MethodHandles.Lookup,
+            name: String,
+            type: java.lang.invoke.MethodType,
+        ): java.lang.invoke.CallSite =
+            java.lang.invoke.ConstantCallSite(lookup.findStatic(lookup.lookupClass(), name, type))
     }
 
     private fun readClass(bytes: ByteArray): ClassNode {
