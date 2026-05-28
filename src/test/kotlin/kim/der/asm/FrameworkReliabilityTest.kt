@@ -1487,6 +1487,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInvokeAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(ModifyExpressionValueGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-generic", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueWithTargetParamsMixin::class.java)
 
@@ -6975,6 +6987,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: CharSequence): StringBuilder = StringBuilder("$original-builder")
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object ModifyExpressionValueGenericReturnMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): Any = "$original-generic"
     }
 
     @AsmMixin("ExpressionValueParamTarget")
