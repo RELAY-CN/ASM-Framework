@@ -1246,18 +1246,18 @@ fun format(original: String): String = original.lowercase()
 fun expandLimit(original: Int): Int = original * 2
 
 @Redirect(
-    method = "connect(Ljava/lang/String;)V",
     target = "java/net/Socket.connect(Ljava/net/SocketAddress;I)V",
     require = 1,
     allow = 1,
 )
-fun redirectConnect(socket: Socket, address: SocketAddress, timeout: Int) {
+fun connect(socket: Socket, address: SocketAddress, timeout: Int) {
     socket.connect(address, timeout)
 }
 ```
 
 `@Redirect(INVOKE)` 可匹配普通方法调用、构造器 `<init>` 调用和 `invokedynamic` 调用。动态调用没有 receiver，
 handler 先接收调用点描述符中的参数，再按需接收目标方法参数前缀；目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及调用点描述符匹配。
+省略 `method` 时，handler 名称必须与目标方法名一致，框架会按重定向点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
 `require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。
 
