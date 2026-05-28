@@ -352,6 +352,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredModifyReturnValueMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-inferred", result)
+    }
+
+    @Test
     fun modifyReturnValueWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyReturnParametersMixin::class.java)
 
@@ -5919,6 +5931,13 @@ class FrameworkReliabilityTest {
         @ModifyReturnValue(method = "value()Ljava/lang/String;")
         @JvmStatic
         fun modify(original: Any): Any = "$original-object"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object InferredModifyReturnValueMixin {
+        @ModifyReturnValue
+        @JvmStatic
+        fun value(original: Any): Any = "$original-inferred"
     }
 
     @AsmMixin("ReturnTarget")
