@@ -1488,15 +1488,46 @@ class TargetClassContext(
         method: Method,
         annotation: WrapMethod,
     ): Boolean {
-        val methodSignature =
-            if (annotation.method.isEmpty()) {
-                buildWrapMethodSignature(method)
-            } else {
-                annotation.method
-            }
-        val targetMethod = requireTargetMethod(methodSignature)
+        val (targetMethod, methodSignature) = resolveWrapMethodTargetMethod(method, annotation)
         wrapMethod(method, targetMethod)
         return requireWrapMethodCount(1, annotation, method, methodSignature)
+    }
+
+    private fun resolveWrapMethodTargetMethod(
+        method: Method,
+        annotation: WrapMethod,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val inferredSignature = buildWrapMethodSignature(method)
+        findTargetMethod(inferredSignature)?.let { targetMethod ->
+            return targetMethod to inferredSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    runCatching {
+                        validateWrapMethodHandlerSignature(method, candidate)
+                    }.isSuccess
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(inferredSignature))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@WrapMethod handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
     }
 
     private fun wrapMethod(
