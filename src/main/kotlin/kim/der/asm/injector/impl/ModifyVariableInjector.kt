@@ -231,6 +231,7 @@ class ModifyVariableInjector(
                 false,
             ),
         )
+        addVariableCastIfNeeded(il, variableType)
         il.add(storeVariable(variableType, variableIndex))
         return il
     }
@@ -323,10 +324,25 @@ class ModifyVariableInjector(
         if (!variableType.isReferenceType() || !handlerReturnType.isReferenceType()) {
             return false
         }
+        if (handlerReturnType.sort == Type.OBJECT &&
+            (handlerReturnType.internalName == "java/lang/Object" || handlerReturnType.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
         return runCatching {
             val variableClass = loadReferenceClass(variableType)
             variableClass.isAssignableFrom(asmMethod.returnType)
         }.getOrDefault(false)
+    }
+
+    private fun addVariableCastIfNeeded(
+        il: InsnList,
+        variableType: Type,
+    ) {
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (variableType != handlerReturnType && variableType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, variableType.internalName))
+        }
     }
 
     private fun loadTargetMethodParameters(
