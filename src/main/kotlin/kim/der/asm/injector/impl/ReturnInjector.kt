@@ -149,12 +149,7 @@ class ReturnInjector(
                             false,
                         ),
                     )
-                    // 检查是否为 null（如果没有被修改）
-                    val notModifiedLabel = LabelNode()
-                    val endLabel = LabelNode()
-                    il.add(InsnNode(Opcodes.DUP))
-                    il.add(JumpInsnNode(Opcodes.IFNULL, notModifiedLabel))
-                    // 类型转换并存储
+                    // CallbackInfo 已预置原始返回值；即使 handler 显式设置 null，也应按新值回写。
                     when (returnType.sort) {
                         Type.BOOLEAN -> {
                             il.add(TypeInsnNode(Opcodes.CHECKCAST, "java/lang/Boolean"))
@@ -201,10 +196,6 @@ class ReturnInjector(
                             il.add(VarInsnNode(Opcodes.ASTORE, returnVarIndex))
                         }
                     }
-                    il.add(JumpInsnNode(Opcodes.GOTO, endLabel))
-                    il.add(notModifiedLabel)
-                    il.add(InsnNode(Opcodes.POP)) // 弹出 null
-                    il.add(endLabel)
                     // 加载修改后的返回值（或原始值）
                     InstructionUtil.loadParam(returnType, returnVarIndex).let { il.add(it) }
                 } else if (returnType != Type.VOID_TYPE && returnVarIndex != null) {
