@@ -1116,6 +1116,17 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAcceptsAssignableParentCallParameter() {
+        AsmRegistry.register(WrapConditionAssignableParentParameterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionStaticTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertEquals("raw", result)
+    }
+
+    @Test
     fun wrapWithConditionAtInvokeControlsInvokeDynamicVoidCall() {
         AsmRegistry.register(WrapConditionInvokeDynamicMixin::class.java)
 
@@ -6586,6 +6597,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun shouldRun(value: String): Boolean = value == "raw"
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionAssignableParentParameterMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(value: CharSequence): Boolean = value == "raw"
     }
 
     @AsmMixin("WrapConditionInvokeDynamicTarget")
