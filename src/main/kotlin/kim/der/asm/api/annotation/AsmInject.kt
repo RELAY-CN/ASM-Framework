@@ -24,6 +24,7 @@ package kim.der.asm.api.annotation
  *   可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。实例调用的 receiver 会被框架保存和恢复，
  *   但不会作为普通 handler 参数传入。
  * - INVOKE 的 REPLACE 注入按替换原调用处理，handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
+ * - HEAD、TAIL、RETURN、INVOKE BEFORE/AFTER 与普通指令点注入的 handler 返回值不参与目标方法结果，会在调用后丢弃。
  *
  * ## 命中数契约
  *
