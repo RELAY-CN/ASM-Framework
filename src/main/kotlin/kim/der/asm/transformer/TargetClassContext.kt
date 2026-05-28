@@ -1105,7 +1105,7 @@ class TargetClassContext(
                 isStatic -> Opcodes.INVOKESTATIC
                 methodName == "<init>" -> Opcodes.INVOKESPECIAL
                 isInterface -> {
-                    if (isSynthetic && isPrivate) Opcodes.INVOKESPECIAL else Opcodes.INVOKEINTERFACE
+                    if (isPrivate) Opcodes.INVOKESPECIAL else Opcodes.INVOKEINTERFACE
                 }
                 isPrivate -> Opcodes.INVOKESPECIAL
                 else -> Opcodes.INVOKEVIRTUAL
