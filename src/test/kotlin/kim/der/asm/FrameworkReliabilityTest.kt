@@ -4471,6 +4471,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtInvokeReplacesInvokeDynamicCall() {
+        AsmRegistry.register(RedirectInvokeDynamicMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("RAW-8-redirected", result)
+    }
+
+    @Test
     fun redirectConstructorCallReplacesNewObjectExpression() {
         AsmRegistry.register(ConstructorRedirectMixin::class.java)
 
@@ -5371,6 +5384,22 @@ class FrameworkReliabilityTest {
             suffix: String,
             count: Int,
         ): String = "$value-$suffix$count"
+    }
+
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object RedirectInvokeDynamicMixin {
+        @Redirect(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            prefix: String,
+            count: Int,
+        ): String = "${prefix.uppercase()}-${count + 1}-redirected"
     }
 
     @AsmMixin("ConstructorModifyArgTarget")
