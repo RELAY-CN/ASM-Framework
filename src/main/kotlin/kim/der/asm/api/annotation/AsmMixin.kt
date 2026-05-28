@@ -711,7 +711,7 @@ annotation class ModifyConstant(
  * 构造器重定向可通过 [At.value] 指定 [InjectionPoint.INVOKE] 并使用 `<init>` 目标匹配，也可通过
  * [InjectionPoint.NEW] 与构造类型目标匹配，当前支持常见 `NEW/DUP/args/<init>` 构造表达式。
  * 类型转换重定向通过 [At.value] 指定 [InjectionPoint.CAST]，并通过 [At.target] 指定要替换的类型
- * internal name 或 binary name。
+ * internal name 或 binary name；[At.target] 为空时会按 handler 返回类型筛选兼容的 `CHECKCAST`，不兼容类型不计入 [ordinal] 或命中数。
  * 类型判断重定向通过 [At.value] 指定 [InjectionPoint.INSTANCEOF]，并通过 [At.target] 指定要替换的类型
  * internal name 或 binary name。
  *

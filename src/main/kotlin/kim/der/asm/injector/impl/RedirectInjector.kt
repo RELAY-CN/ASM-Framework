@@ -36,7 +36,8 @@ import java.lang.reflect.Modifier
  * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素访问与数组长度使用 [InjectionPoint.FIELD]
  * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get`、`array=set` 或 `array=length` 区分读取、写入与长度读取。
  * 构造器重定向可通过 [InjectionPoint.INVOKE] 与 `<init>` 目标匹配，也可通过 [InjectionPoint.NEW]
- * 与构造类型 internal name 或 binary name 匹配。类型转换使用 [InjectionPoint.CAST] 与类型 internal name 或 binary name 匹配；类型判断使用 [InjectionPoint.INSTANCEOF]
+ * 与构造类型 internal name 或 binary name 匹配。类型转换使用 [InjectionPoint.CAST] 与类型 internal name 或 binary name 匹配；
+ * 未指定类型目标时，会按 handler 返回类型筛选兼容的 `CHECKCAST` 候选。类型判断使用 [InjectionPoint.INSTANCEOF]
  * 与类型 internal name 或 binary name 匹配。
  * 方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持静态处理器、`@JvmStatic`
  * 处理器或 Kotlin `object` 实例处理器。处理器需先接收原调用、动态调用、构造器、字段访问、类型转换或类型判断需要的栈参数，

@@ -511,7 +511,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 会替换匹配的 `GETFIELD` / `GETSTATIC` 指令。字段写入重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD_ASSIGN`，
 会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问与数组长度重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
 并通过 `at.args = ["array=get"]`、`at.args = ["array=set"]` 或 `at.args = ["array=length"]` 区分数组读取、写入与长度读取。
-类型转换重定向使用 `at.value = InjectionPoint.CAST` 与类型 `at.target` 匹配 `CHECKCAST` 指令，handler 接收原待转换对象并返回目标类型兼容对象。
+类型转换重定向使用 `at.value = InjectionPoint.CAST` 与类型 `at.target` 匹配 `CHECKCAST` 指令，handler 接收原待转换对象并返回目标类型兼容对象。省略 `at.target` 时会遍历所有 `CHECKCAST`，并按 handler 返回类型筛选兼容目标；不兼容的转换目标不会计入 `ordinal` 或命中数。
 类型判断重定向使用 `at.value = InjectionPoint.INSTANCEOF` 与类型 `at.target` 匹配 `INSTANCEOF` 指令，handler 接收原被判断对象并返回新的 `Boolean` 结果。
 
 方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
