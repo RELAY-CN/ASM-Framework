@@ -2330,6 +2330,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtInvokeCanCallOriginalInvokeDynamic() {
+        AsmRegistry.register(WrapOperationInvokeDynamicMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("RAW-8-wrapped", result)
+    }
+
+    @Test
     fun wrapOperationAtInvokeCanUseTargetMethodParameters() {
         AsmRegistry.register(WrapOperationWithTargetParamsMixin::class.java)
 
@@ -7741,6 +7754,23 @@ class FrameworkReliabilityTest {
             value: Int,
             operation: Operation<String>,
         ): String = "wrapped-${operation.call(value + 1)}"
+    }
+
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object WrapOperationInvokeDynamicMixin {
+        @WrapOperation(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            count: Int,
+            operation: Operation<String>,
+        ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
     }
 
     @AsmMixin("WrapMethodStaticTarget")
