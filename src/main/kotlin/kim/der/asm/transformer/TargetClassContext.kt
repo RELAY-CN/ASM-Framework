@@ -1168,9 +1168,8 @@ class TargetClassContext(
         }
 
         val returnType = Type.getReturnType(asmMethod)
-        val returnsTargetType = returnType.internalName == className || returnType.internalName == "java/lang/Object"
-        if (returnType.sort != Type.OBJECT || !returnsTargetType) {
-            throw IllegalStateException("Constructor invoker return type must be $className or java/lang/Object")
+        if (!isConstructorInvokerReturnTypeAllowed(returnType)) {
+            throw IllegalStateException("Constructor invoker return type must be $className, a declared supertype, or java/lang/Object")
         }
 
         val methodNode =
@@ -1199,6 +1198,16 @@ class TargetClassContext(
         methodNode.maxStack = 2 + constructorParamTypes.sumOf { it.size }
 
         return methodNode
+    }
+
+    private fun isConstructorInvokerReturnTypeAllowed(returnType: Type): Boolean {
+        if (returnType.sort != Type.OBJECT) {
+            return false
+        }
+        return returnType.internalName == className ||
+            returnType.internalName == "java/lang/Object" ||
+            returnType.internalName == classNode.superName ||
+            classNode.interfaces.contains(returnType.internalName)
     }
 
     private fun ensureGeneratedMethodAbsent(
