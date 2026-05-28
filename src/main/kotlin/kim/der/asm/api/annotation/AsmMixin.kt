@@ -770,6 +770,8 @@ annotation class Redirect(
  * - 当 [method] 以 [prefix] 开头时，目标名称为去掉前缀后的部分
  * - 否则将 [method] 作为显式目标字段名/方法名
  *
+ * Shadow 字段会先匹配目标类自身字段；若不存在，会沿可加载父类查找可继承字段并校验类型。
+ * [Mutable] 只会移除目标类自身字段的 `final` 标志，不会改写继承字段的修饰符。
  * `@Overwrite` 等复制方法体的场景会把对 Shadow 成员的引用改写为目标类对应成员。
  *
  * @param method 目标名称提示；为空时使用声明名，非空时可直接指定目标名或使用 `shadow_` 前缀
