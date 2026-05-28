@@ -905,6 +905,7 @@ object InvokerMixin {
 ```
 
 普通 `@Invoker` 的参数和返回值必须与目标方法一致；静态性也必须一致。
+如果目标是接口私有方法，框架会使用 `INVOKESPECIAL` 生成桥接调用；普通接口方法仍按接口调用处理。
 `@Invoker("<init>")` 会生成静态工厂方法，参数用于匹配目标构造器，返回类型使用目标类或
 `Any` / `java.lang.Object`。
 
