@@ -828,7 +828,8 @@ annotation class Accessor(
  *
  * 普通方法调用器会在目标类中生成一个同签名桥接方法，并按目标方法的静态性选择
  * `INVOKEVIRTUAL`、`INVOKESPECIAL`、`INVOKESTATIC` 或 `INVOKEINTERFACE`。当 [value] 为空时，
- * 会从 `callXxx` 或 `invokeXxx` 方法名推断目标方法名。
+ * 会从 `callXxx` 或 `invokeXxx` 方法名推断目标方法名。接口私有方法会使用
+ * `INVOKESPECIAL` 生成桥接调用，普通接口方法仍使用 `INVOKEINTERFACE`。
  *
  * 构造器调用器使用 `@Invoker("<init>")` 声明。此时 ASM 方法必须是静态方法，
  * 参数用于匹配目标构造器，返回类型必须是目标类或 `Any` / `java.lang.Object`，
@@ -839,6 +840,7 @@ annotation class Accessor(
  * - 目标方法或构造器不存在时转换失败。
  * - 普通调用器的参数与返回值必须与目标方法描述符一致。
  * - 普通调用器的静态性必须与目标方法一致。
+ * - 接口私有方法可被普通调用器桥接，调用点会保持 JVM 要求的 special 调用语义。
  * - 生成的方法若与目标类已有同名同描述符方法冲突，转换会失败。
  *
  * @param value 目标方法名；为空时从方法名推断
