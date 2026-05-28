@@ -2757,31 +2757,31 @@ class TargetClassContext(
      */
     private fun applyRedirectAllMethods(annotation: RedirectAllMethods): Boolean {
         var transformed = false
-        
+
         // 收集所有 @Redirect 注解的方法
         val redirectMethods = asmInfo.asmClass.declaredMethods.filter { method ->
             method.getAnnotation(Redirect::class.java) != null
         }
-        
+
         if (redirectMethods.isEmpty()) {
             return false
         }
-        
+
         // 获取目标类的所有方法（排除构造函数和静态初始化块）
-        val targetMethods = classNode.methods.filter { 
-            it.name != "<init>" && it.name != "<clinit>" 
+        val targetMethods = classNode.methods.filter {
+            it.name != "<init>" && it.name != "<clinit>"
         }
-        
+
         // 为每个 @Redirect 方法应用到所有目标方法
         for (redirectMethod in redirectMethods) {
             val redirectAnnotation = redirectMethod.getAnnotation(Redirect::class.java) ?: continue
-            
+
             // 构建重定向目标
             val redirectTarget = buildRedirectTarget(redirectAnnotation.target, redirectAnnotation.at.target)
-            
-            // 为每个目标方法应用此重定向
+            var redirectCount = 0
+
+            // 为每个目标方法应用此重定向，并按整个目标类累计命中数契约。
             for (methodNode in targetMethods) {
-                // 直接使用注入器应用重定向
                 val injector =
                     AsmInjectorFactory.createRedirectInjector(
                         redirectMethod,
@@ -2792,15 +2792,17 @@ class TargetClassContext(
                         redirectAnnotation.slice,
                         redirectAnnotation.at.args,
                     )
-                if (injector.inject(methodNode)) {
-                    transformed = true
-                }
+                redirectCount += injector.injectCount(methodNode)
+            }
+
+            if (requireRedirectCount(redirectCount, redirectAnnotation, redirectMethod, "<all methods>")) {
+                transformed = true
             }
         }
-        
+
         return transformed
     }
-    
+
     /**
      * 根据方法签名查找方法
      */
