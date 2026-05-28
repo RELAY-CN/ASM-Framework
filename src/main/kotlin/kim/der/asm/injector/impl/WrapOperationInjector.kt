@@ -372,9 +372,7 @@ class WrapOperationInjector(
 
     private fun injectInstanceof(target: MethodNode): Int {
         val typeTarget = at.target.replace('.', '/')
-        if (typeTarget.isEmpty()) {
-            throw IllegalArgumentException("@WrapOperation INSTANCEOF target type must not be empty")
-        }
+        val matchAnyTarget = typeTarget.isEmpty()
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -384,7 +382,7 @@ class WrapOperationInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is TypeInsnNode || insn.opcode != Opcodes.INSTANCEOF || insn.desc != typeTarget) {
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.INSTANCEOF || (!matchAnyTarget && insn.desc != typeTarget)) {
                 continue
             }
 
