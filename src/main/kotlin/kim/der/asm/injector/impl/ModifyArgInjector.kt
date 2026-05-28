@@ -95,23 +95,21 @@ class ModifyArgInjector(
                 continue
             }
 
-            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                continue
-            }
+            val callSite = describeMatchedCallSite(insn, targetOwner, targetName, targetDesc) ?: continue
 
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {
                 continue
             }
 
-            val callParamTypes = Type.getArgumentTypes(insn.desc)
+            val callParamTypes = Type.getArgumentTypes(callSite.desc)
             if (argIndex < 0 || argIndex >= callParamTypes.size) {
                 throw IllegalArgumentException("Invalid argument index: $argIndex (call has ${callParamTypes.size} parameters)")
             }
 
             val paramType = callParamTypes[argIndex]
             val targetParamCount = validateHandlerSignature(target, paramType)
-            val il = buildCallArgumentModification(target, insn, callParamTypes, paramType, targetParamCount)
+            val il = buildCallArgumentModification(target, callSite.hasReceiver, callParamTypes, paramType, targetParamCount)
             target.instructions.insertBefore(insn, il)
             injectionCount++
         }
@@ -172,20 +170,19 @@ class ModifyArgInjector(
 
     private fun buildCallArgumentModification(
         target: MethodNode,
-        callInsn: MethodInsnNode,
+        hasReceiver: Boolean,
         callParamTypes: Array<Type>,
         selectedParamType: Type,
         targetParamCount: Int,
     ): InsnList {
         val il = InsnList()
-        val isStaticCall = callInsn.opcode == Opcodes.INVOKESTATIC
         val firstTempIndex = nextLocalIndex(target)
         var nextTempIndex = firstTempIndex
         val receiverIndex =
-            if (isStaticCall) {
-                null
-            } else {
+            if (hasReceiver) {
                 nextTempIndex.also { nextTempIndex += 1 }
+            } else {
+                null
             }
         val argSlots =
             callParamTypes.map { paramType ->
@@ -582,6 +579,46 @@ class ModifyArgInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    private fun describeMatchedCallSite(
+        insn: AbstractInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): CallSite? =
+        when (insn) {
+            is MethodInsnNode ->
+                if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                    CallSite(
+                        desc = insn.desc,
+                        hasReceiver = insn.opcode != Opcodes.INVOKESTATIC,
+                    )
+                } else {
+                    null
+                }
+            is InvokeDynamicInsnNode ->
+                if (matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc)) {
+                    CallSite(desc = insn.desc, hasReceiver = false)
+                } else {
+                    null
+                }
+            else -> null
+        }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
@@ -656,4 +693,9 @@ class ModifyArgInjector(
      * 检查是否需要双槽
      */
     private fun needsDoubleSlot(desc: String): Boolean = desc == "J" || desc == "D"
+
+    private data class CallSite(
+        val desc: String,
+        val hasReceiver: Boolean,
+    )
 }
