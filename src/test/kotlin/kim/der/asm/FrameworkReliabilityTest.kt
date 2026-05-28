@@ -3213,6 +3213,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantWithoutExplicitValueAcceptsTypedReferenceParameterForNullConstant() {
+        AsmRegistry.register(NullConstantTypedReferenceParameterWithoutValueMixin::class.java)
+
+        val transformed = AsmProcessor().transform("NullConstantTarget", nullConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NullConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("typed-null", result)
+    }
+
+    @Test
     fun modifyConstantMatchesExplicitTrueBooleanConstant() {
         AsmRegistry.register(TrueBooleanModifyConstantMixin::class.java)
 
@@ -8722,6 +8734,16 @@ class FrameworkReliabilityTest {
     @AsmMixin("NullConstantTarget")
     object NullConstantTypedReferenceParameterMixin {
         @ModifyConstant(method = "value()Ljava/lang/Object;", constant = "null")
+        @JvmStatic
+        fun modify(original: String?): String {
+            assertEquals(null, original)
+            return "typed-null"
+        }
+    }
+
+    @AsmMixin("NullConstantTarget")
+    object NullConstantTypedReferenceParameterWithoutValueMixin {
+        @ModifyConstant(method = "value()Ljava/lang/Object;")
         @JvmStatic
         fun modify(original: String?): String {
             assertEquals(null, original)
