@@ -735,6 +735,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtMethodStartAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(ModifyArgGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArgTarget", argTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("value-generic", result)
+    }
+
+    @Test
     fun modifyArgCanUseStaticTargetMethodParametersAtMethodStart() {
         AsmRegistry.register(StaticModifyArgWithTargetParamsMixin::class.java)
 
@@ -791,6 +803,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("hello bad", result)
+    }
+
+    @Test
+    fun modifyArgAtInvokeAcceptsGenericObjectReturnType() {
+        AsmRegistry.register(InvokeModifyArgGenericReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-original-generic", result)
     }
 
     @Test
@@ -6070,6 +6094,13 @@ class FrameworkReliabilityTest {
         ): String = "$original-$targetValue"
     }
 
+    @AsmMixin("ArgTarget")
+    object ModifyArgGenericReturnMixin {
+        @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
+        @JvmStatic
+        fun modify(original: String): Any = "$original-generic"
+    }
+
     @AsmMixin("StaticArgTarget")
     object StaticModifyArgWithTargetParamsMixin {
         @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
@@ -6134,6 +6165,20 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: CharSequence): StringBuilder = StringBuilder("raw")
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InvokeModifyArgGenericReturnMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): Any = "$original-generic"
     }
 
     @AsmMixin("InvokeModifyArgParamTarget")
