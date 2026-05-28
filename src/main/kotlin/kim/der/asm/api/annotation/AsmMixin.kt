@@ -563,10 +563,11 @@ annotation class ModifyExpressionValue(
  * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
  *   边界指令本身不参与匹配
  * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项；HEAD 模式同类型入口参数唯一时可省略 [ordinal]
+ * - [method] 为空时会按 handler 名称、变量类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际变量修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望变量修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；为空时按 handler 名称和签名兼容规则推断唯一同名目标方法
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param index 要修改的局部变量槽位索引
  * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号；HEAD 模式同类型入口参数唯一时可保持默认值
