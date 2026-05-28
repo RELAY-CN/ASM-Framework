@@ -911,18 +911,42 @@ class TargetClassContext(
 
     private fun findInheritedAccessorTargetField(fieldName: String): AccessorTargetField? {
         var parentName = classNode.superName
+        val interfaceNames = classNode.interfaces.toMutableList()
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             parentClass.fields.find { it.name == fieldName && isAccessorInheritedFieldVisible(it) }?.let {
                 return AccessorTargetField(parentClass.name, it)
             }
+            interfaceNames += parentClass.interfaces
             parentName = parentClass.superName
+        }
+        return findInterfaceAccessorTargetField(interfaceNames, fieldName)
+    }
+
+    private fun findInterfaceAccessorTargetField(
+        interfaceNames: List<String>,
+        fieldName: String,
+        visited: MutableSet<String> = mutableSetOf(),
+    ): AccessorTargetField? {
+        for (interfaceName in interfaceNames) {
+            if (!visited.add(interfaceName)) {
+                continue
+            }
+            val interfaceClass = loadParentClass(interfaceName) ?: continue
+            interfaceClass.fields.find { it.name == fieldName && isAccessorInheritedInterfaceFieldVisible(it) }?.let {
+                return AccessorTargetField(interfaceName, it)
+            }
+            findInterfaceAccessorTargetField(interfaceClass.interfaces, fieldName, visited)?.let { return it }
         }
         return null
     }
 
     private fun isAccessorInheritedFieldVisible(field: FieldNode): Boolean =
         (field.access and Opcodes.ACC_PRIVATE) == 0
+
+    private fun isAccessorInheritedInterfaceFieldVisible(field: FieldNode): Boolean =
+        (field.access and (Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC)) ==
+            (Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC)
 
     /**
      * 应用 @Invoker 调用器
