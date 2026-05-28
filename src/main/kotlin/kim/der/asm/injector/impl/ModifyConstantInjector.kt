@@ -31,6 +31,8 @@ import java.lang.reflect.Modifier
  * 引用类型参数可声明为原值类型的父类、接口、`Any` 或 `Object`，基础类型仍需精确匹配；
  * 引用类型返回值可返回原常量类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型。
  * 匹配 `ACONST_NULL` 时，允许任意引用类型参数接收原始 `null`，并会按 handler 首参类型确定替换后的引用栈类型。
+ * 常量文本匹配后仍会按 handler 返回类型筛选实际候选；例如 `"1"` 可能同时命中 `int` 与 `long` 文本，
+ * 但 `Int` handler 只会修改 `int` 常量。
  * [injectCount] 会返回实际替换的常量数量，供上层执行 `@ModifyConstant` 的命中数契约校验。
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
