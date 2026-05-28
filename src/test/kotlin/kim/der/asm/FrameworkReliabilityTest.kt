@@ -4660,6 +4660,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun constructorInvokerCanReturnImplementedInterface() {
+        AsmRegistry.register(InterfaceReturnConstructorInvokerMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorInvokerTarget", constructorInvokerTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "createAsRunnable" }
+
+        assertEquals("(Ljava/lang/String;)Ljava/lang/Runnable;", method.desc)
+    }
+
+    @Test
     fun invokerUsesInvokespecialForPrivateInterfaceMethod() {
         AsmRegistry.register(PrivateInterfaceInvokerMixin::class.java)
 
@@ -10332,6 +10344,13 @@ class FrameworkReliabilityTest {
         fun create(value: String): Any = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("ConstructorInvokerTarget")
+    object InterfaceReturnConstructorInvokerMixin {
+        @Invoker("<init>")
+        @JvmStatic
+        fun createAsRunnable(value: String): Runnable = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("PrivateInterfaceInvokerTarget")
     class PrivateInterfaceInvokerMixin {
         @Invoker("secret")
@@ -13939,7 +13958,7 @@ class FrameworkReliabilityTest {
 
     private fun constructorInvokerTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
-        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorInvokerTarget", null, "java/lang/Object", null)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorInvokerTarget", null, "java/lang/Object", arrayOf("java/lang/Runnable"))
         cw.visitField(Opcodes.ACC_PRIVATE, "value", "Ljava/lang/String;", null, null).visitEnd()
         cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "(Ljava/lang/String;)V", null, null).apply {
             visitCode()
@@ -13950,6 +13969,12 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.PUTFIELD, "ConstructorInvokerTarget", "value", "Ljava/lang/String;")
             visitInsn(Opcodes.RETURN)
             visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
             visitEnd()
         }
         cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
