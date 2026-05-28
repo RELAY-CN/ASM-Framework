@@ -197,6 +197,8 @@ annotation class Unique
  *
  * 用于修改目标方法参数，或目标方法内某次方法调用/构造器调用的参数值（语义参考 Mixin 的 `@ModifyArg`）。
  * 默认在目标方法入口直接写回参数槽位；当 [at] 指向 [InjectionPoint.INVOKE] 时，会改写匹配调用点的指定参数。
+ * 入口参数模式下可省略 [method]，框架会按 handler 方法名、[index]、首个参数类型、返回类型和后续目标方法参数前缀，
+ * 在目标类中推断唯一同名方法；若存在多个兼容重载，需要显式声明 [method]。
  *
  * ASM 方法要求：
  *
@@ -208,7 +210,7 @@ annotation class Unique
  * - [require] / [allow] 可约束实际参数修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名
+ * @param method 目标方法签名；入口参数模式可省略并按 handler 名称推断唯一兼容目标，INVOKE 调用点模式建议显式声明
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
  * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用、构造器调用或
  * `invokedynamic` 调用；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配
