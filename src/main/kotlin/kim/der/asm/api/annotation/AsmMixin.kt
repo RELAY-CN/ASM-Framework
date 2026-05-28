@@ -209,7 +209,8 @@ annotation class Unique
  *
  * @param method 目标方法签名
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
- * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用或构造器调用
+ * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用、构造器调用或
+ * `invokedynamic` 调用；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，当前仅在 INVOKE 模式下生效
  * @param slice 切片范围；当前 INVOKE 调用点参数修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
