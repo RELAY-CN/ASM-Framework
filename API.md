@@ -356,7 +356,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 
 ### @WrapWithCondition
 
-在目标方法内匹配 `void` 方法调用、字段写入或简单数组元素写入，并用 boolean handler 决定是否继续执行原指令。适合按条件跳过日志、通知、字段写入、数组写入、广播等副作用。
+在目标方法内匹配 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或简单数组元素写入，并用 boolean handler 决定是否继续执行原指令。适合按条件跳过日志、通知、字段写入、数组写入、广播等副作用。
 
 **参数：**
 
@@ -371,7 +371,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 
 `@WrapWithCondition` handler 必须返回 `Boolean`。返回 `true` 时恢复原 receiver/参数、字段写入值或数组写入栈参数并继续执行原指令；返回 `false` 时跳过该指令。
 
-`INVOKE` 模式只支持返回 `void` 的目标调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；后续参数可按目标方法声明顺序接收目标方法参数前缀。遇到非 `void` 调用会在转换阶段失败。
+`INVOKE` 模式只支持返回 `void` 的目标调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；`invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数。动态调用目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。后续参数可按目标方法声明顺序接收目标方法参数前缀。遇到非 `void` 调用会在转换阶段失败。
 可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `FIELD_ASSIGN` 模式默认匹配 `PUTFIELD` / `PUTSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。实例字段写入 handler 先接收字段 owner，再接收待写入值；静态字段写入 handler 接收待写入值；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。
@@ -382,7 +382,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 `Int` 索引与待写入元素值，后续可继续接收目标方法参数前缀。返回 `true` 时执行原 `xASTORE`，返回 `false`
 时跳过该数组写入。当前实现匹配简单数组字段访问形态，即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
 
-`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，`void` 方法调用、字段写入与数组元素写入均按实际条件包裹数量计数；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
+`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，`void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入与数组元素写入均按实际条件包裹数量计数；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 

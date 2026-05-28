@@ -428,12 +428,14 @@ annotation class WrapMethod(
 /**
  * 条件包裹注解。
  *
- * 用于在目标方法内匹配 `void` 方法调用、字段写入或简单数组元素写入前插入条件判断（语义参考
+ * 用于在目标方法内匹配 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或简单数组元素写入前插入条件判断（语义参考
  * Mixin Extras 的 `@WrapWithCondition`）。handler 返回 `true` 时继续执行原调用或写入，
  * 返回 `false` 时跳过原指令。
  * 相比 [Redirect]，该注解不替换原逻辑，只决定原指令是否继续执行，更适合“按条件跳过副作用调用或写入”的场景。
  *
- * [InjectionPoint.INVOKE] 模式要求目标调用返回类型必须为 `void`。[InjectionPoint.FIELD_ASSIGN] 模式匹配
+ * [InjectionPoint.INVOKE] 模式要求目标普通调用或 `invokedynamic` 调用返回类型必须为 `void`。
+ * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+ * [InjectionPoint.FIELD_ASSIGN] 模式匹配
  * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
  * 数组元素写入使用 [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定，
  * 当前匹配由最近的目标数组字段读取产生数组引用的 `xASTORE` 指令。
@@ -445,11 +447,12 @@ annotation class WrapMethod(
  * - handler 必须返回 `Boolean`
  * - 非静态目标调用的 handler 参数先接收 receiver，再接收原调用参数
  * - 静态目标调用的 handler 参数接收原调用参数
+ * - `invokedynamic` 目标调用没有 receiver，handler 参数接收动态调用点描述符中的参数
  * - 实例字段写入的 handler 参数先接收字段 owner，再接收待写入值
  * - 静态字段写入的 handler 参数接收待写入值
  * - 数组元素写入的 handler 参数先接收数组引用、`Int` 索引，再接收待写入元素值
  * - 后续参数可按顺序接收目标方法参数前缀
- * - [At.target] 必须指定要匹配的方法调用签名或字段签名
+ * - [At.target] 必须指定要匹配的方法调用、动态调用或字段签名
  *
  * @param method 目标方法签名
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
