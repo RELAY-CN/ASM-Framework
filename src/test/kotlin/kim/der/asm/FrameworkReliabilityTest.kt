@@ -4703,11 +4703,22 @@ class FrameworkReliabilityTest {
 
         val transformed =
             AsmProcessor().transform("InterfaceDefaultInvokerTarget", interfaceDefaultInvokerTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val invokerMethod = classNode.methods.single {
+            it.name == "callSpliterator" && it.desc == "()Ljava/util/Spliterator;"
+        }
+        val defaultCall = invokerMethod.instructions.toArray()
+            .filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>()
+            .single { it.name == "spliterator" }
         val clazz = loadClass("InterfaceDefaultInvokerTarget", transformed)
         val instance = clazz.getDeclaredConstructor().newInstance()
-        val spliterator = clazz.getMethod("callSpliterator").invoke(instance) as java.util.Spliterator<*>
+        @Suppress("UNCHECKED_CAST")
+        val spliterator = clazz.getMethod("callSpliterator").invoke(instance) as java.util.Spliterator<Any?>
 
-        assertEquals(0L, spliterator.estimateSize())
+        assertEquals(Opcodes.INVOKEINTERFACE, defaultCall.opcode)
+        assertEquals("java/lang/Iterable", defaultCall.owner)
+        assertEquals(true, defaultCall.itf)
+        assertEquals(false, spliterator.tryAdvance { _ -> })
     }
 
     @Test
