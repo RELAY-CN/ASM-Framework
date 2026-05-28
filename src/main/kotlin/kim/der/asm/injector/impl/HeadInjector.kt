@@ -62,8 +62,8 @@ class HeadInjector(
             callbackVarIndex,
         )
 
-        // 如果方法有返回值且目标方法是 void，需要弹出
-        if (AsmMethodCallGenerator.needsPopReturnValue(asmMethod, target)) {
+        // HEAD handler 的返回值不参与目标方法结果，必须始终丢弃。
+        if (Type.getReturnType(asmMethod) != Type.VOID_TYPE) {
             AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
         }
 

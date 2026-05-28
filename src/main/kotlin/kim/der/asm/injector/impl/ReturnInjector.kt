@@ -136,6 +136,11 @@ class ReturnInjector(
                     callbackVarIndex,
                 )
 
+                // RETURN handler 的返回值不参与目标方法结果，目标返回值由 CallbackInfo 或原返回值恢复。
+                if (Type.getReturnType(asmMethod) != Type.VOID_TYPE) {
+                    AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
+                }
+
                 // 如果使用 CallbackInfo 且有返回值，检查并应用修改后的返回值
                 if (needsCallbackInfo && callbackVarIndex != null && returnType != Type.VOID_TYPE && returnVarIndex != null) {
                     // 获取修改后的返回值
@@ -201,11 +206,6 @@ class ReturnInjector(
                 } else if (returnType != Type.VOID_TYPE && returnVarIndex != null) {
                     // 如果没有使用 CallbackInfo，重新加载原始返回值
                     InstructionUtil.loadParam(returnType, returnVarIndex).let { il.add(it) }
-                }
-
-                // 如果方法有返回值且目标方法是 void，需要弹出
-                if (Type.getReturnType(asmMethod) != Type.VOID_TYPE && returnType == Type.VOID_TYPE) {
-                    AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
                 }
 
                 instructions.insertBefore(insn, il)
