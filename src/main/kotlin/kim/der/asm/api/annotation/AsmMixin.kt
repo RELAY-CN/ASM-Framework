@@ -497,7 +497,7 @@ annotation class WrapWithCondition(
  * ASM 方法要求：
  *
  * - 第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收
- * - primitive 返回类型必须与匹配表达式的值类型一致；引用类型表达式可返回匹配类型的子类型；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
+ * - primitive 返回类型必须与匹配表达式的值类型一致；引用类型表达式可返回匹配类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 方法调用目标的 [At.target] 必须指定调用签名；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
  *   以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`

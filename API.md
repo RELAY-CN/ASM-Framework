@@ -402,7 +402,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 - `remap: Boolean = false` - 是否重映射
 
 `@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object`
-接收。primitive 表达式的返回类型必须与表达式类型一致；引用类型表达式可返回表达式类型的子类型；`THROW` 模式可返回 `Throwable` 或具体异常子类。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。
+接收。primitive 表达式的返回类型必须与表达式类型一致；引用类型表达式可返回表达式类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。
 该注解不会替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断或抛异常指令，也不会接收原调用参数；`invokedynamic` 调用可通过 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`。字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组长度使用 `at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象，`INSTANCEOF` 模式会在匹配类型判断后接收 `Boolean` 结果，二者的 `At.target` 均为类型 internal name 或 binary name。`THROW` 模式会在 `ATHROW` 前接收即将抛出的 `Throwable`。`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF` 与 `THROW` 表达式可用 `slice.from` / `slice.to` 限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`。
 
 `@ModifyExpressionValue` 会按实际改写的表达式值数量计数。未设置 `ordinal` 时命中全部匹配表达式；
