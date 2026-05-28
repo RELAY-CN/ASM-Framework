@@ -2712,6 +2712,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtInstanceofWithoutTargetWrapsTypeChecks() {
+        AsmRegistry.register(AnyInstanceofWrapOperationMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiInstanceofTarget", multiInstanceofTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiInstanceofTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("isString", Any::class.java, Any::class.java)
+
+        assertEquals(true, method.invoke(instance, StringBuilder("ignored"), StringBuilder("raw")))
+        assertEquals(false, method.invoke(instance, StringBuilder("ignored"), "raw"))
+    }
+
+    @Test
     fun wrapOperationOrdinalSelectsSingleInvokeCall() {
         AsmRegistry.register(WrapOperationOrdinalMixin::class.java)
 
@@ -8508,6 +8521,24 @@ class FrameworkReliabilityTest {
             original: Any,
             force: Boolean,
         ): Boolean = operation.call(value.toString()) && value === original && !force
+    }
+
+    @AsmMixin("MultiInstanceofTarget")
+    object AnyInstanceofWrapOperationMixin {
+        @WrapOperation(
+            method = "isString(Ljava/lang/Object;Ljava/lang/Object;)Z",
+            at = At(value = InjectionPoint.INSTANCEOF),
+        )
+        @JvmStatic
+        fun wrap(
+            value: Any,
+            operation: Operation<Boolean>,
+            ignored: Any,
+            raw: Any,
+        ): Boolean {
+            ignored.hashCode()
+            return !operation.call(value)
+        }
     }
 
     @AsmMixin("ModifyReceiverTarget")
@@ -14897,6 +14928,25 @@ class FrameworkReliabilityTest {
         cw.visitMethod(Opcodes.ACC_PUBLIC, "isString", "(Ljava/lang/Object;Z)Z", null, null).apply {
             visitCode()
             visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.INSTANCEOF, "java/lang/String")
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun multiInstanceofTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MultiInstanceofTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "isString", "(Ljava/lang/Object;Ljava/lang/Object;)Z", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitTypeInsn(Opcodes.INSTANCEOF, "java/lang/StringBuilder")
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 2)
             visitTypeInsn(Opcodes.INSTANCEOF, "java/lang/String")
             visitInsn(Opcodes.IRETURN)
             visitMaxs(1, 3)
