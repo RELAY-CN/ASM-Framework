@@ -324,12 +324,12 @@ annotation class ModifyReceiver(
 /**
  * 包裹原始操作注解。
  *
- * 用于把目标方法内匹配的方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断替换为 handler 调用（语义参考
+ * 用于把目标方法内匹配的方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断替换为 handler 调用（语义参考
  * Mixin Extras 的 `@WrapOperation`）。handler 会接收原操作的 receiver（实例调用、实例字段读取与
- * 实例字段写入）、原调用参数、构造器参数、字段写入值、数组访问参数或类型检查输入值与 [Operation]，
+ * 实例字段写入）、原调用参数、动态调用点参数、构造器参数、字段写入值、数组访问参数或类型检查输入值与 [Operation]，
  * 可选择调用、跳过或多次调用原始操作。
  *
- * 当前实现支持 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
+ * 当前实现支持 [InjectionPoint.INVOKE] 方法调用、`invokedynamic` 调用、[InjectionPoint.FIELD] 字段读取与
  * [InjectionPoint.FIELD_ASSIGN] 字段写入；[InjectionPoint.FIELD] 可通过 `args = ["array=get"]`
  * 包裹数组元素读取，通过 `args = ["array=length"]` 包裹数组长度读取；
  * [InjectionPoint.FIELD_ASSIGN] 可通过 `args = ["array=set"]` 包裹数组元素写入。
@@ -342,6 +342,7 @@ annotation class ModifyReceiver(
  *
  * - 实例调用的 handler 参数先接收 receiver，再接收原调用参数
  * - 静态调用的 handler 参数接收原调用参数
+ * - `invokedynamic` 调用没有 receiver，handler 参数接收动态调用点描述符中的参数
  * - 构造器调用的 handler 参数先接收构造器参数，不接收未初始化 receiver
  * - `GETFIELD` 的 handler 参数先接收字段 owner
  * - `GETSTATIC` 的 handler 不接收字段 owner
@@ -352,14 +353,14 @@ annotation class ModifyReceiver(
  * - 数组长度 handler 参数先接收数组引用
  * - 类型转换 handler 参数先接收待转换对象；`Operation.call(value)` 会执行原始 `CHECKCAST` 语义
  * - 类型判断 handler 参数先接收被判断对象；`Operation.call(value)` 会执行原始 `INSTANCEOF` 语义并返回 `Boolean`
- * - 下一参数必须是 [Operation]，用于执行原始调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断
+ * - 下一参数必须是 [Operation]，用于执行原始调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换或类型判断
  * - handler 参数接收引用或数组栈值、目标方法参数时，可声明为原值类型的父类、接口、`Any` 或 `Object`
  * - handler 返回类型必须兼容原操作返回类型；基础类型需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - 原调用为 `void` 时 handler 必须返回 `void`，构造器调用必须返回 owner 类型兼容对象
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 必须为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  *   [InjectionPoint.NEW] 或 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]，并通过 [At.target]
- *   指定要匹配的方法调用、字段读取、字段写入、产生数组引用的字段、构造类型或类型目标
+ *   指定要匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、产生数组引用的字段、构造类型或类型目标
  *
  * @param method 目标方法签名
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
