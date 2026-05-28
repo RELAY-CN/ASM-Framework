@@ -109,13 +109,14 @@ annotation class ReplaceAllMethods(
 /**
  * 全方法重定向注解。
  *
- * 用于将目标类所有方法中的指定调用统一重定向到 [Redirect] 标注的方法。
- * 在该模式下，[Redirect.method] 不用于筛选目标方法；转换器会把每个 `@Redirect` 处理器应用到目标类的全部方法。
+ * 用于将目标类所有普通方法（跳过 `<init>` / `<clinit>`）中的指定调用统一重定向到 [Redirect] 标注的方法。
+ * 在该模式下，[Redirect.method] 不用于筛选目标方法；转换器会把每个 `@Redirect` 处理器应用到目标类的全部普通方法。
  *
- * ## 使用场景
+ * ## 使用边界
  *
- * - 将所有方法中的 `System.gc()` 调用替换成空操作
- * - 将所有方法中的某个调用统一重定向到自定义实现
+ * - 仅遍历普通方法，不处理构造器和类初始化方法。
+ * - [Redirect.require] / [Redirect.allow] / [Redirect.expect] 按整个目标类的总命中数校验。
+ * - [Redirect.ordinal] 与 [Redirect.slice] 仍按单个目标方法生效。
  *
  * 与普通 `@Redirect` 的区别：
  *

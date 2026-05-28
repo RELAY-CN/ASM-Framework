@@ -114,6 +114,7 @@ val transformedBytes = processor.transform(
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
 - **@Redirect** - 重定向方法调用、`invokedynamic` 调用、构造器调用、字段访问、简单数组元素访问、数组长度读取、类型转换或类型判断
+- **@RedirectAllMethods** - 将 `@Redirect` 应用于目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
@@ -1244,6 +1245,8 @@ fun redirectConnect(socket: Socket, address: SocketAddress, timeout: Int) {
 handler 先接收调用点描述符中的参数，再按需接收目标方法参数前缀；目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及调用点描述符匹配。
 
 `require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。
+
+当需要把同一组重定向规则应用到目标类的所有普通方法时，使用 `@RedirectAllMethods`。它会跳过构造器和类初始化方法，并按整个目标类的总命中数校验 `require` / `allow` / `expect`；`ordinal` 和 `slice` 仍然只在单个目标方法内生效。
 
 ### 4. 错误处理
 

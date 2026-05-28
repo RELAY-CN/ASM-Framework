@@ -550,6 +550,18 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
+### @RedirectAllMethods
+
+将目标类所有普通方法中的指定调用统一重定向到 `@Redirect` 标注的方法。
+
+该注解不会用 `method` 字段筛选目标方法；框架会把每个 `@Redirect` 处理器应用到目标类的全部普通方法（跳过构造器和类初始化方法）。`require` / `allow` / `expect` 按整个目标类的总命中数校验，`ordinal` 与 `slice` 仍按单个目标方法生效。
+
+**参数：**
+
+- `remap: Boolean = false` - 是否重映射
+
+**示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
+
 ### @Shadow
 
 在 Mixin 类中引用目标类的字段或方法。转换阶段会校验目标成员存在，字段还会校验类型一致；
