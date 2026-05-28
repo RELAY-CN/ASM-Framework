@@ -32,7 +32,10 @@ package kim.der.asm.api.annotation
  * - [allow] 大于等于 0 时作为最大命中数；实际命中数超出会在转换阶段失败。
  * - [expect] 设置为非默认值时作为期望命中数；不一致时输出警告，但不阻断转换。
  *
- * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
+ * [method] 为空时，框架会按 handler 名称、注入点和 handler 签名兼容规则匹配唯一同名目标方法。
+ * 多个兼容重载需要显式指定 [method]。
+ *
+ * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`；为空时按 handler 名称和注入点兼容性推断唯一同名目标方法
  * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/THROW
  * @param cancellable 是否声明该注入点允许取消；当前 HEAD 注入会据此允许 [CallbackInfo.cancel] 或
  * [CallbackInfo.setReturnValue] 触发提前返回分支

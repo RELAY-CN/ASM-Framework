@@ -168,7 +168,6 @@ object LoggingMixin {
 
 ```kotlin
 @AsmInject(
-    method = "process(Ljava/lang/String;)V",
     target = InjectionPoint.INVOKE,
     at = At(
         value = InjectionPoint.INVOKE,
@@ -181,13 +180,14 @@ object LoggingMixin {
     require = 1,
     allow = 1,
 )
-fun beforeTrim(value: String) {
+fun process(value: String) {
     println(value)
 }
 ```
 
 普通 `@AsmInject(INVOKE)` 的 `Shift.BEFORE` / `Shift.AFTER` handler 会先接收匹配调用参数前缀，
 再接收目标方法参数前缀；引用或数组参数可用父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
+省略 `method` 时，handler 名称必须与目标方法名一致，框架会按注入点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
 `from` 边界之后、`to` 边界之前的调用点、字段读写指令、局部变量读写指令、类型转换指令或抛异常指令才会参与匹配，边界调用本身不会被注入；
 `ordinal` 会在切片内重新计数。
