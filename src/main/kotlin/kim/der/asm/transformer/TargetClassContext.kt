@@ -1204,10 +1204,27 @@ class TargetClassContext(
         if (returnType.sort != Type.OBJECT) {
             return false
         }
-        return returnType.internalName == className ||
+        if (returnType.internalName == className ||
             returnType.internalName == "java/lang/Object" ||
             returnType.internalName == classNode.superName ||
             classNode.interfaces.contains(returnType.internalName)
+        ) {
+            return true
+        }
+        return runCatching {
+            val returnClass = loadReferenceClass(returnType)
+            constructorInvokerDeclaredSupertypes().any { returnClass.isAssignableFrom(it) }
+        }.getOrDefault(false)
+    }
+
+    private fun constructorInvokerDeclaredSupertypes(): List<Class<*>> {
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return sequenceOf(classNode.superName)
+            .plus(classNode.interfaces.asSequence())
+            .filter { it != null && it != "java/lang/Object" }
+            .map { it!!.replace('/', '.') }
+            .mapNotNull { runCatching { Class.forName(it, false, classLoader) }.getOrNull() }
+            .toList()
     }
 
     private fun ensureGeneratedMethodAbsent(
