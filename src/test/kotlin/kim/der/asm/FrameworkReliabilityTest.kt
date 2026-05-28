@@ -747,6 +747,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredModifyArgTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArgTarget", argTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+
+        assertEquals("inferred-value", result)
+    }
+
+    @Test
     fun modifyArgAtMethodStartAcceptsGenericObjectReturnType() {
         AsmRegistry.register(ModifyArgGenericReturnMixin::class.java)
 
@@ -6315,6 +6327,13 @@ class FrameworkReliabilityTest {
             original: String,
             targetValue: String,
         ): String = "$original-$targetValue"
+    }
+
+    @AsmMixin("ArgTarget")
+    object InferredModifyArgTargetMixin {
+        @ModifyArg(index = 0)
+        @JvmStatic
+        fun echo(original: String): String = "inferred-$original"
     }
 
     @AsmMixin("ArgTarget")
