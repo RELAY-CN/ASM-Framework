@@ -4684,6 +4684,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun accessorCanReadInheritedInterfaceField() {
+        AsmRegistry.register(InheritedInterfaceFieldAccessorMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InheritedInterfaceAccessorTarget", inheritedInterfaceAccessorTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val accessorMethod = classNode.methods.single { it.name == "getSqlIntegerType" }
+        val fieldRead = accessorMethod.instructions.toArray()
+            .filterIsInstance<org.objectweb.asm.tree.FieldInsnNode>()
+            .single { it.name == "INTEGER" }
+
+        assertEquals("java/sql/Types", fieldRead.owner)
+        assertEquals(Opcodes.GETSTATIC, fieldRead.opcode)
+    }
+
+    @Test
     fun invokerCanCallInheritedMethod() {
         AsmRegistry.register(InheritedMethodInvokerMixin::class.java)
 
@@ -10454,6 +10470,13 @@ class FrameworkReliabilityTest {
         fun getEra(): Int = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("InheritedInterfaceAccessorTarget")
+    object InheritedInterfaceFieldAccessorMixin {
+        @Accessor("INTEGER")
+        @JvmStatic
+        fun getSqlIntegerType(): Int = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("InheritedAccessorTarget")
     class InheritedMethodInvokerMixin {
         @Invoker("size")
@@ -14052,6 +14075,20 @@ class FrameworkReliabilityTest {
             null,
             "java/util/Calendar",
             null,
+        )
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun inheritedInterfaceAccessorTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_ABSTRACT,
+            "InheritedInterfaceAccessorTarget",
+            null,
+            "java/lang/Object",
+            arrayOf("java/sql/Types"),
         )
         cw.visitEnd()
         return cw.toByteArray()
