@@ -1528,7 +1528,7 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyArgs,
     ): Boolean {
-        val targetMethod = requireTargetMethod(annotation.method)
+        val (targetMethod, methodSignature) = resolveModifyArgsTargetMethod(method, annotation)
         val injector = AsmInjectorFactory.createModifyArgsInjector(
             method,
             asmInfo,
@@ -1542,15 +1542,263 @@ class TargetClassContext(
                 injectionCount,
                 annotation,
                 method,
-                annotation.method,
+                methodSignature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@ModifyArgs",
             method,
-            annotation.method,
+            methodSignature,
         )
+    }
+
+    private fun resolveModifyArgsTargetMethod(
+        method: Method,
+        annotation: ModifyArgs,
+    ): Pair<MethodNode, String> {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            return requireTargetMethod(methodSignature) to methodSignature
+        }
+
+        val compatibleTargets =
+            classNode.methods.filter { candidate ->
+                candidate.name == method.name &&
+                    isModifyArgsTargetCompatible(method, annotation, candidate)
+            }
+
+        if (compatibleTargets.isEmpty()) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
+        }
+        if (compatibleTargets.size > 1) {
+            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            throw IllegalStateException(
+                "@ModifyArgs handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
+                    "Specify method explicitly to disambiguate.",
+            )
+        }
+
+        val targetMethod = compatibleTargets.single()
+        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun isModifyArgsTargetCompatible(
+        handlerMethod: Method,
+        annotation: ModifyArgs,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            require(annotation.at.value == InjectionPoint.INVOKE) {
+                "@ModifyArgs currently supports only INVOKE injection point"
+            }
+            validateModifyArgsHandlerSignature(handlerMethod, targetMethod)
+            require(hasModifyArgsCallSite(targetMethod, annotation)) {
+                "@ModifyArgs target ${targetMethod.name}${targetMethod.desc} has no matching call site"
+            }
+        }.isSuccess
+
+    private fun validateModifyArgsHandlerSignature(
+        handlerMethod: Method,
+        targetMethod: MethodNode,
+    ) {
+        val handlerParamTypes = Type.getArgumentTypes(handlerMethod)
+        val argsType = Type.getType(Args::class.java)
+        if (handlerParamTypes.isEmpty() || handlerParamTypes[0] != argsType) {
+            throw IllegalArgumentException(
+                "@ModifyArgs handler ${handlerMethod.name} first parameter must be Args, " +
+                    "actual ${handlerParamTypes.toList()}",
+            )
+        }
+
+        val handlerReturnType = Type.getReturnType(handlerMethod)
+        if (handlerReturnType != Type.VOID_TYPE) {
+            throw IllegalArgumentException("@ModifyArgs handler ${handlerMethod.name} must return void, actual $handlerReturnType")
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        val requestedTargetParamCount = handlerParamTypes.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@ModifyArgs handler ${handlerMethod.name} requests $requestedTargetParamCount target parameter(s), " +
+                    "but target method ${targetMethod.name}${targetMethod.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = handlerParamTypes[index + 1]
+            if (!isModifyArgsParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@ModifyArgs handler ${handlerMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+    }
+
+    private fun hasModifyArgsCallSite(
+        targetMethod: MethodNode,
+        annotation: ModifyArgs,
+    ): Boolean {
+        val (targetOwner, targetName, targetDesc) = parseModifyArgsTargetMethod(annotation.at.target)
+        if (targetName == null || targetDesc == null) {
+            throw IllegalArgumentException("@ModifyArgs INVOKE requires at.target method signature")
+        }
+
+        val insns = targetMethod.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveModifyArgsSliceRange(insns, annotation.slice)
+        var matchedOrdinal = 0
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (!matchesModifyArgsCallSite(insn, targetOwner, targetName, targetDesc)) {
+                continue
+            }
+            val currentOrdinal = matchedOrdinal++
+            if (annotation.ordinal < 0 || currentOrdinal == annotation.ordinal) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun resolveModifyArgsSliceRange(
+        insns: Array<AbstractInsnNode>,
+        slice: Slice,
+    ): Pair<Int, Int> {
+        val startIndex =
+            if (slice.from.target.isNotEmpty()) {
+                val fromIndex = findModifyArgsSliceBoundaryIndex(insns, slice.from, 0) ?: return insns.size to insns.size
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (slice.to.target.isNotEmpty()) {
+                findModifyArgsSliceBoundaryIndex(insns, slice.to, startIndex) ?: return insns.size to insns.size
+            } else {
+                insns.size
+            }
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun findModifyArgsSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @ModifyArgs(INVOKE): ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseModifyArgsTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid ModifyArgs slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (matchesModifyArgsCallSite(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+        }
+
+        return null
+    }
+
+    private fun parseModifyArgsTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun matchesModifyArgsCallSite(
+        insn: AbstractInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean =
+        when (insn) {
+            is MethodInsnNode -> matchesModifyArgsTargetMethod(insn, targetOwner, targetName, targetDesc)
+            is InvokeDynamicInsnNode -> matchesModifyArgsInvokeDynamic(insn, targetOwner, targetName, targetDesc)
+            else -> false
+        }
+
+    private fun matchesModifyArgsTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesModifyArgsInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun isModifyArgsParameterCompatible(
+        expected: Type,
+        actual: Type,
+    ): Boolean {
+        if (expected == actual) {
+            return true
+        }
+        if (!expected.isReferenceType() || !actual.isReferenceType()) {
+            return false
+        }
+        if (actual.sort == Type.OBJECT &&
+            (actual.internalName == "java/lang/Object" || actual.internalName == "kotlin/Any")
+        ) {
+            return true
+        }
+        return runCatching {
+            val expectedClass = loadReferenceClass(expected)
+            loadReferenceClass(actual).isAssignableFrom(expectedClass)
+        }.getOrDefault(false)
     }
 
     /**
