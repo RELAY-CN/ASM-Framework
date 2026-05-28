@@ -278,7 +278,7 @@ class ModifyConstantInjector(
         constantType: Type,
     ) {
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
-        validateHandlerParameters(target, constantType, asmParamTypes)
+        validateHandlerParameters(target, constantType, asmParamTypes, isExplicitNullConstant(constNode))
 
         val instanceType = Type.getType(asmInfo.asmClass)
         val useStaticCall = Modifier.isStatic(asmMethod.modifiers)
@@ -306,8 +306,21 @@ class ModifyConstantInjector(
         target: MethodNode,
         constantType: Type,
         asmParamTypes: Array<Type>,
+        explicitNullConstant: Boolean,
     ) {
-        if (asmParamTypes.isEmpty() || !isHandlerParameterCompatible(constantType, asmParamTypes[0])) {
+        if (asmParamTypes.isEmpty()) {
+            throw IllegalArgumentException(
+                "ASM method ${asmMethod.name} first parameter must accept constant type $constantType, actual ${asmParamTypes.toList()}",
+            )
+        }
+
+        val acceptsConstant =
+            if (explicitNullConstant) {
+                asmParamTypes[0].isReferenceType()
+            } else {
+                isHandlerParameterCompatible(constantType, asmParamTypes[0])
+            }
+        if (!acceptsConstant) {
             throw IllegalArgumentException(
                 "ASM method ${asmMethod.name} first parameter must accept constant type $constantType, actual ${asmParamTypes.toList()}",
             )
@@ -377,6 +390,9 @@ class ModifyConstantInjector(
     }
 
     private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
+
+    private fun isExplicitNullConstant(insn: AbstractInsnNode): Boolean =
+        constantValue == "null" && insn.opcode == Opcodes.ACONST_NULL
 
     private fun isBooleanConstantInsn(
         insn: AbstractInsnNode,
