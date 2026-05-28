@@ -546,6 +546,7 @@ annotation class ModifyExpressionValue(
  * 当前实现支持在方法入口（[InjectionPoint.HEAD]）修改已有参数槽位，也支持在局部变量读取前
  *（[InjectionPoint.LOAD]）或写入后（[InjectionPoint.STORE]）改写槽位值。可以通过 JVM 局部变量槽位
  * [index] 精确定位，未指定 [index] 时按 handler 参数类型与 [ordinal] 选择匹配项。
+ * [InjectionPoint.HEAD] 未指定 [index] 与 [ordinal] 时，如果同类型入口参数唯一，会自动推断该参数。
  *
  * ASM 方法要求：
  *
@@ -558,14 +559,14 @@ annotation class ModifyExpressionValue(
  * - [InjectionPoint.STORE] 会在匹配的 xSTORE 指令后加载新存入的值、调用 handler，并写回同一槽位
  * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
  *   边界指令本身不参与匹配
- * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项
+ * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项；HEAD 模式同类型入口参数唯一时可省略 [ordinal]
  * - [require] / [allow] 可约束实际变量修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望变量修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param index 要修改的局部变量槽位索引
- * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号
+ * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号；HEAD 模式同类型入口参数唯一时可保持默认值
  * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写与 [InjectionPoint.STORE] 局部变量写入改写
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际变量修改数必须不少于该值
