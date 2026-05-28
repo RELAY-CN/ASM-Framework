@@ -4672,6 +4672,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun constructorInvokerCanReturnInheritedInterface() {
+        AsmRegistry.register(InheritedInterfaceReturnConstructorInvokerMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConstructorInvokerTarget", constructorInvokerTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "createAsList" }
+
+        assertEquals("(Ljava/lang/String;)Ljava/util/List;", method.desc)
+    }
+
+    @Test
     fun invokerUsesInvokespecialForPrivateInterfaceMethod() {
         AsmRegistry.register(PrivateInterfaceInvokerMixin::class.java)
 
@@ -10351,6 +10363,13 @@ class FrameworkReliabilityTest {
         fun createAsRunnable(value: String): Runnable = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("ConstructorInvokerTarget")
+    object InheritedInterfaceReturnConstructorInvokerMixin {
+        @Invoker("<init>")
+        @JvmStatic
+        fun createAsList(value: String): java.util.List<*> = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("PrivateInterfaceInvokerTarget")
     class PrivateInterfaceInvokerMixin {
         @Invoker("secret")
@@ -13958,12 +13977,12 @@ class FrameworkReliabilityTest {
 
     private fun constructorInvokerTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
-        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorInvokerTarget", null, "java/lang/Object", arrayOf("java/lang/Runnable"))
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorInvokerTarget", null, "java/util/ArrayList", arrayOf("java/lang/Runnable"))
         cw.visitField(Opcodes.ACC_PRIVATE, "value", "Ljava/lang/String;", null, null).visitEnd()
         cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "(Ljava/lang/String;)V", null, null).apply {
             visitCode()
             visitVarInsn(Opcodes.ALOAD, 0)
-            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false)
             visitVarInsn(Opcodes.ALOAD, 0)
             visitVarInsn(Opcodes.ALOAD, 1)
             visitFieldInsn(Opcodes.PUTFIELD, "ConstructorInvokerTarget", "value", "Ljava/lang/String;")
