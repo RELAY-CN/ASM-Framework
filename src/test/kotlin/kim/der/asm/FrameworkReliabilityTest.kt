@@ -3649,6 +3649,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun shadowCanReferenceInheritedMethod() {
+        AsmRegistry.register(InheritedShadowMethodMixin::class.java)
+
+        AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+    }
+
+    @Test
     fun mutableFieldOnlyTransformWritesModifiedClassBytes() {
         AsmRegistry.register(MutableFieldOnlyMixin::class.java)
 
@@ -9582,6 +9589,14 @@ class FrameworkReliabilityTest {
     class InheritedShadowFieldMixin {
         @Shadow("modCount")
         private val inheritedModCount: Int = 0
+    }
+
+    @AsmMixin("InheritedAccessorTarget")
+    class InheritedShadowMethodMixin {
+        @Shadow("clear")
+        private fun inheritedClear() {
+            throw UnsupportedOperationException()
+        }
     }
 
     @AsmMixin("FinalFieldTarget")
