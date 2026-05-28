@@ -2437,6 +2437,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationInfersTargetWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredWrapOperationTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("original-inferred-call", result)
+    }
+
+    @Test
     fun wrapOperationAtInvokeCanSkipOriginalCall() {
         AsmRegistry.register(WrapOperationSkipCallMixin::class.java)
 
@@ -8253,6 +8265,26 @@ class FrameworkReliabilityTest {
             target.length
             value.length
             return operation.call(target, "-wrapped-call")
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object InferredWrapOperationTargetMixin {
+        @WrapOperation(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun value(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            value.length
+            return operation.call(target, "-inferred-call")
         }
     }
 
