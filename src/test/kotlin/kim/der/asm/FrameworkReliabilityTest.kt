@@ -4698,6 +4698,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokerCanCallInterfaceDefaultMethod() {
+        AsmRegistry.register(InterfaceDefaultMethodInvokerMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InterfaceDefaultInvokerTarget", interfaceDefaultInvokerTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InterfaceDefaultInvokerTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val spliterator = clazz.getMethod("callSpliterator").invoke(instance) as java.util.Spliterator<*>
+
+        assertEquals(0L, spliterator.estimateSize())
+    }
+
+    @Test
     fun invokerMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingInvokerMixin::class.java)
 
@@ -10436,6 +10449,12 @@ class FrameworkReliabilityTest {
         fun callSize(): Int = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("InterfaceDefaultInvokerTarget")
+    class InterfaceDefaultMethodInvokerMixin {
+        @Invoker("spliterator")
+        fun callSpliterator(): java.util.Spliterator<*> = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("InvokerConflictTarget")
     class ConflictingInvokerMixin {
         @Invoker("target")
@@ -14145,6 +14164,21 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun interfaceDefaultInvokerTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InterfaceDefaultInvokerTarget", null, "java/lang/Object", arrayOf("java/lang/Iterable"))
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "iterator", "()Ljava/util/Iterator;", null, null).apply {
+            visitCode()
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/util/Collections", "emptyIterator", "()Ljava/util/Iterator;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
             visitEnd()
         }
         cw.visitEnd()
