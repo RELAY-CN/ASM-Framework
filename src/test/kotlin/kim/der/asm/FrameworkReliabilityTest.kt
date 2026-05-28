@@ -4660,6 +4660,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokerUsesInvokespecialForPrivateInterfaceMethod() {
+        AsmRegistry.register(PrivateInterfaceInvokerMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("PrivateInterfaceInvokerTarget", privateInterfaceInvokerTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val invokerMethod = classNode.methods.single {
+            it.name == "callSecret" && it.desc == "(Ljava/lang/String;)Ljava/lang/String;"
+        }
+        val secretCall = invokerMethod.instructions.toArray()
+            .filterIsInstance<org.objectweb.asm.tree.MethodInsnNode>()
+            .single { it.name == "secret" }
+
+        assertEquals(Opcodes.INVOKESPECIAL, secretCall.opcode)
+        assertEquals(true, secretCall.itf)
+    }
+
+    @Test
     fun modifyConstantDoesNotTreatNewInstructionAsClassConstant() {
         AsmRegistry.register(ClassConstantModifyMixin::class.java)
 
@@ -10314,6 +10332,12 @@ class FrameworkReliabilityTest {
         fun create(value: String): Any = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("PrivateInterfaceInvokerTarget")
+    class PrivateInterfaceInvokerMixin {
+        @Invoker("secret")
+        fun callSecret(value: String): String = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("NewInstructionTarget")
     object ClassConstantModifyMixin {
         @ModifyConstant(method = "create()Ljava/lang/StringBuilder;")
@@ -13934,6 +13958,27 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.GETFIELD, "ConstructorInvokerTarget", "value", "Ljava/lang/String;")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun privateInterfaceInvokerTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_INTERFACE or Opcodes.ACC_ABSTRACT,
+            "PrivateInterfaceInvokerTarget",
+            null,
+            "java/lang/Object",
+            null,
+        )
+        cw.visitMethod(Opcodes.ACC_PRIVATE, "secret", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()
