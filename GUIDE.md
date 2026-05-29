@@ -155,7 +155,7 @@ object LoggingMixin {
 }
 ```
 
-普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`INSTANCEOF`、`THROW`
+普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`THROW`
 等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。
@@ -166,7 +166,7 @@ object LoggingMixin {
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
 普通 `RETURN` 注入会把原始返回值预置到 `CallbackInfo`，handler 可调用 `setReturnValue(null)` 把引用类型返回值明确替换为 `null`。
 
-当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF` 或 `THROW`
+当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP` 或 `THROW`
 注入限制在一段调用边界内：
 
 ```kotlin
@@ -192,8 +192,11 @@ fun process(value: String) {
 再接收目标方法参数前缀；引用或数组参数可用父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按注入点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
-`from` 边界之后、`to` 边界之前的调用点、字段读写指令、局部变量读写指令、类型转换指令或抛异常指令才会参与匹配，边界调用本身不会被注入；
+`from` 边界之后、`to` 边界之前的调用点、字段读写指令、局部变量读写指令、类型转换指令、跳转指令或抛异常指令才会参与匹配，边界调用本身不会被注入；
 `ordinal` 会在切片内重新计数。
+
+普通 `@AsmInject(JUMP)` 只在匹配跳转指令前后插入 handler，不接收也不改写跳转条件栈值或跳转目标；`At.target`
+可省略以匹配所有跳转，也可写 `IFEQ`、`IF_ICMPGT` 或对应数字操作码来过滤具体跳转类型。需要改变控制流时应使用更专门的重定向或表达式改写能力。
 
 ### 场景 2: 修改参数与局部变量
 
