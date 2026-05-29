@@ -157,6 +157,52 @@ object BytecodeUtil {
     }
 
     /**
+     * 检查常量指令是否匹配注解中的文本目标。
+     */
+    fun matchesConstantText(
+        insn: AbstractInsnNode,
+        value: String,
+    ): Boolean {
+        val constant = getConstant(insn)
+        if (constant == null) {
+            return value == "null"
+        }
+        if (isBooleanLiteral(value)) {
+            return isBooleanConstantInsn(insn, value == "true")
+        }
+
+        return when (constant) {
+            is Int -> constant.toString() == value
+            is Long -> constant.toString() == value
+            is Float -> constant.toString() == value
+            is Double -> constant.toString() == value
+            is String -> constant == value
+            is Type -> {
+                if (constant.sort == Type.METHOD) {
+                    constant.descriptor == value
+                } else {
+                    constant.internalName == value.replace('.', '/')
+                }
+            }
+            is Handle -> "${constant.owner}.${constant.name}${constant.desc}" == value
+            is ConstantDynamic -> constant.name == value || "${constant.name}:${constant.descriptor}" == value
+            else -> false
+        }
+    }
+
+    private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
+
+    private fun isBooleanConstantInsn(
+        insn: AbstractInsnNode,
+        value: Boolean,
+    ): Boolean =
+        when (insn.opcode) {
+            Opcodes.ICONST_0 -> !value
+            Opcodes.ICONST_1 -> value
+            else -> false
+        }
+
+    /**
      * 检查方法是否有指定标志
      */
     fun hasFlag(
