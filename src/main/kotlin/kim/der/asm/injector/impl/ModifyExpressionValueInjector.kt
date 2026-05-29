@@ -114,8 +114,9 @@ class ModifyExpressionValueInjector(
     }
 
     private fun injectMethodCallReturn(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (targetName == null || targetDesc == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target method signature")
         }
 
@@ -130,13 +131,13 @@ class ModifyExpressionValueInjector(
             val callDesc =
                 when (insn) {
                     is MethodInsnNode ->
-                        if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                        if (inferTarget || (targetName != null && matchesTargetMethod(insn, targetOwner, targetName, targetDesc))) {
                             insn.desc
                         } else {
                             null
                         }
                     is InvokeDynamicInsnNode ->
-                        if (matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc)) {
+                        if (inferTarget || (targetName != null && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc))) {
                             insn.desc
                         } else {
                             null
@@ -147,16 +148,22 @@ class ModifyExpressionValueInjector(
                 continue
             }
 
-            val currentOrdinal = matchedOrdinal++
-            if (!matchesOrdinal(currentOrdinal)) {
-                continue
-            }
-
             val callReturnType = Type.getReturnType(callDesc)
             if (callReturnType == Type.VOID_TYPE) {
+                if (inferTarget) {
+                    continue
+                }
                 throw IllegalArgumentException(
                     "@ModifyExpressionValue cannot modify void call ${callName(insn)}$callDesc",
                 )
+            }
+            if (inferTarget && !isHandlerCompatible(callReturnType, allowThrowableSubtypeReturn = false)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
             }
 
             val targetParamCount = validateHandlerSignature(target, callReturnType)
