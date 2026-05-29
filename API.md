@@ -157,18 +157,18 @@ object RemoveInterfacesMixin
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
 - `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
-- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `inline: Boolean = false` - 是否内联代码
 
 handler 首参可以是 `CallbackInfo`。普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW`
 指令点注入，可在 `CallbackInfo` 后按顺序接收目标方法参数前缀。
-`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
+`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入和 `INVOKE_ASSIGN` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
-实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入。`Shift.REPLACE` 按替换原调用处理，
+实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入。普通 `INVOKE_ASSIGN` 默认在调用完成后插入；需要调用前插入时使用普通 `INVOKE`。`Shift.REPLACE` 按替换原调用处理，
 handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
-除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD` / `TAIL` / `RETURN`、`INVOKE` 的 `BEFORE` / `AFTER`
+除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD` / `TAIL` / `RETURN`、`INVOKE` 的 `BEFORE` / `AFTER`、`INVOKE_ASSIGN`
 以及普通指令点注入的 handler 返回值不会参与目标方法结果，框架会在调用后丢弃该返回值以保持栈平衡。
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容注入点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
@@ -180,7 +180,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
 
-普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通 `@AsmInject(target = InjectionPoint.FIELD / FIELD_ASSIGN)`、
+普通 `@AsmInject(target = InjectionPoint.INVOKE / INVOKE_ASSIGN)`、普通 `@AsmInject(target = InjectionPoint.FIELD / FIELD_ASSIGN)`、
 普通 `@AsmInject(target = InjectionPoint.LOAD / STORE)` 与普通 `@AsmInject(target = InjectionPoint.NEW / CAST / INSTANCEOF / JUMP / CONSTANT / THROW)`
 支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界。框架只在起始边界之后、
 结束边界之前查找目标调用、字段读写指令、局部变量读写指令、对象创建、类型转换、类型判断、跳转、常量或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
@@ -910,7 +910,7 @@ val callback = CallbackInfo.returnable("value")
 - `CONSTANT` - 常量表达式
 - `THROW` - 抛出异常前
 
-其中 `INVOKE_ASSIGN` 当前复用 `INVOKE` 注入器；是否在调用前后插入由 `At.shift` 决定。
+普通 `@AsmInject(INVOKE_ASSIGN)` 复用调用点注入器，但默认在匹配调用完成后插入 handler；如果需要调用前注入，应使用普通 `@AsmInject(INVOKE)`。
 `@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”；省略调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；把
 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
 完成后的元素值”，当 `args = ["array=length"]` 时解释为“匹配数组长度值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配

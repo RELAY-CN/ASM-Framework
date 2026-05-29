@@ -158,15 +158,15 @@ object LoggingMixin {
 普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`CONSTANT`、`THROW`
 等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
-`param` 来自 `process` 目标方法。
-除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD`、`TAIL`、`RETURN`、`INVOKE BEFORE/AFTER`
+`param` 来自 `process` 目标方法。`INVOKE_ASSIGN` 默认在匹配调用完成后插入 handler；需要调用前注入时使用 `INVOKE`。
+除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD`、`TAIL`、`RETURN`、`INVOKE BEFORE/AFTER`、`INVOKE_ASSIGN`
 和指令点注入的 handler 返回值会被丢弃，不会改写目标方法返回结果。
 
 只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
 普通 `RETURN` 注入会把原始返回值预置到 `CallbackInfo`，handler 可调用 `setReturnValue(null)` 把引用类型返回值明确替换为 `null`。
 
-当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、常量或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`CONSTANT` 或 `THROW`
+当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、常量或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`CONSTANT` 或 `THROW`
 注入限制在一段调用边界内：
 
 ```kotlin
