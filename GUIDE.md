@@ -166,7 +166,7 @@ object LoggingMixin {
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
 普通 `RETURN` 注入会把原始返回值预置到 `CallbackInfo`，handler 可调用 `setReturnValue(null)` 把引用类型返回值明确替换为 `null`。
 
-当目标方法内有多个相同调用、字段读写点、局部变量读写点、类型转换点、类型判断点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CAST`、`INSTANCEOF` 或 `THROW`
+当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF` 或 `THROW`
 注入限制在一段调用边界内：
 
 ```kotlin
@@ -1150,7 +1150,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围，也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。对象创建指令点当前不使用 `slice` 或 `At.by`。`NEW` 不支持 `Shift.AFTER`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果、类型判断结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选指令范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。`NEW` 不支持 `Shift.AFTER` 和 `At.by`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果、类型判断结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
