@@ -47,8 +47,8 @@ package kim.der.asm.api.annotation
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.LOAD] /
- * [InjectionPoint.STORE] 局部变量读写指令点注入，以及普通 [InjectionPoint.CAST] /
- * [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 类型转换、类型判断与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.STORE] 局部变量读写指令点注入，以及普通 [InjectionPoint.NEW] /
+ * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
@@ -140,7 +140,7 @@ enum class InjectionPoint {
  * - INVOKE 目标要求包含方法或构造器描述符；owner 可省略，省略时只按方法名与描述符匹配。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
- * - NEW 只支持 BEFORE 或 REPLACE，且不支持 by；AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
+ * - NEW 支持 Slice 缩小候选范围，只支持 BEFORE 或 REPLACE，且不支持 by；AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
  *   当前实现会拒绝该配置。
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
@@ -201,7 +201,7 @@ enum class Shift {
  * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
  * [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、
  * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写指令点注入、普通
- * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 类型转换、类型判断与抛异常指令点注入、
+ * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断与抛异常指令点注入、
  * [Redirect] 的方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问与数组长度重定向，
  * [ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 方法或构造器调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与

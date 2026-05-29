@@ -157,7 +157,7 @@ object RemoveInterfacesMixin
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
 - `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
-- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`CAST` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `inline: Boolean = false` - 是否内联代码
@@ -181,12 +181,12 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
 
 普通 `@AsmInject(target = InjectionPoint.INVOKE)`、普通 `@AsmInject(target = InjectionPoint.FIELD / FIELD_ASSIGN)`、
-普通 `@AsmInject(target = InjectionPoint.LOAD / STORE)` 与普通 `@AsmInject(target = InjectionPoint.CAST / INSTANCEOF / THROW)`
+普通 `@AsmInject(target = InjectionPoint.LOAD / STORE)` 与普通 `@AsmInject(target = InjectionPoint.NEW / CAST / INSTANCEOF / THROW)`
 支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界。框架只在起始边界之后、
-结束边界之前查找目标调用、字段读写指令、局部变量读写指令、类型转换、类型判断或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
+结束边界之前查找目标调用、字段读写指令、局部变量读写指令、对象创建、类型转换、类型判断或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
 也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
-`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选范围，也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但仍不会把异常对象传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `INSTANCEOF` 只观察类型判断位置，不接收也不改写 boolean 结果；需要改写类型判断结果时使用 `@ModifyExpressionValue`。普通 `NEW` 当前不使用 `slice` 或 `At.by`。`NEW` 只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `THROW` 属于指令点注入。它们会在匹配指令附近插入 handler，不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `THROW` 可用 `Slice` 缩小候选范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但仍不会把异常对象传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `INSTANCEOF` 只观察类型判断位置，不接收也不改写 boolean 结果；需要改写类型判断结果时使用 `@ModifyExpressionValue`。普通 `NEW` 不支持 `At.by`，且只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -979,7 +979,7 @@ At(
 
 ### Slice
 
-用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD_ASSIGN)`、
