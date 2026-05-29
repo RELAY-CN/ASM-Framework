@@ -33,8 +33,10 @@ import java.lang.reflect.Modifier
  * handler 可就地修改容器内容，注入器随后从容器中取回整组参数并恢复原方法调用。
  * 实例方法调用的 receiver 会被保存和恢复，但不会放入 [Args]；构造器调用只把构造器描述符中的参数放入 [Args]，
  * 不暴露未初始化 receiver；`invokedynamic` 调用按调用点描述符读取和写回参数，不存在 receiver。
+ * [At.target] 为空时会扫描普通方法调用、构造器调用和 `invokedynamic` 调用；可配合 [ordinal]、[slice]
+ * 或命中数约束收窄候选。
  *
- * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]
+ * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，目标为空时按兼容调用点推断
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
