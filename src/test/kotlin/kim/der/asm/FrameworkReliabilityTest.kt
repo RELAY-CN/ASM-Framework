@@ -2391,6 +2391,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverAtInvokeInfersTargetByCompatibleReceiverType() {
+        AsmRegistry.register(ModifyReceiverInferredInvokeTargetMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "MixedModifyReceiverTarget",
+                mixedModifyReceiverTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("MixedModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed-call", result)
+    }
+
+    @Test
     fun modifyReceiverAtInvokeAcceptsAssignableParentParameter() {
         AsmRegistry.register(ModifyReceiverParentParamMixin::class.java)
 
@@ -8830,6 +8847,19 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("MixedModifyReceiverTarget")
+    object ModifyReceiverInferredInvokeTargetMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE),
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
     @AsmMixin("ModifyReceiverTarget")
     object ModifyReceiverParentParamMixin {
         @ModifyReceiver(
@@ -14054,6 +14084,29 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun mixedModifyReceiverTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedModifyReceiverTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("ignored")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("original")
+            visitLdcInsn("-call")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
             visitEnd()
         }
         cw.visitEnd()
