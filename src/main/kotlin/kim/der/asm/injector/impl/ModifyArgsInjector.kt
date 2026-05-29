@@ -72,8 +72,9 @@ class ModifyArgsInjector(
             throw IllegalArgumentException("@ModifyArgs currently supports only INVOKE injection point")
         }
 
+        val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (targetName == null || targetDesc == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyArgs INVOKE requires at.target method signature")
         }
 
@@ -87,7 +88,12 @@ class ModifyArgsInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            val callSite = describeMatchedCallSite(insn, targetOwner, targetName, targetDesc) ?: continue
+            val callSite =
+                if (inferTarget) {
+                    describeAnyCallSite(insn)
+                } else {
+                    describeMatchedCallSite(insn, targetOwner, targetName!!, targetDesc)
+                } ?: continue
 
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {
@@ -462,6 +468,17 @@ class ModifyArgsInjector(
                 } else {
                     null
                 }
+            else -> null
+        }
+
+    private fun describeAnyCallSite(insn: AbstractInsnNode): CallSite? =
+        when (insn) {
+            is MethodInsnNode ->
+                CallSite(
+                    desc = insn.desc,
+                    hasReceiver = insn.opcode != Opcodes.INVOKESTATIC,
+                )
+            is InvokeDynamicInsnNode -> CallSite(desc = insn.desc, hasReceiver = false)
             else -> null
         }
 
