@@ -632,6 +632,7 @@ annotation class ModifyVariable(
     val method: String = "",
     val at: At = At(value = InjectionPoint.HEAD),
     val index: Int = -1,
+    val name: Array<String> = [],
     val ordinal: Int = -1,
     val slice: Slice = Slice(),
     val require: Int = 0,
