@@ -3355,6 +3355,27 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtFieldAssignInfersTargetInTestClassConstructor() {
+        AsmRegistry.register(WrapOperationInferredTestFieldAssignMixin::class.java)
+
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), javaClass.classLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                ),
+            )
+
+        val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("raw")
+        val result = clazz.getMethod("testA0").invoke(instance)
+
+        assertEquals("wrapped-test-raw", result)
+    }
+
+    @Test
     fun wrapOperationAtFieldAssignCanSkipOriginalPutField() {
         AsmRegistry.register(WrapOperationFieldAssignSkipMixin::class.java)
 
@@ -9835,6 +9856,24 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("Test")
+    object WrapOperationInferredTestFieldAssignMixin {
+        @WrapOperation(
+            method = "<init>(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN),
+            require = 2,
+            allow = 2,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(target, "wrapped-test-$value")
+        }
+    }
+
     @AsmMixin("FieldPointTarget")
     object WrapOperationFieldAssignSkipMixin {
         @WrapOperation(
@@ -16069,6 +16108,26 @@ class FrameworkReliabilityTest {
                 }
             }
         return loader.loadClass(className)
+    }
+
+    private fun loadClasses(
+        primaryClassName: String,
+        classBytes: Map<String, ByteArray>,
+    ): Class<*> {
+        val loader =
+            object : ClassLoader(Thread.currentThread().contextClassLoader) {
+                override fun findClass(name: String): Class<*> {
+                    val bytes = classBytes[name] ?: throw ClassNotFoundException(name)
+                    return defineClass(name, bytes, 0, bytes.size)
+                }
+            }
+        return loader.loadClass(primaryClassName)
+    }
+
+    private fun testFixtureClassBytes(className: String): ByteArray {
+        val resourcePath = "test/$className.class"
+        return javaClass.classLoader.getResourceAsStream(resourcePath)?.use { it.readBytes() }
+            ?: error("Missing test fixture class resource: $resourcePath")
     }
 }
 
