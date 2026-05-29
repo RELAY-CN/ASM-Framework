@@ -2074,7 +2074,7 @@ class TargetClassContext(
         val compatibleTargets =
             classNode.methods.filter { candidate ->
                 candidate.name == method.name &&
-                    isModifyReceiverTargetCompatible(method, annotation, candidate)
+                    hasCompatibleModifyReceiverCandidate(method, annotation, candidate)
             }
 
         if (compatibleTargets.isEmpty()) {
@@ -2092,15 +2092,21 @@ class TargetClassContext(
         return targetMethod to "${targetMethod.name}${targetMethod.desc}"
     }
 
-    private fun isModifyReceiverTargetCompatible(
-        handlerMethod: Method,
+    private fun hasCompatibleModifyReceiverCandidate(
+        method: Method,
         annotation: ModifyReceiver,
         targetMethod: MethodNode,
     ): Boolean =
         runCatching {
-            val receiverType = resolveModifyReceiverType(targetMethod, annotation)
-            validateModifyReceiverHandlerSignature(handlerMethod, targetMethod, receiverType)
-        }.isSuccess
+            val injector = AsmInjectorFactory.createModifyReceiverInjector(
+                method,
+                asmInfo,
+                annotation.at,
+                annotation.ordinal,
+                annotation.slice,
+            )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     private fun resolveModifyReceiverType(
         targetMethod: MethodNode,
