@@ -107,9 +107,10 @@ class RedirectInjector(
             return injectNewConstructorCount(target)
         }
 
+        val inferTarget = redirectTarget.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(redirectTarget)
 
-        if (targetName == null || targetDesc == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException(
                 "Invalid target method signature: $redirectTarget " +
                     "(parsed: owner=$targetOwner, name=$targetName, desc=$targetDesc)",
@@ -128,7 +129,8 @@ class RedirectInjector(
             }
 
             when {
-                insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc) -> {
+                insn is MethodInsnNode &&
+                    matchesRedirectMethodCandidate(target, insn, inferTarget, targetOwner, targetName, targetDesc) -> {
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -140,7 +142,15 @@ class RedirectInjector(
                     }
                     injectionCount++
                 }
-                insn is InvokeDynamicInsnNode && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc) -> {
+                insn is InvokeDynamicInsnNode &&
+                    matchesRedirectInvokeDynamicCandidate(
+                        target,
+                        insn,
+                        inferTarget,
+                        targetOwner,
+                        targetName,
+                        targetDesc,
+                    ) -> {
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -155,6 +165,54 @@ class RedirectInjector(
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun matchesRedirectMethodCandidate(
+        target: MethodNode,
+        insn: MethodInsnNode,
+        inferTarget: Boolean,
+        targetOwner: String?,
+        targetName: String?,
+        targetDesc: String?,
+    ): Boolean {
+        if (!inferTarget) {
+            return matchesTargetMethod(insn, targetOwner, targetName ?: return false, targetDesc ?: return false)
+        }
+        return canRedirectMethodCall(target, insn)
+    }
+
+    private fun matchesRedirectInvokeDynamicCandidate(
+        target: MethodNode,
+        insn: InvokeDynamicInsnNode,
+        inferTarget: Boolean,
+        targetOwner: String?,
+        targetName: String?,
+        targetDesc: String?,
+    ): Boolean {
+        if (!inferTarget) {
+            return matchesTargetInvokeDynamic(insn, targetOwner, targetName ?: return false, targetDesc ?: return false)
+        }
+        return canRedirectInvokeDynamicCall(target, insn)
+    }
+
+    private fun canRedirectMethodCall(
+        target: MethodNode,
+        insn: MethodInsnNode,
+    ): Boolean =
+        runCatching {
+            if (insn.name == "<init>") {
+                validateConstructorHandlerSignature(target, insn)
+            } else {
+                validateHandlerSignature(target, insn)
+            }
+        }.isSuccess
+
+    private fun canRedirectInvokeDynamicCall(
+        target: MethodNode,
+        insn: InvokeDynamicInsnNode,
+    ): Boolean =
+        runCatching {
+            validateInvokeDynamicHandlerSignature(target, insn)
+        }.isSuccess
 
     private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
         val startIndex =
