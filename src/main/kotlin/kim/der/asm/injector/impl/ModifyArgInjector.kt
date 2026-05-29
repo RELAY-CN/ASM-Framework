@@ -82,8 +82,9 @@ class ModifyArgInjector(
     }
 
     private fun modifyCallArgumentCount(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (targetName == null) {
+        if (!inferTarget && targetName == null) {
             throw IllegalArgumentException("@ModifyArg INVOKE requires at.target method signature")
         }
 
@@ -96,20 +97,43 @@ class ModifyArgInjector(
                 continue
             }
 
-            val callSite = describeMatchedCallSite(insn, targetOwner, targetName, targetDesc) ?: continue
+            val callSite =
+                if (inferTarget) {
+                    describeAnyCallSite(insn)
+                } else {
+                    describeMatchedCallSite(insn, targetOwner, targetName!!, targetDesc)
+                } ?: continue
 
-            val currentOrdinal = matchedOrdinal++
-            if (!matchesOrdinal(currentOrdinal)) {
-                continue
+            if (!inferTarget) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
             }
 
             val callParamTypes = Type.getArgumentTypes(callSite.desc)
             if (argIndex < 0 || argIndex >= callParamTypes.size) {
+                if (inferTarget) {
+                    continue
+                }
                 throw IllegalArgumentException("Invalid argument index: $argIndex (call has ${callParamTypes.size} parameters)")
             }
 
             val paramType = callParamTypes[argIndex]
-            val targetParamCount = validateHandlerSignature(target, paramType)
+            val targetParamCount =
+                if (inferTarget) {
+                    validateInferredHandlerSignature(target, paramType) ?: continue
+                } else {
+                    validateHandlerSignature(target, paramType)
+                }
+
+            if (inferTarget) {
+                val currentOrdinal = matchedOrdinal++
+                if (!matchesOrdinal(currentOrdinal)) {
+                    continue
+                }
+            }
+
             val il = buildCallArgumentModification(target, callSite.hasReceiver, callParamTypes, paramType, targetParamCount)
             target.instructions.insertBefore(insn, il)
             injectionCount++
@@ -437,6 +461,11 @@ class ModifyArgInjector(
         return requestedTargetParamCount
     }
 
+    private fun validateInferredHandlerSignature(
+        target: MethodNode,
+        paramType: Type,
+    ): Int? = runCatching { validateHandlerSignature(target, paramType) }.getOrNull()
+
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -619,6 +648,17 @@ class ModifyArgInjector(
                 } else {
                     null
                 }
+            else -> null
+        }
+
+    private fun describeAnyCallSite(insn: AbstractInsnNode): CallSite? =
+        when (insn) {
+            is MethodInsnNode ->
+                CallSite(
+                    desc = insn.desc,
+                    hasReceiver = insn.opcode != Opcodes.INVOKESTATIC,
+                )
+            is InvokeDynamicInsnNode -> CallSite(desc = insn.desc, hasReceiver = false)
             else -> null
         }
 
