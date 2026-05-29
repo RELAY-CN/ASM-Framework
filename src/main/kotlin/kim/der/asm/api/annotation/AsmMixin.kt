@@ -734,6 +734,8 @@ annotation class ModifyConstant(
  *
  * [InjectionPoint.INVOKE] 可匹配普通方法调用、构造器调用或 `invokedynamic` 调用。
  * `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+ * [At.target] 为空时会按 handler 栈参数、返回类型与可选目标方法参数前缀筛选兼容的普通方法调用、构造器调用或 `invokedynamic` 调用，
+ * 不兼容候选不计入 [ordinal] 或命中数。
  * 字段读取重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，并通过 [At.target] 指定
  * `owner.field:desc`、`field:desc` 或 `field`；字段写入重定向通过 [At.value] 指定
  * [InjectionPoint.FIELD_ASSIGN]，目标格式相同。数组元素访问与数组长度重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，
@@ -768,7 +770,7 @@ annotation class ModifyConstant(
  *
  * @param method 目标方法签名；为空时按 handler 名称、重定向点和签名兼容规则推断唯一同名目标方法
  * @param target 目标调用、动态调用、构造器、字段、构造类型或类型签名组件；会与 [At.target] 组合构建最终的匹配签名
- * @param at 调用点信息；[At.value] 决定重定向方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、类型转换还是类型判断，[At.target] 用于指定匹配签名
+ * @param at 调用点信息；[At.value] 决定重定向方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、类型转换还是类型判断，[At.target] 用于指定匹配签名；[InjectionPoint.INVOKE] 省略时按 handler 签名筛选兼容调用点
  * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、类型转换与类型判断中生效
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
