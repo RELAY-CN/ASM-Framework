@@ -298,8 +298,9 @@ class WrapOperationInjector(
     ): Boolean = runCatching { validateFieldHandlerSignature(target, insn) }.isSuccess
 
     private fun injectFieldAssign(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
+        if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapOperation FIELD_ASSIGN requires at.target field signature")
         }
 
@@ -311,7 +312,14 @@ class WrapOperationInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_WRITE_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
+                continue
+            }
+            if (inferTarget && !isFieldAssignHandlerCompatible(target, insn)) {
                 continue
             }
 
@@ -329,6 +337,11 @@ class WrapOperationInjector(
 
         return injectionCount
     }
+
+    private fun isFieldAssignHandlerCompatible(
+        target: MethodNode,
+        insn: FieldInsnNode,
+    ): Boolean = runCatching { validateFieldAssignHandlerSignature(target, insn) }.isSuccess
 
     private fun injectArrayAccess(
         target: MethodNode,
