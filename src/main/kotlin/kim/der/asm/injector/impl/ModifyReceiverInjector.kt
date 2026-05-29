@@ -74,8 +74,9 @@ class ModifyReceiverInjector(
         }
 
     private fun injectMethodCall(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (targetName == null || targetDesc == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyReceiver INVOKE requires at.target method signature")
         }
 
@@ -87,7 +88,13 @@ class ModifyReceiverInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+            if (
+                insn !is MethodInsnNode ||
+                !(inferTarget || (targetName != null && matchesTargetMethod(insn, targetOwner, targetName, targetDesc)))
+            ) {
+                continue
+            }
+            if (inferTarget && !isMethodReceiverCompatible(target, insn)) {
                 continue
             }
 
@@ -110,6 +117,17 @@ class ModifyReceiverInjector(
         }
 
         return injectionCount
+    }
+
+    private fun isMethodReceiverCompatible(
+        target: MethodNode,
+        insn: MethodInsnNode,
+    ): Boolean {
+        if (insn.opcode == Opcodes.INVOKESTATIC || insn.name == "<init>") {
+            return false
+        }
+        val receiverType = Type.getObjectType(insn.owner)
+        return runCatching { validateHandlerSignature(target, receiverType) }.isSuccess
     }
 
     private fun injectFieldRead(target: MethodNode): Int {
