@@ -3100,6 +3100,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun operationConstantCallReturnsOriginalValueWithoutArguments() {
+        val operation: Operation<String> = Operation("original", String::class.java)
+
+        assertEquals("original", operation.call())
+        assertEquals(
+            "Operation constant java.lang.String expects 0 argument(s), actual 1",
+            assertThrows(IllegalArgumentException::class.java) {
+                operation.call("unused")
+            }.message,
+        )
+    }
+
+    @Test
     fun wrapOperationOrdinalSelectsSingleInvokeCall() {
         AsmRegistry.register(WrapOperationOrdinalMixin::class.java)
 
