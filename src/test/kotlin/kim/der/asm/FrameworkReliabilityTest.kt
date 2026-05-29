@@ -3358,7 +3358,8 @@ class FrameworkReliabilityTest {
     fun wrapOperationAtFieldAssignInfersTargetInTestClassConstructor() {
         AsmRegistry.register(WrapOperationInferredTestFieldAssignMixin::class.java)
 
-        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), javaClass.classLoader)
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
         val clazz =
             loadClasses(
                 "Test",
@@ -3366,6 +3367,11 @@ class FrameworkReliabilityTest {
                     "Test" to transformed,
                     "TestParent" to testFixtureClassBytes("TestParent"),
                     "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
                 ),
             )
 
@@ -16128,6 +16134,21 @@ class FrameworkReliabilityTest {
         val resourcePath = "test/$className.class"
         return javaClass.classLoader.getResourceAsStream(resourcePath)?.use { it.readBytes() }
             ?: error("Missing test fixture class resource: $resourcePath")
+    }
+
+    private fun testFixtureClassLoader(vararg classNames: String): ClassLoader {
+        val classes = classNames.associateWith { testFixtureClassBytes(it) }
+        return object : ClassLoader(Thread.currentThread().contextClassLoader) {
+            override fun getResourceAsStream(name: String): java.io.InputStream? {
+                val fixtureClassName = name.removeSuffix(".class").takeIf { name.endsWith(".class") && '/' !in name }
+                val bytes = fixtureClassName?.let(classes::get)
+                return if (bytes != null) {
+                    java.io.ByteArrayInputStream(bytes)
+                } else {
+                    super.getResourceAsStream(name)
+                }
+            }
+        }
     }
 }
 
