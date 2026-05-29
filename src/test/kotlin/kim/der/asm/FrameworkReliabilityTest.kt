@@ -6571,6 +6571,25 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun constantInjectInsertsHandlerBeforeMatchedConstantInTestClass() {
+        AsmRegistry.register(ConstantInstructionInjectMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "testB0" && it.desc == "()Ljava/lang/String;" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, ConstantInstructionInjectMixin::class.java, "inject")
+        val constantIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.LdcInsnNode && it.cst == "StaticFinalString"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, constantIndex >= 0)
+        assertEquals(constantIndex - 1, handlerCallIndex)
+    }
+
+    @Test
     fun asmInjectCastSliceLimitsCheckcastsBetweenFromAndTo() {
         AsmRegistry.register(CastInstructionSliceMixin::class.java)
         CastInstructionSliceMixin.injectCount = 0
@@ -12697,6 +12716,18 @@ class FrameworkReliabilityTest {
             method = "recursiveMethod(I)I",
             target = InjectionPoint.JUMP,
             at = At(value = InjectionPoint.JUMP, target = "${Opcodes.IF_ICMPGT}"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("Test")
+    object ConstantInstructionInjectMixin {
+        @AsmInject(
+            method = "testB0()Ljava/lang/String;",
+            target = InjectionPoint.CONSTANT,
+            at = At(value = InjectionPoint.CONSTANT, target = "StaticFinalString"),
         )
         @JvmStatic
         fun inject() {
