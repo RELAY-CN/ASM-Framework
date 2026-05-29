@@ -250,8 +250,9 @@ class WrapOperationInjector(
     }
 
     private fun injectFieldRead(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
+        if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapOperation FIELD requires at.target field signature")
         }
 
@@ -263,7 +264,14 @@ class WrapOperationInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_READ_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
+                continue
+            }
+            if (inferTarget && !isFieldReadHandlerCompatible(target, insn)) {
                 continue
             }
 
@@ -281,6 +289,11 @@ class WrapOperationInjector(
 
         return injectionCount
     }
+
+    private fun isFieldReadHandlerCompatible(
+        target: MethodNode,
+        insn: FieldInsnNode,
+    ): Boolean = runCatching { validateFieldHandlerSignature(target, insn) }.isSuccess
 
     private fun injectFieldAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
