@@ -186,8 +186,9 @@ class ModifyReceiverInjector(
     }
 
     private fun injectFieldAssign(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
+        if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyReceiver FIELD_ASSIGN requires at.target field signature")
         }
 
@@ -199,12 +200,14 @@ class ModifyReceiverInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_WRITE_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
                 continue
             }
-
-            val currentOrdinal = matchedOrdinal++
-            if (!matchesOrdinal(currentOrdinal)) {
+            if (inferTarget && insn.opcode == Opcodes.PUTSTATIC) {
                 continue
             }
 
@@ -216,6 +219,15 @@ class ModifyReceiverInjector(
 
             val receiverType = Type.getObjectType(insn.owner)
             val fieldType = Type.getType(insn.desc)
+            if (inferTarget && !isReceiverHandlerCompatible(target, receiverType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
             val targetParamCount = validateHandlerSignature(target, receiverType)
             val il = buildFieldAssignReceiverModification(target, receiverType, fieldType, targetParamCount)
             target.instructions.insertBefore(insn, il)
