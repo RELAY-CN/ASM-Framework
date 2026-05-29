@@ -163,6 +163,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun injectionPointExposesJumpInstructionPoint() {
+        val names = InjectionPoint.entries.map { it.name }
+
+        assertEquals(true, "JUMP" in names)
+    }
+
+    @Test
     fun overwriteWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleOverwriteMixin::class.java)
 
