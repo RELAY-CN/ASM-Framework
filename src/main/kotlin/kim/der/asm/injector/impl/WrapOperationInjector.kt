@@ -124,8 +124,9 @@ class WrapOperationInjector(
     }
 
     private fun injectMethodCall(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (targetName == null || targetDesc == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@WrapOperation INVOKE requires at.target method signature")
         }
 
@@ -139,7 +140,11 @@ class WrapOperationInjector(
             }
 
             when {
-                insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc) -> {
+                insn is MethodInsnNode &&
+                    (inferTarget || (targetName != null && matchesTargetMethod(insn, targetOwner, targetName, targetDesc))) -> {
+                    if (inferTarget && !isMethodCallHandlerCompatible(target, insn)) {
+                        continue
+                    }
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -162,7 +167,11 @@ class WrapOperationInjector(
                     target.instructions.remove(insn)
                     injectionCount++
                 }
-                insn is InvokeDynamicInsnNode && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc) -> {
+                insn is InvokeDynamicInsnNode &&
+                    (inferTarget || (targetName != null && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc))) -> {
+                    if (inferTarget && !isInvokeDynamicHandlerCompatible(target, insn)) {
+                        continue
+                    }
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -179,6 +188,23 @@ class WrapOperationInjector(
 
         return injectionCount
     }
+
+    private fun isMethodCallHandlerCompatible(
+        target: MethodNode,
+        insn: MethodInsnNode,
+    ): Boolean =
+        runCatching {
+            if (insn.name == "<init>") {
+                validateConstructorHandlerSignature(target, insn)
+            } else {
+                validateHandlerSignature(target, insn)
+            }
+        }.isSuccess
+
+    private fun isInvokeDynamicHandlerCompatible(
+        target: MethodNode,
+        insn: InvokeDynamicInsnNode,
+    ): Boolean = runCatching { validateInvokeDynamicHandlerSignature(target, insn) }.isSuccess
 
     private fun injectNewConstructor(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
