@@ -47,6 +47,7 @@ object AsmInjectorFactory {
             InjectionPoint.NEW,
             InjectionPoint.CAST,
             InjectionPoint.INSTANCEOF,
+            InjectionPoint.JUMP,
             InjectionPoint.LOAD,
             InjectionPoint.STORE,
             InjectionPoint.THROW,

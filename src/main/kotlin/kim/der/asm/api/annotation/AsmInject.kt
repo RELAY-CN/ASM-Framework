@@ -76,7 +76,7 @@ annotation class AsmInject(
  * 注入点枚举。
  *
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[FIELD]、
- * [FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF] 与 [THROW]。
+ * [FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP] 与 [THROW]。
  * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [INSTANCEOF] 改写类型判断结果，通过 [CONSTANT] 改写常量表达式，
  * 也可通过 [THROW] 改写即将抛出的异常。
  * 其中指令点注入会在匹配指令前后插入 handler，
@@ -121,6 +121,9 @@ enum class InjectionPoint {
 
     /** instanceof 判断指令 */
     INSTANCEOF,
+
+    /** 跳转指令 */
+    JUMP,
 
     /** 常量表达式 */
     CONSTANT,
