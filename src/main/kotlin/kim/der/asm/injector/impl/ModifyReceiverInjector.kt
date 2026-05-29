@@ -129,12 +129,13 @@ class ModifyReceiverInjector(
             return false
         }
         val receiverType = Type.getObjectType(insn.owner)
-        return runCatching { validateHandlerSignature(target, receiverType) }.isSuccess
+        return isReceiverHandlerCompatible(target, receiverType)
     }
 
     private fun injectFieldRead(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
+        if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyReceiver FIELD requires at.target field signature")
         }
 
@@ -146,12 +147,14 @@ class ModifyReceiverInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_READ_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
                 continue
             }
-
-            val currentOrdinal = matchedOrdinal++
-            if (!matchesOrdinal(currentOrdinal)) {
+            if (inferTarget && insn.opcode == Opcodes.GETSTATIC) {
                 continue
             }
 
@@ -162,6 +165,15 @@ class ModifyReceiverInjector(
             }
 
             val receiverType = Type.getObjectType(insn.owner)
+            if (inferTarget && !isReceiverHandlerCompatible(target, receiverType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
             val targetParamCount = validateHandlerSignature(target, receiverType)
             val il = buildFieldReadReceiverModification(target, receiverType, targetParamCount)
             target.instructions.insertBefore(insn, il)
@@ -210,6 +222,11 @@ class ModifyReceiverInjector(
 
         return injectionCount
     }
+
+    private fun isReceiverHandlerCompatible(
+        target: MethodNode,
+        receiverType: Type,
+    ): Boolean = runCatching { validateHandlerSignature(target, receiverType) }.isSuccess
 
     private fun buildCallReceiverModification(
         target: MethodNode,
