@@ -34,6 +34,7 @@ import java.lang.reflect.Modifier
 class InvokeInjector(
     method: Method,
     asmInfo: AsmInfo,
+    private val injectionPoint: InjectionPoint = InjectionPoint.INVOKE,
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 在匹配的调用点附近注入 ASM 调用。
@@ -55,6 +56,12 @@ class InvokeInjector(
                 ?: return 0
 
         val at = injectAnnotation.at
+        val shift =
+            if (injectionPoint == InjectionPoint.INVOKE_ASSIGN && at.shift == Shift.BEFORE) {
+                Shift.AFTER
+            } else {
+                at.shift
+            }
         val targetMethodSignature = at.target
 
         if (targetMethodSignature.isEmpty()) {
@@ -90,7 +97,7 @@ class InvokeInjector(
                         continue
                     }
 
-                    when (at.shift) {
+                    when (shift) {
                         Shift.BEFORE -> {
                             injectBeforeCall(instructions, insn, target)
                             injectionCount++
