@@ -719,7 +719,8 @@ object ValidationMixin {
 框架会按 handler 栈参数、`Operation` 位置与返回类型筛选兼容的普通调用、`invokedynamic` 调用或构造器调用，不兼容候选不计入 `ordinal` 或命中数；
 `invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数，再接收 `Operation<R>`，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，`operation.call(...)` 只传动态调用点参数；构造器模式可通过 `INVOKE + <init>` 目标指定，也可通过 `NEW` 与类型目标指定；`NEW` 目标可写
 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`，handler 先接收构造器参数，不接收未初始化 receiver；
-`GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；`PUTFIELD` handler
+`GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；省略 `FIELD` 字段目标时，
+框架会按 handler 字段 owner 参数、`Operation` 位置与返回类型筛选兼容字段读取，不兼容字段读取不计入 `ordinal` 或命中数；`PUTFIELD` handler
 先接收字段 owner 和待写入值，`PUTSTATIC` handler 先接收待写入值；数组读取模式通过
 `FIELD + args = ["array=get"]` 指定，handler 接收数组引用、`Int` 索引与 `Operation<R>`；数组写入模式
 通过 `FIELD_ASSIGN + args = ["array=set"]` 指定，handler 接收数组引用、`Int` 索引、待写入元素值与
