@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -37,6 +38,7 @@ import java.lang.reflect.Modifier
  *
  * @param injectionPoint 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param variableIndex 要修改的 JVM 局部变量槽位索引
+ * @param variableNames 要匹配的局部变量名；为空时不按名称过滤
  * @param ordinal 未指定 [variableIndex] 时，同类型入口参数、读取点或写入点的序号
  * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 INVOKE 边界缩小匹配范围
  *
@@ -48,9 +50,12 @@ class ModifyVariableInjector(
     asmInfo: AsmInfo,
     private val injectionPoint: InjectionPoint,
     private val variableIndex: Int,
+    variableNames: Array<String> = emptyArray(),
     private val ordinal: Int,
     private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
+    private val requestedVariableNames = variableNames.filterTo(linkedSetOf()) { it.isNotBlank() }
+
     /**
      * 在目标方法入口、变量读取点前或变量写入点后修改指定局部变量槽位。
      *
@@ -122,6 +127,9 @@ class ModifyVariableInjector(
             if (variableIndex >= 0 && insn.`var` != variableIndex) {
                 continue
             }
+            if (!matchesRequestedVariableName(target, insn, insn.`var`)) {
+                continue
+            }
             if (!isLoadCompatibleWithHandler(insn.opcode, handlerVariableType)) {
                 continue
             }
@@ -160,6 +168,9 @@ class ModifyVariableInjector(
             if (variableIndex >= 0 && insn.`var` != variableIndex) {
                 continue
             }
+            if (!matchesRequestedVariableName(target, storeAnchor(insn), insn.`var`)) {
+                continue
+            }
             if (!isStoreCompatibleWithHandler(insn.opcode, handlerVariableType)) {
                 continue
             }
@@ -189,10 +200,10 @@ class ModifyVariableInjector(
     ): HeadVariable? {
         val variables = collectHeadParameters(target)
         if (index >= 0) {
-            return variables.find { it.index == index }
+            return variables.find { it.index == index && matchesRequestedVariableName(it.name) }
         }
 
-        val matchingVariables = variables.filter { it.type == expectedType }
+        val matchingVariables = variables.filter { it.type == expectedType && matchesRequestedVariableName(it.name) }
         if (ordinal < 0) {
             return matchingVariables.singleOrNull()
         }
@@ -205,7 +216,7 @@ class ModifyVariableInjector(
         var slot = if (isStatic) 0 else 1
         return buildList {
             for (argumentType in Type.getArgumentTypes(target.desc)) {
-                add(HeadVariable(slot, argumentType))
+                add(HeadVariable(slot, argumentType, localVariableNameAtSlot(target, slot)))
                 slot += argumentType.size
             }
         }
@@ -341,6 +352,58 @@ class ModifyVariableInjector(
             current = current.next
         }
         return current
+    }
+
+    private fun storeAnchor(insn: AbstractInsnNode): AbstractInsnNode = nextRealInstruction(insn) ?: insn
+
+    private fun matchesRequestedVariableName(name: String?): Boolean =
+        requestedVariableNames.isEmpty() || (name != null && name in requestedVariableNames)
+
+    private fun matchesRequestedVariableName(
+        target: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): Boolean {
+        if (requestedVariableNames.isEmpty()) {
+            return true
+        }
+        return localVariableAt(target, anchor, index)?.name in requestedVariableNames
+    }
+
+    private fun localVariableNameAtSlot(
+        target: MethodNode,
+        index: Int,
+    ): String? =
+        target.localVariables
+            .firstOrNull { it.index == index }
+            ?.name
+
+    private fun localVariableAt(
+        target: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): LocalVariableNode? {
+        val insns = target.instructions.toArray()
+        val anchorIndex = insns.indexOf(anchor)
+        if (anchorIndex < 0) {
+            return null
+        }
+
+        return target.localVariables.firstOrNull { local ->
+            local.index == index && local.containsInstruction(insns, anchorIndex)
+        }
+    }
+
+    private fun LocalVariableNode.containsInstruction(
+        insns: Array<AbstractInsnNode>,
+        instructionIndex: Int,
+    ): Boolean {
+        val startIndex = insns.indexOf(start)
+        val endIndex = insns.indexOf(end)
+        return startIndex >= 0 &&
+            endIndex >= 0 &&
+            instructionIndex >= startIndex &&
+            instructionIndex < endIndex
     }
 
     private fun buildModificationCall(
@@ -667,6 +730,7 @@ class ModifyVariableInjector(
     private data class HeadVariable(
         val index: Int,
         val type: Type,
+        val name: String?,
     )
 
     private companion object {

@@ -2730,6 +2730,7 @@ class TargetClassContext(
                 asmInfo,
                 annotation.at.value,
                 annotation.index,
+                annotation.name,
                 annotation.ordinal,
                 annotation.slice,
             )

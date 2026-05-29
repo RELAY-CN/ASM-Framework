@@ -191,6 +191,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param injectionPoint 修改位置
      * @param index 要修改的局部变量槽位索引
+     * @param names 要匹配的局部变量名集合
      * @param ordinal 未指定槽位索引时，同类型入口参数、读取点或写入点的序号
      * @param slice 切片范围；当前 LOAD 与 STORE 局部变量改写支持 INVOKE 边界切片
      * @return ModifyVariable 注入器
@@ -203,9 +204,10 @@ object AsmInjectorFactory {
         asmInfo: AsmInfo,
         injectionPoint: InjectionPoint,
         index: Int,
+        names: Array<String>,
         ordinal: Int,
         slice: Slice = Slice(),
-    ): AsmInjector = ModifyVariableInjector(method, asmInfo, injectionPoint, index, ordinal, slice)
+    ): AsmInjector = ModifyVariableInjector(method, asmInfo, injectionPoint, index, names, ordinal, slice)
 
     /**
      * 创建 Redirect 注入器。
