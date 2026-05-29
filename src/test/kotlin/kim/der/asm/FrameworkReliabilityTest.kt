@@ -2426,6 +2426,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtJumpRewritesBranchDecisionInTestClass() {
+        AsmRegistry.register(ModifyExpressionValueJumpMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+                ),
+            )
+        val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("raw")
+        val result = clazz.getMethod("recursiveMethod", Int::class.javaPrimitiveType).invoke(instance, 5)
+
+        assertEquals(1, result)
+    }
+
+    @Test
     fun modifyExpressionValueAtThrowAcceptsSpecificThrowableReturnType() {
         AsmRegistry.register(ModifyExpressionValueSpecificThrowableMixin::class.java)
 
@@ -9297,6 +9323,22 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "inferred-$original"
+    }
+
+    @AsmMixin("Test")
+    object ModifyExpressionValueJumpMixin {
+        @ModifyExpressionValue(
+            method = "recursiveMethod(I)I",
+            at = At(value = InjectionPoint.JUMP, target = "IF_ICMPGT"),
+        )
+        @JvmStatic
+        fun modify(
+            original: Boolean,
+            n: Int,
+        ): Boolean {
+            n.hashCode()
+            return false && original
+        }
     }
 
     @AsmMixin("InstanceofTarget")
