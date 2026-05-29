@@ -11,8 +11,6 @@ import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
-import org.objectweb.asm.ConstantDynamic
-import org.objectweb.asm.Handle
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -89,8 +87,7 @@ class ModifyConstantInjector(
 
             // 如果指定了常量值，检查是否匹配
             if (constantValue != null) {
-                val constant = BytecodeUtil.getConstant(insn)
-                if (!matchesConstant(insn, constant, constantValue)) {
+                if (!BytecodeUtil.matchesConstantText(insn, constantValue)) {
                     continue
                 }
             }
@@ -210,40 +207,6 @@ class ModifyConstantInjector(
             return false
         }
         return targetDesc == null || insn.desc == targetDesc
-    }
-
-    /**
-     * 检查常量值是否匹配
-     */
-    private fun matchesConstant(
-        insn: AbstractInsnNode,
-        constant: Any?,
-        value: String,
-    ): Boolean {
-        if (constant == null) {
-            return value == "null"
-        }
-        if (isBooleanLiteral(value)) {
-            return isBooleanConstantInsn(insn, value == "true")
-        }
-
-        return when (constant) {
-            is Int -> constant.toString() == value
-            is Long -> constant.toString() == value
-            is Float -> constant.toString() == value
-            is Double -> constant.toString() == value
-            is String -> constant == value
-            is Type -> {
-                if (constant.sort == Type.METHOD) {
-                    constant.descriptor == value
-                } else {
-                    constant.internalName == value.replace('.', '/')
-                }
-            }
-            is Handle -> "${constant.owner}.${constant.name}${constant.desc}" == value
-            is ConstantDynamic -> constant.name == value || "${constant.name}:${constant.descriptor}" == value
-            else -> false
-        }
     }
 
     /**
