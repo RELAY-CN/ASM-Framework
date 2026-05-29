@@ -750,6 +750,8 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 数组写入模式通过 `args = ["array=set"]` 指定，并让 handler 接收数组引用、`Int` 索引与待写入元素值，
 后续都可接收目标方法参数前缀。省略 `INVOKE` 调用目标时，框架会按 handler 参数和 boolean 返回类型筛选兼容的 `void`
 普通调用或 `invokedynamic` 调用；构造器、非 `void` 调用和 handler 不兼容的调用不计入 `ordinal` 或命中数。
+省略 `FIELD_ASSIGN` 字段目标时，框架会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容字段写入，
+不兼容字段写入不计入 `ordinal` 或命中数。
 构造器 `<init>` 会消费未初始化对象，不能用条件包裹跳过；如需控制构造过程，应改用
 `@Redirect` 或 `@WrapOperation`。`INVOKE`、`FIELD_ASSIGN` 与 `array=set` 条件包裹可用 `Slice` 限制匹配范围；`from` 边界之后、
 `to` 边界之前的调用、字段写入或数组元素写入才会参与匹配，边界调用本身不会被包裹，`ordinal` 会在切片内重新计数。关键条件包裹可设置 `require` / `allow` / `expect`，按实际插入条件判断的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
@@ -1099,8 +1101,8 @@ object ConditionalMixin {
 `CallbackInfo.cancel()` 需要 `@AsmInject(cancellable = true)`；漏写时会在 handler 调用期间抛出异常，避免补丁静默失效。
 非 `void` 目标方法可直接在可取消 HEAD 注入中调用 `callback.setReturnValue(value)`，该调用会同时取消原方法体。
 
-`@WrapWithCondition` 可用于按条件跳过 `void` 调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入。字段写入模式需要使用
-`At(value = InjectionPoint.FIELD_ASSIGN, target = "...")`，`PUTFIELD` handler 参数为字段 owner 与待写入值，
+`@WrapWithCondition` 可用于按条件跳过 `void` 调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入。字段写入模式使用
+`At(value = InjectionPoint.FIELD_ASSIGN, target = "...")` 精确匹配字段，也可省略字段目标按 handler 签名筛选兼容写入；`PUTFIELD` handler 参数为字段 owner 与待写入值，
 `PUTSTATIC` handler 参数只包含待写入值，后续仍可追加目标方法参数前缀。数组元素写入使用
 `args = ["array=set"]`，handler 参数为数组引用、`Int` 索引与待写入元素值，返回 `false` 时跳过原 `xASTORE`。
 动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。省略调用目标时按 handler 参数筛选兼容的 `void` 调用，非 `void` 调用与不兼容调用不会参与 `ordinal` 计数。构造器 `<init>` 不支持条件包裹；命中构造器目标会在转换阶段失败，如需控制构造过程应使用 `@Redirect` 或 `@WrapOperation`。引用类型参数可使用精确类型、父类型或 `Any` / `Object`；原始类型参数仍按 JVM 栈类型匹配。调用、字段写入和数组元素写入都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内。
