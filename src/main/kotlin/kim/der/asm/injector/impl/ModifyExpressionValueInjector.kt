@@ -18,6 +18,8 @@ import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
+import org.objectweb.asm.tree.JumpInsnNode
+import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -96,10 +98,11 @@ class ModifyExpressionValueInjector(
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.JUMP -> injectJump(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST, INSTANCEOF, CONSTANT and THROW",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST, INSTANCEOF, JUMP, CONSTANT and THROW",
             )
         }
     }
@@ -442,6 +445,64 @@ class ModifyExpressionValueInjector(
         }
 
         return injectionCount
+    }
+
+    private fun injectJump(target: MethodNode): Int {
+        val targetOpcode = parseJumpOpcodeTarget(at.target)
+        if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue JUMP target must be a conditional JVM jump opcode: ${at.target}",
+            )
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (
+                insn !is JumpInsnNode ||
+                insn.opcode !in CONDITIONAL_JUMP_OPS ||
+                (targetOpcode != null && insn.opcode != targetOpcode)
+            ) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, Type.BOOLEAN_TYPE)
+            val il = buildJumpExpressionValueModification(insn, target, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            target.instructions.remove(insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun buildJumpExpressionValueModification(
+        jumpInsn: JumpInsnNode,
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val originalTrue = LabelNode()
+        val afterOriginal = LabelNode()
+        val il = InsnList()
+        il.add(JumpInsnNode(jumpInsn.opcode, originalTrue))
+        il.add(InsnNode(Opcodes.ICONST_0))
+        il.add(JumpInsnNode(Opcodes.GOTO, afterOriginal))
+        il.add(originalTrue)
+        il.add(InsnNode(Opcodes.ICONST_1))
+        il.add(afterOriginal)
+        il.add(buildExpressionValueModification(target, Type.BOOLEAN_TYPE, targetParamCount))
+        il.add(JumpInsnNode(Opcodes.IFNE, jumpInsn.label))
+        return il
     }
 
     private fun injectThrow(target: MethodNode): Int {
@@ -803,6 +864,25 @@ class ModifyExpressionValueInjector(
         return null
     }
 
+    private fun parseJumpOpcodeTarget(target: String): Int? {
+        if (target.isEmpty()) {
+            return null
+        }
+
+        val normalized = target.trim().uppercase()
+        normalized.toIntOrNull()?.let { opcode ->
+            require(opcode in JUMP_OPS) {
+                "@ModifyExpressionValue JUMP target opcode must be a JVM jump opcode: $target"
+            }
+            return opcode
+        }
+
+        return JUMP_OPCODE_NAMES[normalized]
+            ?: throw IllegalArgumentException(
+                "@ModifyExpressionValue JUMP target must be a jump opcode name or number: $target",
+            )
+    }
+
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
             return Triple(null, null, null)
@@ -975,5 +1055,28 @@ class ModifyExpressionValueInjector(
                 Opcodes.CALOAD,
                 Opcodes.SALOAD,
             )
+        private val JUMP_OPCODE_NAMES =
+            mapOf(
+                "IFEQ" to Opcodes.IFEQ,
+                "IFNE" to Opcodes.IFNE,
+                "IFLT" to Opcodes.IFLT,
+                "IFGE" to Opcodes.IFGE,
+                "IFGT" to Opcodes.IFGT,
+                "IFLE" to Opcodes.IFLE,
+                "IF_ICMPEQ" to Opcodes.IF_ICMPEQ,
+                "IF_ICMPNE" to Opcodes.IF_ICMPNE,
+                "IF_ICMPLT" to Opcodes.IF_ICMPLT,
+                "IF_ICMPGE" to Opcodes.IF_ICMPGE,
+                "IF_ICMPGT" to Opcodes.IF_ICMPGT,
+                "IF_ICMPLE" to Opcodes.IF_ICMPLE,
+                "IF_ACMPEQ" to Opcodes.IF_ACMPEQ,
+                "IF_ACMPNE" to Opcodes.IF_ACMPNE,
+                "GOTO" to Opcodes.GOTO,
+                "JSR" to Opcodes.JSR,
+                "IFNULL" to Opcodes.IFNULL,
+                "IFNONNULL" to Opcodes.IFNONNULL,
+            )
+        private val JUMP_OPS = JUMP_OPCODE_NAMES.values.toSet()
+        private val CONDITIONAL_JUMP_OPS = JUMP_OPS - setOf(Opcodes.GOTO, Opcodes.JSR)
     }
 }
