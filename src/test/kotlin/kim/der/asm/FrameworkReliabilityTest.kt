@@ -1648,6 +1648,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtInvokeInfersTargetByCompatibleReturnType() {
+        AsmRegistry.register(ModifyExpressionValueInferredInvokeTargetMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InferredInvokeExpressionValueTarget",
+                inferredInvokeExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InferredInvokeExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-inferred", result)
+    }
+
+    @Test
     fun modifyExpressionValueInfersTargetWhenMethodIsOmitted() {
         AsmRegistry.register(InferredModifyExpressionValueTargetMixin::class.java)
 
@@ -8001,6 +8018,16 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "$original-changed"
     }
 
+    @AsmMixin("InferredInvokeExpressionValueTarget")
+    object ModifyExpressionValueInferredInvokeTargetMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-inferred"
+    }
+
     @AsmMixin("ExpressionValueTarget")
     object InferredModifyExpressionValueTargetMixin {
         @ModifyExpressionValue(
@@ -13705,6 +13732,54 @@ class FrameworkReliabilityTest {
             visitCode()
             visitLdcInsn(" raw ")
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun inferredInvokeExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InferredInvokeExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "InferredInvokeExpressionValueTarget",
+                "builder",
+                "()Ljava/lang/StringBuilder;",
+                false,
+            )
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "InferredInvokeExpressionValueTarget",
+                "text",
+                "()Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "builder", "()Ljava/lang/StringBuilder;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("ignored")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "text", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("raw")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
             visitEnd()
