@@ -2671,6 +2671,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtInvokeInfersTargetByCompatibleSignature() {
+        AsmRegistry.register(WrapOperationInferredInvokeTargetMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InferredInvokeExpressionValueTarget",
+                inferredInvokeExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InferredInvokeExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("raw-wrapped", result)
+    }
+
+    @Test
     fun wrapOperationAtInvokeCanSkipOriginalCall() {
         AsmRegistry.register(WrapOperationSkipCallMixin::class.java)
 
@@ -9066,6 +9083,19 @@ class FrameworkReliabilityTest {
             value.length
             return operation.call(target, "-inferred-call")
         }
+    }
+
+    @AsmMixin("InferredInvokeExpressionValueTarget")
+    object WrapOperationInferredInvokeTargetMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE),
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String = "${operation.call(target)}-wrapped"
     }
 
     @AsmMixin("ModifyReceiverTarget")
