@@ -2395,6 +2395,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtConstantRewritesConstantExpression() {
+        AsmRegistry.register(ModifyExpressionValueConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("expression-original", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtThrowAcceptsSpecificThrowableReturnType() {
         AsmRegistry.register(ModifyExpressionValueSpecificThrowableMixin::class.java)
 
@@ -9130,6 +9142,16 @@ class FrameworkReliabilityTest {
             value.hashCode()
             return original || force
         }
+    }
+
+    @AsmMixin("MixedConstantTarget")
+    object ModifyExpressionValueConstantMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "original"),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expression-$original"
     }
 
     @AsmMixin("InstanceofTarget")
