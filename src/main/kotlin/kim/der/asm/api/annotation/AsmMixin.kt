@@ -516,13 +516,14 @@ annotation class WrapWithCondition(
  * - 第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收
  * - primitive 返回类型必须与匹配表达式的值类型一致；引用类型表达式可返回匹配类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；[InjectionPoint.THROW] 可返回 `Throwable` 或其子类
  * - 后续参数可按顺序接收目标方法参数前缀
- * - 方法调用目标的 [At.target] 必须指定调用签名；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
+ * - 方法调用目标的 [At.target] 可指定调用签名；省略时按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
  *   以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`
  * - 字段读取目标必须指定字段签名
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
  * - 数组长度目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象；省略 [At.target] 时按 handler 首参与返回类型筛选兼容 `NEW`
  * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象；省略 [At.target] 时按 handler 首参与返回类型筛选兼容 `CHECKCAST`
+ * - 未指定调用、[InjectionPoint.NEW] 或 [InjectionPoint.CAST] 目标时，不兼容候选不计入 [ordinal] 或命中数
  * - [InjectionPoint.INSTANCEOF] 的 [At.target] 为类型 internal name 或 binary name；handler 接收 `Boolean` 判断结果
  * - [InjectionPoint.THROW] 的 [At.target] 可省略；handler 接收即将抛出的 `Throwable` 并返回新的 `Throwable` 或具体异常子类，后续参数仍可接收目标方法参数前缀；指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常
  * - [method] 为空时会按 handler 名称、表达式定位、表达式值类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
