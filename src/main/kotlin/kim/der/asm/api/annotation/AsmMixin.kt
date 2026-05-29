@@ -198,9 +198,11 @@ annotation class Unique
  * 用于修改目标方法参数，或目标方法内某次方法调用/构造器调用的参数值（语义参考 Mixin 的 `@ModifyArg`）。
  * 默认在目标方法入口直接写回参数槽位；当 [at] 指向 [InjectionPoint.INVOKE] 时，会改写匹配调用点的指定参数。
  * 入口参数模式下可省略 [method]，框架会按 handler 方法名、[index]、首个参数类型、返回类型和后续目标方法参数前缀，
- * 在目标类中推断唯一同名方法；若存在多个兼容重载，需要显式声明 [method]。
- * INVOKE 模式下 [At.target] 可省略，框架会按 [index] 指向的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀
- * 筛选兼容调用点；不兼容候选不会计入 [ordinal] 或实际命中数。
+ * 在目标类中推断唯一同名方法；[index] 为负数时会在入口参数中推断唯一兼容参数。若存在多个兼容重载或多个兼容参数，
+ * 需要显式声明 [method] 或 [index]。
+ * INVOKE 模式下 [index] 为负数时会在调用参数中推断唯一兼容参数；[At.target] 可省略，框架会按
+ * [index] 指向或推断出的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀筛选兼容调用点；
+ * 不兼容候选不会计入 [ordinal] 或实际命中数。
  *
  * ASM 方法要求：
  *
@@ -208,12 +210,13 @@ annotation class Unique
  * - 第一个参数必须是被修改的原参数；后续参数可按顺序接收目标方法参数前缀
  * - 被修改参数或目标方法参数为对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`；返回类型对基础类型仍需精确匹配，对象/数组类型可返回可赋值给原参数类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - 后续目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收
- * - INVOKE 模式只把 [index] 选中的调用参数作为第一个参数，不会自动传入目标调用的其他参数；构造器调用不暴露未初始化 receiver
+ * - INVOKE 模式只把 [index] 选中或推断出的调用参数作为第一个参数，不会自动传入目标调用的其他参数；构造器调用不暴露未初始化 receiver
  * - [require] / [allow] 可约束实际参数修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数修改数量，不一致时只输出警告，不阻断转换
  *
  * @param method 目标方法签名；可省略并按 handler 名称、参数类型和实际兼容调用点推断唯一兼容目标
- * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
+ * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，负数表示按 handler 首参和返回类型推断唯一兼容参数；
+ * INVOKE 模式下为目标调用参数索引，负数同样表示按调用参数兼容性推断唯一参数
  * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用、构造器调用或
  * `invokedynamic` 调用，为空则按 handler 签名推断兼容调用点；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
  * 以及动态调用点描述符匹配
@@ -594,7 +597,8 @@ annotation class ModifyExpressionValue(
  * 用于修改目标方法中的参数或局部变量（语义参考 Mixin 的 `@ModifyVariable`）。
  * 当前实现支持在方法入口（[InjectionPoint.HEAD]）修改已有参数槽位，也支持在局部变量读取前
  *（[InjectionPoint.LOAD]）或写入后（[InjectionPoint.STORE]）改写槽位值。可以通过 JVM 局部变量槽位
- * [index] 精确定位，未指定 [index] 时按 handler 参数类型与 [ordinal] 选择匹配项。
+ * [index] 精确定位，也可以通过 [name] 依赖 LocalVariableTable 中的局部变量名筛选候选；
+ * 未指定 [index] 时按 handler 参数类型与 [ordinal] 选择匹配项。
  * [InjectionPoint.HEAD] 未指定 [index] 与 [ordinal] 时，如果同类型入口参数唯一，会自动推断该参数。
  *
  * ASM 方法要求：
@@ -602,6 +606,7 @@ annotation class ModifyExpressionValue(
  * - 第一个参数接收原始变量值并返回同类型的新值
  * - 后续参数可按目标方法声明顺序接收目标方法参数前缀
  * - [index] 使用 JVM 局部变量槽位索引；实例方法中 `this` 占用槽位 0，第一个参数从槽位 1 开始
+ * - [name] 为空时不按名称过滤；非空时只匹配 LocalVariableTable 名称在列表中的变量，目标字节码缺少调试变量表时不会命中
  * - 显式指定 [index] 时，对象/数组变量或目标方法参数对应的 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`；框架会尽量保留真实槽位类型再写回，返回类型对基础类型仍需精确匹配，对象/数组类型可返回可赋值给原变量类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - [InjectionPoint.HEAD] 会在目标方法体执行前写回选中的参数槽位
  * - [InjectionPoint.LOAD] 会在匹配的 xLOAD 指令前加载当前槽位值、调用 handler，并写回同一槽位
@@ -609,13 +614,15 @@ annotation class ModifyExpressionValue(
  * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
  *   边界指令本身不参与匹配
  * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项；HEAD 模式同类型入口参数唯一时可省略 [ordinal]
- * - [method] 为空时会按 handler 名称、变量类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
+ * - [method] 为空时会按 handler 名称、变量类型、返回类型、[index] / [name] / [ordinal]、
+ *   [slice] 限定后的实际读取或写入候选和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际变量修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望变量修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名；为空时按 handler 名称和签名兼容规则推断唯一同名目标方法
+ * @param method 目标方法签名；为空时按 handler 名称、变量筛选条件、实际读写候选和签名兼容规则推断唯一同名目标方法
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param index 要修改的局部变量槽位索引
+ * @param name 要匹配的局部变量名列表；为空时不按名称过滤，非空时依赖目标方法的 LocalVariableTable
  * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号；HEAD 模式同类型入口参数唯一时可保持默认值
  * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写与 [InjectionPoint.STORE] 局部变量写入改写
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
@@ -652,11 +659,11 @@ annotation class ModifyVariable(
  * - primitive 返回类型必须与目标方法返回类型一致；对象/数组返回类型可为目标类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - 参数可选：可不声明参数直接返回新值，也可以接收原始返回值并追加目标方法的部分参数
  * - 原返回值或目标方法参数为对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`
- * - [method] 为空时会按 handler 名称、返回类型和参数兼容规则匹配唯一同名目标方法，多个兼容重载需要显式指定 [method]
+ * - [method] 为空时会按 handler 名称、返回类型、[ordinal] 对应的真实返回点和参数兼容规则匹配唯一同名目标方法，多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际返回值修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望返回值修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名；为空时按 handler 名称与签名兼容性推断唯一目标方法
+ * @param method 目标方法签名；为空时按 handler 名称、签名兼容性与 [ordinal] 对应的真实返回点推断唯一目标方法
  * @param at 预留参数，当前实现未使用
  * @param ordinal 返回点序号；`-1` 表示修改全部非 void 返回点，`0` 及以上表示只修改第 N 个返回点
  * @param require 最小命中数；大于 0 时实际返回值修改数必须不少于该值

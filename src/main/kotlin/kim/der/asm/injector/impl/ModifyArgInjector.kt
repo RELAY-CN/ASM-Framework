@@ -22,13 +22,14 @@ import java.lang.reflect.Modifier
  * 在目标方法开头读取指定参数槽位，调用 ASM 方法得到新值后写回原槽位。
  * 默认按参数索引直接修改方法入口处的参数值；当 [at] 指向 [InjectionPoint.INVOKE] 时，
  * 会改写匹配普通方法调用、构造器调用或 `invokedynamic` 调用点的指定调用参数。
- * [At.target] 为空时，会按 [argIndex] 指向的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀
- * 筛选兼容调用点；不兼容候选不会计入 [ordinal] 或命中数。
+ * [argIndex] 为负数时，会按 handler 首参、返回类型和后续目标方法参数前缀推断唯一兼容参数。
+ * [At.target] 为空时，会按 [argIndex] 指向或推断出的调用参数类型筛选兼容调用点；
+ * 不兼容候选不会计入 [ordinal] 或命中数。
  * handler 的第一个参数是被修改的原参数；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
  * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原参数类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回原参数类型。后续可按顺序接收目标方法参数前缀。
  *
- * @param argIndex 要修改的目标参数索引，从 0 开始
+ * @param argIndex 要修改的目标参数索引，从 0 开始；负数表示推断唯一兼容参数
  * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标方法调用、构造器调用或 `invokedynamic` 调用，
  * 为空则按 handler 签名推断兼容调用点
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
@@ -115,19 +116,11 @@ class ModifyArgInjector(
             }
 
             val callParamTypes = Type.getArgumentTypes(callSite.desc)
-            if (argIndex < 0 || argIndex >= callParamTypes.size) {
+            val selectedArgument =
                 if (inferTarget) {
-                    continue
-                }
-                throw IllegalArgumentException("Invalid argument index: $argIndex (call has ${callParamTypes.size} parameters)")
-            }
-
-            val paramType = callParamTypes[argIndex]
-            val targetParamCount =
-                if (inferTarget) {
-                    validateInferredHandlerSignature(target, paramType) ?: continue
+                    resolveInferredCallArgument(target, callParamTypes) ?: continue
                 } else {
-                    validateHandlerSignature(target, paramType)
+                    resolveCallArgument(target, callParamTypes)
                 }
 
             if (inferTarget) {
@@ -137,13 +130,67 @@ class ModifyArgInjector(
                 }
             }
 
-            val il = buildCallArgumentModification(target, callSite.hasReceiver, callParamTypes, paramType, targetParamCount)
+            val il = buildCallArgumentModification(target, callSite.hasReceiver, callParamTypes, selectedArgument)
             target.instructions.insertBefore(insn, il)
             injectionCount++
         }
 
         return injectionCount
     }
+
+    private data class CallArgument(
+        val index: Int,
+        val type: Type,
+        val targetParamCount: Int,
+    )
+
+    private fun resolveCallArgument(
+        target: MethodNode,
+        callParamTypes: Array<Type>,
+    ): CallArgument {
+        if (argIndex >= 0) {
+            require(argIndex < callParamTypes.size) {
+                "Invalid argument index: $argIndex (call has ${callParamTypes.size} parameters)"
+            }
+
+            val paramType = callParamTypes[argIndex]
+            return CallArgument(argIndex, paramType, validateHandlerSignature(target, paramType))
+        }
+
+        val compatibleArguments = collectCompatibleCallArguments(target, callParamTypes)
+        require(compatibleArguments.isNotEmpty()) {
+            "Cannot infer @ModifyArg call argument index for ${target.name}${target.desc}"
+        }
+        require(compatibleArguments.size == 1) {
+            "Cannot infer @ModifyArg call argument index for ${target.name}${target.desc}: " +
+                "compatible indexes ${compatibleArguments.map { it.index }}. Specify index explicitly."
+        }
+        return compatibleArguments.single()
+    }
+
+    private fun resolveInferredCallArgument(
+        target: MethodNode,
+        callParamTypes: Array<Type>,
+    ): CallArgument? =
+        if (argIndex >= 0) {
+            if (argIndex >= callParamTypes.size) {
+                null
+            } else {
+                validateInferredHandlerSignature(target, callParamTypes[argIndex])
+                    ?.let { CallArgument(argIndex, callParamTypes[argIndex], it) }
+            }
+        } else {
+            collectCompatibleCallArguments(target, callParamTypes).singleOrNull()
+        }
+
+    private fun collectCompatibleCallArguments(
+        target: MethodNode,
+        callParamTypes: Array<Type>,
+    ): List<CallArgument> =
+        callParamTypes.mapIndexedNotNull { index, paramType ->
+            validateInferredHandlerSignature(target, paramType)
+                ?.let { CallArgument(index, paramType, it) }
+        }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
@@ -200,10 +247,10 @@ class ModifyArgInjector(
         target: MethodNode,
         hasReceiver: Boolean,
         callParamTypes: Array<Type>,
-        selectedParamType: Type,
-        targetParamCount: Int,
+        selectedArgument: CallArgument,
     ): InsnList {
         val il = InsnList()
+        val selectedParamType = selectedArgument.type
         val firstTempIndex = nextLocalIndex(target)
         var nextTempIndex = firstTempIndex
         val receiverIndex =
@@ -225,8 +272,8 @@ class ModifyArgInjector(
         }
 
         addHandlerOwner(il)
-        loadFromVariable(il, selectedParamType, argSlots[argIndex])
-        loadTargetMethodParameters(il, target, targetParamCount)
+        loadFromVariable(il, selectedParamType, argSlots[selectedArgument.index])
+        loadTargetMethodParameters(il, target, selectedArgument.targetParamCount)
         il.add(
             MethodInsnNode(
                 handlerOpcode(),
@@ -237,7 +284,7 @@ class ModifyArgInjector(
             ),
         )
         addArgumentCastIfNeeded(il, selectedParamType)
-        storeStackValue(il, selectedParamType, argSlots[argIndex])
+        storeStackValue(il, selectedParamType, argSlots[selectedArgument.index])
 
         if (receiverIndex != null) {
             il.add(VarInsnNode(Opcodes.ALOAD, receiverIndex))

@@ -38,6 +38,8 @@ import java.lang.reflect.Method
  * `index=N` 或 `var=N` 限制 JVM 局部变量槽位；JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，CONSTANT
  * 指定 `At.target` 时按常量文本过滤，THROW 指定 `At.target`
  * 时只匹配 `ATHROW` 前直接构造出的同类型异常。
+ * [InjectionPoint.CONSTANT] 搭配 [Shift.REPLACE] 时会删除原常量加载指令，并用 handler 返回值作为新的常量表达式值；
+ * 该模式不会把原常量值传给 handler，handler 仍只接收可选 [CallbackInfo] 与目标方法参数前缀。
  * 对象创建指令点仍不支持 `At.by`。
  * 由于 JVM verifier 不允许在未初始化对象仍位于栈顶时插入普通方法调用，[InjectionPoint.NEW] 不支持 [Shift.AFTER]。
  *
@@ -94,11 +96,23 @@ class InstructionPointInjector(
                 continue
             }
 
-            val il = buildHandlerCall(target)
-            val anchor = resolveByAnchor(insns, index, injectAnnotation.at.by)
-            when (injectAnnotation.at.shift) {
-                Shift.BEFORE, Shift.REPLACE -> instructions.insertBefore(anchor, il)
-                Shift.AFTER -> instructions.insert(anchor, il)
+            when {
+                injectAnnotation.at.shift == Shift.REPLACE && point == InjectionPoint.CONSTANT -> {
+                    require(injectAnnotation.at.by == 0) {
+                        "@AsmInject CONSTANT Shift.REPLACE does not support At.by because replacement must remove the matched constant"
+                    }
+                    val replacementCall = buildConstantReplacementHandlerCall(target, insn, injectAnnotation.at.target)
+                    instructions.insertBefore(insn, replacementCall)
+                    instructions.remove(insn)
+                }
+                else -> {
+                    val il = buildHandlerCall(target)
+                    val anchor = resolveByAnchor(insns, index, injectAnnotation.at.by)
+                    when (injectAnnotation.at.shift) {
+                        Shift.BEFORE, Shift.REPLACE -> instructions.insertBefore(anchor, il)
+                        Shift.AFTER -> instructions.insert(anchor, il)
+                    }
+                }
             }
             injectionCount++
         }
@@ -406,6 +420,119 @@ class InstructionPointInjector(
         }
 
         return il
+    }
+
+    private fun buildConstantReplacementHandlerCall(
+        target: MethodNode,
+        constantInsn: AbstractInsnNode,
+        constantTarget: String,
+    ): InsnList {
+        val constantType =
+            resolveConstantReplacementType(constantInsn, constantTarget)
+                ?: throw IllegalStateException("@AsmInject CONSTANT Shift.REPLACE matched unsupported constant instruction")
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        require(handlerReturnType != Type.VOID_TYPE) {
+            "@AsmInject CONSTANT Shift.REPLACE handler ${asmMethod.name} must return replacement value for $constantType"
+        }
+        require(isConstantReplacementReturnCompatible(constantType, handlerReturnType)) {
+            "@AsmInject CONSTANT Shift.REPLACE handler ${asmMethod.name} return type mismatch: " +
+                "original $constantType, handler $handlerReturnType"
+        }
+
+        val il = InsnList()
+        val callbackVarIndex =
+            if (AsmMethodCallGenerator.needsCallbackInfo(asmMethod)) {
+                AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+                allocateLocalVariable(target, Type.getType(CallbackInfo::class.java)).also {
+                    il.add(VarInsnNode(Opcodes.ASTORE, it))
+                }
+            } else {
+                null
+            }
+
+        AsmMethodCallGenerator.generateMethodCall(il, asmMethod, asmInfo, target, callbackVarIndex)
+        addConstantReplacementCastIfNeeded(il, constantInsn, constantType, handlerReturnType)
+        return il
+    }
+
+    private fun resolveConstantReplacementType(
+        constantInsn: AbstractInsnNode,
+        constantTarget: String,
+    ): Type? {
+        if (isBooleanLiteral(constantTarget) && isBooleanConstantInsn(constantInsn, constantTarget == "true")) {
+            return Type.BOOLEAN_TYPE
+        }
+        return BytecodeUtil.getConstantType(constantInsn)
+    }
+
+    private fun isConstantReplacementReturnCompatible(
+        constantType: Type,
+        handlerReturnType: Type,
+    ): Boolean {
+        if (constantType == handlerReturnType) {
+            return true
+        }
+        if (handlerReturnType == Type.VOID_TYPE) {
+            return false
+        }
+        if (!constantType.isReferenceType() || !handlerReturnType.isReferenceType()) {
+            return false
+        }
+        if (constantType.isGenericObjectType()) {
+            return true
+        }
+        if (handlerReturnType.isGenericObjectType()) {
+            return true
+        }
+        return runCatching {
+            val constantClass = loadReferenceClass(constantType)
+            constantClass.isAssignableFrom(asmMethod.returnType)
+        }.getOrDefault(false)
+    }
+
+    private fun addConstantReplacementCastIfNeeded(
+        il: InsnList,
+        constantInsn: AbstractInsnNode,
+        constantType: Type,
+        handlerReturnType: Type,
+    ) {
+        val replacementType =
+            if (constantInsn.opcode == Opcodes.ACONST_NULL || constantType.isGenericObjectType()) {
+                handlerReturnType
+            } else {
+                constantType
+            }
+        if (replacementType != handlerReturnType && replacementType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, replacementType.internalName))
+        }
+    }
+
+    private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
+
+    private fun Type.isGenericObjectType(): Boolean =
+        sort == Type.OBJECT && (internalName == "java/lang/Object" || internalName == "kotlin/Any")
+
+    private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
+
+    private fun isBooleanConstantInsn(
+        insn: AbstractInsnNode,
+        value: Boolean,
+    ): Boolean =
+        when (insn.opcode) {
+            Opcodes.ICONST_0 -> !value
+            Opcodes.ICONST_1 -> value
+            else -> false
+        }
+
+    private fun loadReferenceClass(type: Type): Class<*> {
+        val className =
+            if (type.sort == Type.ARRAY) {
+                type.descriptor.replace('/', '.')
+            } else {
+                type.className
+            }
+        val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
+        return Class.forName(className, false, classLoader)
     }
 
     private fun parseFieldTarget(target: String): FieldTarget {

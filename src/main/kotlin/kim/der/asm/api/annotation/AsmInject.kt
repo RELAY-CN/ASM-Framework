@@ -24,7 +24,8 @@ package kim.der.asm.api.annotation
  *   可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。实例调用的 receiver 会被框架保存和恢复，
  *   但不会作为普通 handler 参数传入。INVOKE_ASSIGN 默认在调用完成后插入；需要调用前插入时使用 INVOKE。
  * - INVOKE 的 REPLACE 注入按替换原调用处理，handler 参数对应原调用参数，返回值需要与原调用返回类型兼容。
- * - HEAD、TAIL、RETURN、INVOKE BEFORE/AFTER、INVOKE_ASSIGN 与普通指令点注入的 handler 返回值不参与目标方法结果，会在调用后丢弃。
+ * - 普通 CONSTANT 的 REPLACE 注入会用 handler 返回值替换原常量加载；其他普通指令点注入不会替换原始指令。
+ * - HEAD、TAIL、RETURN、INVOKE BEFORE/AFTER、INVOKE_ASSIGN 与普通非替换指令点注入的 handler 返回值不参与目标方法结果，会在调用后丢弃。
  *
  * ## 命中数契约
  *
@@ -80,8 +81,8 @@ annotation class AsmInject(
  * [FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP]、[CONSTANT] 与 [THROW]。
  * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [INSTANCEOF] 改写类型判断结果，通过 [JUMP] 改写条件跳转分支结果，通过 [CONSTANT] 改写常量表达式，
  * 也可通过 [THROW] 改写即将抛出的异常。
- * 其中指令点注入会在匹配指令前后插入 handler，
- * 不会替换原始指令、自动传递栈顶操作数或局部变量值。
+ * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
+ * [CONSTANT] 搭配 [Shift.REPLACE] 时可用 handler 返回值替换原常量加载。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -156,8 +157,9 @@ enum class InjectionPoint {
  * - 普通 JUMP 目标可省略；指定时为跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`。
  *   [ModifyExpressionValue] 的 JUMP 只支持条件跳转，handler 接收并返回 `Boolean` 分支结果。
  * - 普通 CONSTANT 目标可省略；指定时为常量文本。`LDC` 类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符。
+ *   当 [shift] 为 [Shift.REPLACE] 时，handler 返回值会替换原常量加载，handler 不接收原常量值。
  * - 普通 THROW 目标可省略；指定时为异常类型 internal name 或 binary name，只匹配 `ATHROW` 前直接构造出的同类型异常。
- * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
+ * - 除普通 CONSTANT 外，REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
  * - [Redirect] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取。
  * - [WrapOperation] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，

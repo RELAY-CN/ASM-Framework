@@ -414,6 +414,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueInfersTargetFromOrdinalCandidateWhenMethodIsOmitted() {
+        AsmRegistry.register(InferredOrdinalModifyReturnValueMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "OrdinalReturnInferenceTarget",
+            ordinalReturnInferenceTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("OrdinalReturnInferenceTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        assertEquals("single", clazz.getMethod("value").invoke(instance))
+        assertEquals("first", clazz.getMethod("value", Boolean::class.javaPrimitiveType).invoke(instance, true))
+        assertEquals("ordinal-second", clazz.getMethod("value", Boolean::class.javaPrimitiveType).invoke(instance, false))
+    }
+
+    @Test
     fun modifyReturnValueWithTooManyHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(TooManyModifyReturnParametersMixin::class.java)
 
@@ -877,6 +894,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtMethodStartInfersIndexWhenSingleParameterMatches() {
+        AsmRegistry.register(InferredModifyArgIndexMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedArgTarget", mixedArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz
+            .getMethod("echo", Int::class.javaPrimitiveType, String::class.java)
+            .invoke(instance, 7, "value")
+
+        assertEquals("7:inferred-index-value", result)
+    }
+
+    @Test
     fun modifyArgAtMethodStartAcceptsGenericObjectReturnType() {
         AsmRegistry.register(ModifyArgGenericReturnMixin::class.java)
 
@@ -921,6 +952,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("prefix-inferred", result)
+    }
+
+    @Test
+    fun modifyArgAtInvokeInfersIndexWhenSingleCallParameterMatches() {
+        AsmRegistry.register(InferredInvokeModifyArgIndexMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-inferred-index", result)
     }
 
     @Test
@@ -4915,6 +4958,66 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtStoreInfersOverloadFromActualStoreCandidate() {
+        AsmRegistry.register(InferredStoreModifyVariableMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "StoreVariableOverloadTarget",
+                storeVariableOverloadTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("StoreVariableOverloadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val intResult = clazz.getMethod("value", Int::class.javaPrimitiveType).invoke(instance, 7)
+        val stringResult = clazz.getMethod("value", String::class.java).invoke(instance, "raw")
+
+        assertEquals(7, intResult)
+        assertEquals("stored-local-raw", stringResult)
+    }
+
+    @Test
+    fun modifyVariableAtLoadInfersOverloadFromActualLoadCandidate() {
+        AsmRegistry.register(InferredLoadModifyVariableMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "LoadVariableOverloadTarget",
+                loadVariableOverloadTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("LoadVariableOverloadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val intResult = clazz.getMethod("value", Int::class.javaPrimitiveType).invoke(instance, 7)
+        val stringResult = clazz.getMethod("value", String::class.java).invoke(instance, "raw")
+
+        assertEquals(7, intResult)
+        assertEquals("loaded-local-raw", stringResult)
+    }
+
+    @Test
+    fun modifyVariableAtHeadUsesNameDiscriminatorWhenInferringOverload() {
+        AsmRegistry.register(InferredNamedHeadModifyVariableMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "NamedHeadVariableOverloadTarget",
+                namedHeadVariableOverloadTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("NamedHeadVariableOverloadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val oneArgResult = clazz.getMethod("echo", String::class.java).invoke(instance, "value")
+        val twoArgResult =
+            clazz
+                .getMethod("echo", String::class.java, Int::class.javaPrimitiveType)
+                .invoke(instance, "value", 7)
+
+        assertEquals("value", oneArgResult)
+        assertEquals("named-value:7", twoArgResult)
+    }
+
+    @Test
     fun modifyVariableExposesCountContractParameters() {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
@@ -6649,6 +6752,30 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun constantInjectReplaceUsesHandlerReturnAsConstantValue() {
+        AsmRegistry.register(ConstantInstructionReplaceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstantParamTarget", constantParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstantParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 4)
+
+        assertEquals("suffix-4", result)
+    }
+
+    @Test
+    fun constantInjectReplaceTreatsExplicitBooleanTargetAsBooleanConstant() {
+        AsmRegistry.register(BooleanConstantInstructionReplaceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("TrueBooleanConstantTarget", trueBooleanConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("TrueBooleanConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(false, result)
+    }
+
+    @Test
     fun invokeAssignInjectDefaultsToAfterMatchedCallInTestClass() {
         AsmRegistry.register(InvokeAssignInjectMixin::class.java)
 
@@ -7235,6 +7362,13 @@ class FrameworkReliabilityTest {
         fun value(original: Any): Any = "$original-inferred"
     }
 
+    @AsmMixin("OrdinalReturnInferenceTarget")
+    object InferredOrdinalModifyReturnValueMixin {
+        @ModifyReturnValue(ordinal = 1)
+        @JvmStatic
+        fun value(original: String): String = "ordinal-$original"
+    }
+
     @AsmMixin("ReturnTarget")
     object TooManyModifyReturnParametersMixin {
         @ModifyReturnValue(method = "value()Ljava/lang/String;")
@@ -7616,6 +7750,13 @@ class FrameworkReliabilityTest {
         fun echo(original: String): String = "inferred-$original"
     }
 
+    @AsmMixin("MixedArgTarget")
+    object InferredModifyArgIndexMixin {
+        @ModifyArg
+        @JvmStatic
+        fun echo(original: String): String = "inferred-index-$original"
+    }
+
     @AsmMixin("ArgTarget")
     object ModifyArgGenericReturnMixin {
         @ModifyArg(method = "echo(Ljava/lang/String;)Ljava/lang/String;", index = 0)
@@ -7658,6 +7799,18 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "inferred"
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InferredInvokeModifyArgIndexMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "inferred-index"
     }
 
     @AsmMixin("InvokeModifyArgTarget")
@@ -11513,6 +11666,42 @@ class FrameworkReliabilityTest {
         fun echo(original: String): String = "target-$original"
     }
 
+    @AsmMixin("StoreVariableOverloadTarget")
+    object InferredStoreModifyVariableMixin {
+        @ModifyVariable(
+            at = At(value = InjectionPoint.STORE),
+            index = 2,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun value(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("LoadVariableOverloadTarget")
+    object InferredLoadModifyVariableMixin {
+        @ModifyVariable(
+            at = At(value = InjectionPoint.LOAD),
+            index = 2,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun value(original: String): String = "loaded-$original"
+    }
+
+    @AsmMixin("NamedHeadVariableOverloadTarget")
+    object InferredNamedHeadModifyVariableMixin {
+        @ModifyVariable(
+            at = At(value = InjectionPoint.HEAD),
+            name = ["target"],
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun echo(original: String): String = "named-$original"
+    }
+
     @AsmMixin("StaticVariableTarget")
     object ModifyVariableStaticParamMixin {
         @ModifyVariable(
@@ -12844,6 +13033,35 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("ConstantParamTarget")
+    object ConstantInstructionReplaceMixin {
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.CONSTANT,
+            at = At(value = InjectionPoint.CONSTANT, target = "base-", shift = Shift.REPLACE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            suffix: String,
+            count: Int,
+        ): String = "$suffix-$count"
+    }
+
+    @AsmMixin("TrueBooleanConstantTarget")
+    object BooleanConstantInstructionReplaceMixin {
+        @AsmInject(
+            method = "value()Z",
+            target = InjectionPoint.CONSTANT,
+            at = At(value = InjectionPoint.CONSTANT, target = "true", shift = Shift.REPLACE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(): Boolean = false
+    }
+
     @AsmMixin("Test")
     object InvokeAssignInjectMixin {
         @AsmInject(
@@ -13373,6 +13591,187 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun namedHeadVariableOverloadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC,
+            "NamedHeadVariableOverloadTarget",
+            null,
+            "java/lang/Object",
+            null,
+        )
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "echo",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            val start = org.objectweb.asm.Label()
+            val end = org.objectweb.asm.Label()
+            visitCode()
+            visitLabel(start)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(end)
+            visitLocalVariable(
+                "this",
+                "LNamedHeadVariableOverloadTarget;",
+                null,
+                start,
+                end,
+                0,
+            )
+            visitLocalVariable("other", "Ljava/lang/String;", null, start, end, 1)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "echo",
+            "(Ljava/lang/String;I)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            val start = org.objectweb.asm.Label()
+            val end = org.objectweb.asm.Label()
+            visitCode()
+            visitLabel(start)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "java/lang/Integer",
+                "toString",
+                "(I)Ljava/lang/String;",
+                false,
+            )
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(end)
+            visitLocalVariable(
+                "this",
+                "LNamedHeadVariableOverloadTarget;",
+                null,
+                start,
+                end,
+                0,
+            )
+            visitLocalVariable("target", "Ljava/lang/String;", null, start, end, 1)
+            visitLocalVariable("count", "I", null, start, end, 2)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun storeVariableOverloadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC,
+            "StoreVariableOverloadTarget",
+            null,
+            "java/lang/Object",
+            null,
+        )
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(I)I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn("local-")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun loadVariableOverloadTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC,
+            "LoadVariableOverloadTarget",
+            null,
+            "java/lang/Object",
+            null,
+        )
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(I)I", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn("local-")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun storeVariableTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StoreVariableTarget", null, "java/lang/Object", null)
@@ -13650,6 +14049,34 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun ordinalReturnInferenceTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "OrdinalReturnInferenceTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("single")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Z)Ljava/lang/String;", null, null).apply {
+            val secondReturn = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFEQ, secondReturn)
+            visitLdcInsn("first")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(secondReturn)
+            visitLdcInsn("second")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun staticInvokeArgTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticInvokeArgTarget", null, "java/lang/Object", null)
@@ -13845,6 +14272,26 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun mixedArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "echo", "(ILjava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/Integer", "toString", "(I)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
