@@ -3088,6 +3088,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtConstantInfersTargetByCompatibleConstantType() {
+        AsmRegistry.register(WrapOperationInferredConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("inferred-original", result)
+    }
+
+    @Test
     fun wrapOperationOrdinalSelectsSingleInvokeCall() {
         AsmRegistry.register(WrapOperationOrdinalMixin::class.java)
 
@@ -9267,6 +9279,19 @@ class FrameworkReliabilityTest {
             value: String,
             operation: Operation<String>,
         ): String = "wrapped-$value-${operation.call()}"
+    }
+
+    @AsmMixin("MixedConstantTarget")
+    object WrapOperationInferredConstantMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT),
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<String>,
+        ): String = "inferred-${operation.call()}"
     }
 
     @AsmMixin("ModifyReceiverTarget")
