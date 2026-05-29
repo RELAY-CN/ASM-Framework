@@ -7576,7 +7576,13 @@ class FrameworkReliabilityTest {
             at = At(value = InjectionPoint.INVOKE),
         )
         @JvmStatic
-        fun shouldRun(value: String): Boolean = value != "raw"
+        fun shouldRun(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            return value != "raw"
+        }
     }
 
     @AsmMixin("WrapConditionStaticTarget")

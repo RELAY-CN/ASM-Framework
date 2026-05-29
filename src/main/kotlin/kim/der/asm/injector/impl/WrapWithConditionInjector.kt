@@ -94,8 +94,9 @@ class WrapWithConditionInjector(
     }
 
     private fun injectMethodCall(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (targetName == null || targetDesc == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@WrapWithCondition INVOKE requires at.target method signature")
         }
 
@@ -108,9 +109,9 @@ class WrapWithConditionInjector(
                 continue
             }
             when {
-                insn is MethodInsnNode && matchesTargetMethod(insn, targetOwner, targetName, targetDesc) -> {
-                    val currentOrdinal = matchedOrdinal++
-                    if (!matchesOrdinal(currentOrdinal)) {
+                insn is MethodInsnNode &&
+                    (inferTarget || (targetName != null && matchesTargetMethod(insn, targetOwner, targetName, targetDesc))) -> {
+                    if (inferTarget && !isMethodCallConditionCompatible(target, insn)) {
                         continue
                     }
 
@@ -125,6 +126,11 @@ class WrapWithConditionInjector(
                         )
                     }
 
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
+                    }
+
                     val targetParamCount = validateHandlerSignature(target, insn)
                     val skipOriginalLabel = LabelNode()
                     val il = buildConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
@@ -132,9 +138,9 @@ class WrapWithConditionInjector(
                     target.instructions.insert(insn, skipOriginalLabel)
                     injectionCount++
                 }
-                insn is InvokeDynamicInsnNode && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc) -> {
-                    val currentOrdinal = matchedOrdinal++
-                    if (!matchesOrdinal(currentOrdinal)) {
+                insn is InvokeDynamicInsnNode &&
+                    (inferTarget || (targetName != null && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc))) -> {
+                    if (inferTarget && !isInvokeDynamicConditionCompatible(target, insn)) {
                         continue
                     }
 
@@ -142,6 +148,11 @@ class WrapWithConditionInjector(
                         throw IllegalArgumentException(
                             "@WrapWithCondition only supports void invokedynamic calls, target ${insn.name}${insn.desc}",
                         )
+                    }
+
+                    val currentOrdinal = matchedOrdinal++
+                    if (!matchesOrdinal(currentOrdinal)) {
+                        continue
                     }
 
                     val targetParamCount = validateInvokeDynamicHandlerSignature(target, insn)
@@ -155,6 +166,26 @@ class WrapWithConditionInjector(
         }
 
         return injectionCount
+    }
+
+    private fun isMethodCallConditionCompatible(
+        target: MethodNode,
+        insn: MethodInsnNode,
+    ): Boolean {
+        if (insn.name == "<init>" || Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
+            return false
+        }
+        return runCatching { validateHandlerSignature(target, insn) }.isSuccess
+    }
+
+    private fun isInvokeDynamicConditionCompatible(
+        target: MethodNode,
+        insn: InvokeDynamicInsnNode,
+    ): Boolean {
+        if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
+            return false
+        }
+        return runCatching { validateInvokeDynamicHandlerSignature(target, insn) }.isSuccess
     }
 
     private fun injectFieldAssign(target: MethodNode): Int {
