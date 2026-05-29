@@ -6590,6 +6590,28 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeAssignInjectDefaultsToAfterMatchedCallInTestClass() {
+        AsmRegistry.register(InvokeAssignInjectMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "testVoid" && it.desc == "()V" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, InvokeAssignInjectMixin::class.java, "inject")
+        val printlnIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.MethodInsnNode &&
+                it.owner == "java/io/PrintStream" &&
+                it.name == "println" &&
+                it.desc == "(Ljava/lang/String;)V"
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, printlnIndex >= 0)
+        assertEquals(printlnIndex + 1, handlerCallIndex)
+    }
+
+    @Test
     fun asmInjectCastSliceLimitsCheckcastsBetweenFromAndTo() {
         AsmRegistry.register(CastInstructionSliceMixin::class.java)
         CastInstructionSliceMixin.injectCount = 0
@@ -12728,6 +12750,21 @@ class FrameworkReliabilityTest {
             method = "testB0()Ljava/lang/String;",
             target = InjectionPoint.CONSTANT,
             at = At(value = InjectionPoint.CONSTANT, target = "StaticFinalString"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("Test")
+    object InvokeAssignInjectMixin {
+        @AsmInject(
+            method = "testVoid()V",
+            target = InjectionPoint.INVOKE_ASSIGN,
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "java/io/PrintStream.println(Ljava/lang/String;)V",
+            ),
         )
         @JvmStatic
         fun inject() {
