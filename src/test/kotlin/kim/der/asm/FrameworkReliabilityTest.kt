@@ -3216,6 +3216,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtJumpCanCallOriginalBranchDecisionAndOverrideIt() {
+        AsmRegistry.register(WrapOperationJumpMixin::class.java)
+
+        val transformed = AsmProcessor().transform("JumpOperationTarget", jumpOperationTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("JumpOperationTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("positive", method.invoke(instance, 5, false))
+        assertEquals("negative", method.invoke(instance, -1, false))
+        assertEquals("negative", method.invoke(instance, 5, true))
+    }
+
+    @Test
     fun operationConstantCallReturnsOriginalValueWithoutArguments() {
         val operation: Operation<String> = Operation("original", String::class.java)
 
@@ -9659,6 +9673,26 @@ class FrameworkReliabilityTest {
             value: String,
             operation: Operation<String>,
         ): String = "inferred-${operation.call()}"
+    }
+
+    @AsmMixin("JumpOperationTarget")
+    object WrapOperationJumpMixin {
+        @WrapOperation(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP, target = "IFLE"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: Boolean,
+            operation: Operation<Boolean>,
+            value: Int,
+            forceNegative: Boolean,
+        ): Boolean {
+            value.hashCode()
+            return forceNegative || operation.call(original)
+        }
     }
 
     @AsmMixin("ModifyReceiverTarget")
@@ -16440,6 +16474,27 @@ class FrameworkReliabilityTest {
                 false,
             )
             visitInsn(Opcodes.ATHROW)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun jumpOperationTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "JumpOperationTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "choose", "(IZ)Ljava/lang/String;", null, null).apply {
+            val negative = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFLE, negative)
+            visitLdcInsn("positive")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(negative)
+            visitLdcInsn("negative")
+            visitInsn(Opcodes.ARETURN)
             visitMaxs(0, 0)
             visitEnd()
         }
