@@ -156,6 +156,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun injectionPointExposesConstantExpressionPoint() {
+        val names = InjectionPoint.entries.map { it.name }
+
+        assertEquals(true, "CONSTANT" in names)
+    }
+
+    @Test
     fun overwriteWithIncompatibleReturnTypeFailsDuringTransform() {
         AsmRegistry.register(IncompatibleOverwriteMixin::class.java)
 
