@@ -717,7 +717,7 @@ annotation class ModifyConstant(
  * 类型转换重定向通过 [At.value] 指定 [InjectionPoint.CAST]，并通过 [At.target] 指定要替换的类型
  * internal name 或 binary name；[At.target] 为空时会按 handler 返回类型筛选兼容的 `CHECKCAST`，不兼容类型不计入 [ordinal] 或命中数。
  * 类型判断重定向通过 [At.value] 指定 [InjectionPoint.INSTANCEOF]，并通过 [At.target] 指定要替换的类型
- * internal name 或 binary name。
+ * internal name 或 binary name；[At.target] 为空时会匹配切片内全部 `INSTANCEOF` 判断。
  *
  * 重定向处理器要求：
  *
