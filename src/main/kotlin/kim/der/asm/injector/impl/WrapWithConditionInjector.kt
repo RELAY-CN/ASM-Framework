@@ -191,8 +191,9 @@ class WrapWithConditionInjector(
     }
 
     private fun injectFieldAssign(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
+        if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@WrapWithCondition FIELD_ASSIGN requires at.target field signature")
         }
 
@@ -204,7 +205,14 @@ class WrapWithConditionInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is FieldInsnNode || insn.opcode !in FIELD_WRITE_OPS || !matchesTargetField(insn, fieldTarget)) {
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_WRITE_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
+                continue
+            }
+            if (inferTarget && !isFieldAssignHandlerCompatible(target, insn)) {
                 continue
             }
 
@@ -223,6 +231,11 @@ class WrapWithConditionInjector(
 
         return injectionCount
     }
+
+    private fun isFieldAssignHandlerCompatible(
+        target: MethodNode,
+        insn: FieldInsnNode,
+    ): Boolean = runCatching { validateFieldAssignHandlerSignature(target, insn) }.isSuccess
 
     private fun injectArrayAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
