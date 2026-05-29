@@ -3245,6 +3245,26 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtFieldInfersTargetByCompatibleOperationType() {
+        AsmRegistry.register(WrapOperationInferredFieldReadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "MixedFieldExpressionValueTarget",
+                mixedFieldExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("MixedFieldExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeValues", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "raw", 7)
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("wrapped-inferred-raw", result)
+    }
+
+    @Test
     fun wrapOperationAtPrimitiveFieldCanCallOriginalGetField() {
         AsmRegistry.register(WrapOperationPrimitiveFieldReadMixin::class.java)
 
@@ -9717,6 +9737,21 @@ class FrameworkReliabilityTest {
             target: Any,
             operation: Operation<String>,
         ): String = "wrapped-${operation.call(target)}"
+    }
+
+    @AsmMixin("MixedFieldExpressionValueTarget")
+    object WrapOperationInferredFieldReadMixin {
+        @WrapOperation(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String = "wrapped-inferred-${operation.call(target)}"
     }
 
     @AsmMixin("PrimitiveFieldPointTarget")
