@@ -1587,61 +1587,89 @@ class TargetClassContext(
         method: Method,
         annotation: ModifyArg,
     ): Boolean {
-        val (targetMethod, methodSignature) = resolveModifyArgTargetMethod(method, annotation)
+        val target = resolveModifyArgTargetMethod(method, annotation)
         val injector = AsmInjectorFactory.createModifyArgInjector(
             method,
             asmInfo,
-            annotation.index,
+            target.index,
             annotation.at,
             annotation.ordinal,
             annotation.slice,
         )
-        val injectionCount = injector.injectCount(targetMethod)
+        val injectionCount = injector.injectCount(target.method)
         if (annotation.require > 0 || annotation.allow >= 0 || annotation.expect != 1) {
             return requireModifyArgCount(
                 injectionCount,
                 annotation,
                 method,
-                methodSignature,
+                target.signature,
             )
         }
         return requireInjectorMatched(
             injectionCount > 0,
             "@ModifyArg",
             method,
-            methodSignature,
+            target.signature,
         )
     }
 
     private fun resolveModifyArgTargetMethod(
         method: Method,
         annotation: ModifyArg,
-    ): Pair<MethodNode, String> {
+    ): ModifyArgTarget {
         if (annotation.method.isNotEmpty()) {
             val methodSignature = annotation.method
-            return requireTargetMethod(methodSignature) to methodSignature
+            val targetMethod = requireTargetMethod(methodSignature)
+            return ModifyArgTarget(
+                targetMethod,
+                methodSignature,
+                resolveModifyArgIndex(method, annotation, targetMethod),
+            )
         }
 
         val compatibleTargets =
-            classNode.methods.filter { candidate ->
-                candidate.name == method.name &&
-                    isModifyArgTargetCompatible(method, annotation, candidate)
+            classNode.methods.mapNotNull { candidate ->
+                if (candidate.name != method.name) {
+                    null
+                } else {
+                    resolveModifyArgTarget(method, annotation, candidate)
+                }
             }
 
         if (compatibleTargets.isEmpty()) {
             throw IllegalStateException(buildMissingTargetMethodMessage(method.name))
         }
         if (compatibleTargets.size > 1) {
-            val candidates = compatibleTargets.joinToString(", ") { "${it.name}${it.desc}" }
+            val candidates = compatibleTargets.joinToString(", ") { it.signature }
             throw IllegalStateException(
                 "@ModifyArg handler ${method.name} matches multiple target methods in $className: [$candidates]. " +
                     "Specify method explicitly to disambiguate.",
             )
         }
 
-        val targetMethod = compatibleTargets.single()
-        return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+        return compatibleTargets.single()
     }
+
+    private data class ModifyArgTarget(
+        val method: MethodNode,
+        val signature: String,
+        val index: Int,
+    )
+
+    private fun resolveModifyArgTarget(
+        handlerMethod: Method,
+        annotation: ModifyArg,
+        targetMethod: MethodNode,
+    ): ModifyArgTarget? =
+        if (isModifyArgTargetCompatible(handlerMethod, annotation, targetMethod)) {
+            ModifyArgTarget(
+                targetMethod,
+                "${targetMethod.name}${targetMethod.desc}",
+                resolveModifyArgIndex(handlerMethod, annotation, targetMethod),
+            )
+        } else {
+            null
+        }
 
     private fun isModifyArgTargetCompatible(
         handlerMethod: Method,
@@ -1651,23 +1679,55 @@ class TargetClassContext(
         if (annotation.at.value == InjectionPoint.INVOKE) {
             hasCompatibleModifyArgInvokeCandidate(handlerMethod, annotation, targetMethod)
         } else {
-            isModifyArgEntryTargetCompatible(handlerMethod, annotation, targetMethod)
+            runCatching {
+                resolveModifyArgIndex(handlerMethod, annotation, targetMethod)
+            }.isSuccess
         }
 
-    private fun isModifyArgEntryTargetCompatible(
+    private fun resolveModifyArgIndex(
         handlerMethod: Method,
         annotation: ModifyArg,
         targetMethod: MethodNode,
-    ): Boolean =
-        runCatching {
-            val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+    ): Int {
+        if (annotation.at.value == InjectionPoint.INVOKE) {
+            return annotation.index
+        }
+
+        return resolveModifyArgEntryIndex(handlerMethod, annotation, targetMethod)
+    }
+
+    private fun resolveModifyArgEntryIndex(
+        handlerMethod: Method,
+        annotation: ModifyArg,
+        targetMethod: MethodNode,
+    ): Int {
+        val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
+        if (annotation.index >= 0) {
             require(annotation.index >= 0 && annotation.index < targetParamTypes.size) {
                 "Invalid @ModifyArg index ${annotation.index} for ${targetMethod.name}${targetMethod.desc}"
             }
 
             val targetParamType = targetParamTypes[annotation.index]
             validateModifyArgEntryHandlerSignature(handlerMethod, targetMethod, targetParamType)
-        }.isSuccess
+            return annotation.index
+        }
+
+        val compatibleIndexes =
+            targetParamTypes.indices.filter { index ->
+                runCatching {
+                    validateModifyArgEntryHandlerSignature(handlerMethod, targetMethod, targetParamTypes[index])
+                }.isSuccess
+            }
+        require(compatibleIndexes.isNotEmpty()) {
+            "@ModifyArg handler ${handlerMethod.name} cannot infer target parameter index for " +
+                "${targetMethod.name}${targetMethod.desc}"
+        }
+        require(compatibleIndexes.size == 1) {
+            "@ModifyArg handler ${handlerMethod.name} matches multiple target parameters in " +
+                "${targetMethod.name}${targetMethod.desc}: $compatibleIndexes. Specify index explicitly."
+        }
+        return compatibleIndexes.single()
+    }
 
     private fun hasCompatibleModifyArgInvokeCandidate(
         handlerMethod: Method,
@@ -2786,10 +2846,33 @@ class TargetClassContext(
         annotation: ModifyVariable,
         targetMethod: MethodNode,
     ): Boolean =
+        if (annotation.at.value == InjectionPoint.LOAD || annotation.at.value == InjectionPoint.STORE) {
+            hasCompatibleModifyVariableInstructionCandidate(handlerMethod, annotation, targetMethod)
+        } else {
+            runCatching {
+                val variableType = resolveModifyVariableType(handlerMethod, annotation, targetMethod)
+                validateModifyVariableHandlerSignature(handlerMethod, targetMethod, variableType)
+            }.isSuccess
+        }
+
+    private fun hasCompatibleModifyVariableInstructionCandidate(
+        handlerMethod: Method,
+        annotation: ModifyVariable,
+        targetMethod: MethodNode,
+    ): Boolean =
         runCatching {
-            val variableType = resolveModifyVariableType(handlerMethod, annotation, targetMethod)
-            validateModifyVariableHandlerSignature(handlerMethod, targetMethod, variableType)
-        }.isSuccess
+            val injector =
+                AsmInjectorFactory.createModifyVariableInjector(
+                    handlerMethod,
+                    asmInfo,
+                    annotation.at.value,
+                    annotation.index,
+                    annotation.name,
+                    annotation.ordinal,
+                    annotation.slice,
+                )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     private fun resolveModifyVariableType(
         handlerMethod: Method,
@@ -2819,12 +2902,14 @@ class TargetClassContext(
         targetMethod: MethodNode,
         handlerVariableType: Type,
     ): Type {
+        val requestedNames = annotation.name.filterTo(linkedSetOf()) { it.isNotBlank() }
         val variables = collectModifyVariableHeadParameters(targetMethod)
         val variable =
             if (annotation.index >= 0) {
-                variables.find { it.index == annotation.index }
+                variables.find { it.index == annotation.index && it.matchesName(requestedNames) }
             } else {
-                val matchingVariables = variables.filter { it.type == handlerVariableType }
+                val matchingVariables =
+                    variables.filter { it.type == handlerVariableType && it.matchesName(requestedNames) }
                 if (annotation.ordinal < 0) {
                     matchingVariables.singleOrNull()
                 } else {
@@ -2843,16 +2928,28 @@ class TargetClassContext(
         var slot = if (isStatic) 0 else 1
         return buildList {
             for (argumentType in Type.getArgumentTypes(targetMethod.desc)) {
-                add(ModifyVariableHeadVariable(slot, argumentType))
+                add(ModifyVariableHeadVariable(slot, argumentType, localVariableNameAtSlot(targetMethod, slot)))
                 slot += argumentType.size
             }
         }
     }
 
+    private fun localVariableNameAtSlot(
+        targetMethod: MethodNode,
+        index: Int,
+    ): String? =
+        targetMethod.localVariables
+            .firstOrNull { it.index == index }
+            ?.name
+
     private data class ModifyVariableHeadVariable(
         val index: Int,
         val type: Type,
-    )
+        val name: String?,
+    ) {
+        fun matchesName(requestedNames: Set<String>): Boolean =
+            requestedNames.isEmpty() || (name != null && name in requestedNames)
+    }
 
     private fun validateModifyVariableHandlerSignature(
         handlerMethod: Method,
@@ -3659,9 +3756,7 @@ class TargetClassContext(
         val compatibleTargets =
             classNode.methods.filter { candidate ->
                 candidate.name == method.name &&
-                    runCatching {
-                        validateModifyReturnValueHandlerSignature(method, candidate)
-                    }.isSuccess
+                    hasCompatibleModifyReturnValueCandidate(method, annotation, candidate)
             }
 
         if (compatibleTargets.isEmpty()) {
@@ -3678,6 +3773,21 @@ class TargetClassContext(
         val targetMethod = compatibleTargets.single()
         return targetMethod to "${targetMethod.name}${targetMethod.desc}"
     }
+
+    private fun hasCompatibleModifyReturnValueCandidate(
+        handlerMethod: Method,
+        annotation: ModifyReturnValue,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            validateModifyReturnValueHandlerSignature(handlerMethod, targetMethod)
+            val injector = AsmInjectorFactory.createModifyReturnValueInjector(
+                handlerMethod,
+                asmInfo,
+                annotation.ordinal,
+            )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     private fun validateModifyReturnValueHandlerSignature(
         handlerMethod: Method,
