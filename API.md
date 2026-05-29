@@ -508,7 +508,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 ### @Redirect
 
-重定向目标方法中的方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度读取、类型转换或 `INSTANCEOF` 类型判断。
+重定向目标方法中的方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度读取、类型转换、`INSTANCEOF` 类型判断或条件跳转。
 
 方法调用重定向会替换匹配的调用指令。`invokedynamic` 重定向同样使用 `at.value = InjectionPoint.INVOKE`，
 按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配；handler 不接收 receiver，
@@ -520,8 +520,9 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 并通过 `at.args = ["array=get"]`、`at.args = ["array=set"]` 或 `at.args = ["array=length"]` 区分数组读取、写入与长度读取。
 类型转换重定向使用 `at.value = InjectionPoint.CAST` 与类型 `at.target` 匹配 `CHECKCAST` 指令，handler 接收原待转换对象并返回目标类型兼容对象。省略 `at.target` 时会遍历所有 `CHECKCAST`，并按 handler 返回类型筛选兼容目标；不兼容的转换目标不会计入 `ordinal` 或命中数。
 类型判断重定向使用 `at.value = InjectionPoint.INSTANCEOF` 与类型 `at.target` 匹配 `INSTANCEOF` 指令，handler 接收原被判断对象并返回新的 `Boolean` 结果。省略 `at.target` 时会遍历所有 `INSTANCEOF` 判断，并按实际重定向的类型判断计入 `ordinal` 和命中数。
+条件跳转重定向使用 `at.value = InjectionPoint.JUMP` 与跳转操作码名或数字匹配条件跳转指令，handler 接收原始分支结果 `Boolean` 并返回新的 `Boolean` 分支结果。省略 `at.target` 时会遍历所有条件跳转，`GOTO` 与 `JSR` 不支持重定向。
 
-方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向的 handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。
 
 方法调用重定向的 handler 参数形态：
 
@@ -543,27 +544,28 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 - 数组长度读取：数组引用，并可继续追加目标方法参数前缀，返回 `Int`
 - 类型转换：原待转换对象，并可继续追加目标方法参数前缀，返回目标类型兼容对象
 - 类型判断：原被判断对象，并可继续追加目标方法参数前缀，返回 `Boolean`
+- 条件跳转：原始分支结果 `Boolean`，并可继续追加目标方法参数前缀，返回新的分支结果 `Boolean`
 
 **参数：**
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、重定向点和签名兼容规则推断唯一同名目标方法
-- `target: String = ""` - 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型或类型签名
-- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配
-- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向中生效
-- `slice: Slice = Slice()` - 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持用 `INVOKE` 边界缩小查找范围
+- `target: String = ""` - 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型、类型签名或跳转操作码
+- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配，`JUMP` 时按条件跳转语义匹配
+- `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向中生效
+- `slice: Slice = Slice()` - 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际重定向数必须不少于该值
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向都可用 `ordinal` 只替换第 N 个匹配点。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向都可用 `ordinal` 只替换第 N 个匹配点。
 重定向返回值的兼容规则与操作包裹一致：基础类型需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容重定向点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 这些模式均支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界；框架只在起始边界之后、
-结束边界之前查找目标调用、动态调用、NEW 构造表达式、字段访问、数组访问、数组长度、类型转换或类型判断指令，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+结束边界之前查找目标调用、动态调用、NEW 构造表达式、字段访问、数组访问、数组长度、类型转换、类型判断或条件跳转指令，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 指定的边界未命中时，切片按空范围处理。
 
-`@Redirect` 会统计实际替换的调用点、动态调用点、构造器调用点、NEW 构造表达式、字段访问点、数组元素访问点、数组长度读取点、类型转换点或类型判断点数量；显式设置
+`@Redirect` 会统计实际替换的调用点、动态调用点、构造器调用点、NEW 构造表达式、字段访问点、数组元素访问点、数组长度读取点、类型转换点、类型判断点或条件跳转点数量；显式设置
 `require` / `allow` / 非默认 `expect` 时按实际重定向数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，
 `expect` 不一致只输出警告。
 
@@ -933,7 +935,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 不会把局部变量值传给 handler，也可以用
 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；需要读取并写回变量值时使用 `@ModifyVariable`。
 普通 `@AsmInject(INSTANCEOF)` 只在匹配类型判断指令前后插入 handler，不接收也不修改 boolean 结果；需要替换类型判断时使用 `@Redirect`，需要按需调用原判断时使用 `@WrapOperation`，只需要改写类型判断结果时使用
-`@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `@AsmInject(JUMP)` 只观察跳转指令位置，不接收条件栈值或改写跳转目标；`At.target` 可省略，也可写 `IFEQ`、`IF_ICMPGT` 或数字操作码过滤；需要按原条件结果决定新控制流时使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`。普通 `@AsmInject(CONSTANT)` 的 `BEFORE` / `AFTER` 只观察常量加载位置，不接收常量值；`Shift.REPLACE` 会删除原常量加载，并把 handler 返回值作为新的常量表达式值。`At.target` 可省略，也可写常量文本过滤。
+`@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `@AsmInject(JUMP)` 只观察跳转指令位置，不接收条件栈值或改写跳转目标；`At.target` 可省略，也可写 `IFEQ`、`IF_ICMPGT` 或数字操作码过滤；需要直接替换条件跳转分支结果时使用 `@Redirect(at = At(value = InjectionPoint.JUMP, target = "..."))`，需要保留原条件结果并改写新结果时使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`。普通 `@AsmInject(CONSTANT)` 的 `BEFORE` / `AFTER` 只观察常量加载位置，不接收常量值；`Shift.REPLACE` 会删除原常量加载，并把 handler 返回值作为新的常量表达式值。`At.target` 可省略，也可写常量文本过滤。
 
 ### At
 
@@ -957,7 +959,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
 - `CAST`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
 - `INSTANCEOF`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
-- `JUMP`: 跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`；省略时匹配所有跳转，`@ModifyExpressionValue(JUMP)` 与 `@WrapOperation(JUMP)` 只支持条件跳转
+- `JUMP`: 跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`；省略时匹配所有跳转，`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)` 与 `@WrapOperation(JUMP)` 只支持条件跳转
 - `CONSTANT`: 常量文本；类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符；普通 `@AsmInject(CONSTANT)` 可省略目标以匹配所有常量
 - `THROW`: 通常不需要 `target`，匹配 `ATHROW`；普通 `@AsmInject`、`@WrapOperation` 与 `@ModifyExpressionValue` 可用类型 internal name 或 binary name 只匹配直接构造后抛出的同类型异常
 
@@ -990,7 +992,7 @@ At(
 
 ### Slice
 
-用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF)`
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP)`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD_ASSIGN)`、

@@ -17,6 +17,8 @@ import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
+import org.objectweb.asm.tree.JumpInsnNode
+import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -28,7 +30,7 @@ import java.lang.reflect.Modifier
  * Redirect 注入器。
  *
  * 查找目标方法中的匹配方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度、
- * `CHECKCAST` 类型转换或 `INSTANCEOF` 类型判断指令，并用 ASM 方法调用替换原指令。
+ * `CHECKCAST` 类型转换、`INSTANCEOF` 类型判断或条件跳转指令，并用 ASM 方法调用替换原指令。
  *
  * 方法调用和 `invokedynamic` 调用目标使用 `owner.name(desc)` 或 `name(desc)` 格式；`invokedynamic`
  * 会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。字段读取目标使用
@@ -39,16 +41,18 @@ import java.lang.reflect.Modifier
  * 与构造类型 internal name 或 binary name 匹配。类型转换使用 [InjectionPoint.CAST] 与类型 internal name 或 binary name 匹配；
  * 未指定类型目标时，会按 handler 返回类型筛选兼容的 `CHECKCAST` 候选。类型判断使用 [InjectionPoint.INSTANCEOF]
  * 与类型 internal name 或 binary name 匹配；未指定类型目标时，会匹配切片内全部 `INSTANCEOF` 判断。
- * 方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持静态处理器、`@JvmStatic`
- * 处理器或 Kotlin `object` 实例处理器。处理器需先接收原调用、动态调用、构造器、字段访问、类型转换或类型判断需要的栈参数，
+ * 条件跳转使用 [InjectionPoint.JUMP] 与跳转操作码名或数字匹配；未指定跳转目标时，会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持重定向。
+ * 方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向支持静态处理器、`@JvmStatic`
+ * 处理器或 Kotlin `object` 实例处理器。处理器需先接收原调用、动态调用、构造器、字段访问、类型转换、类型判断或原条件跳转分支结果需要的栈参数，
  * 后续可按顺序接收目标方法的部分参数。
  *
- * @param redirectTarget 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型或类型签名
+ * @param redirectTarget 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型、类型签名或跳转操作码
  * @param injectionPoint Redirect 的定位点类型；[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * 会强制按字段访问语义解析目标，[InjectionPoint.NEW] 会按构造类型解析目标，
- * [InjectionPoint.CAST] 会按类型转换语义解析目标，[InjectionPoint.INSTANCEOF] 会按类型判断语义解析目标
- * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向
- * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向
+ * [InjectionPoint.CAST] 会按类型转换语义解析目标，[InjectionPoint.INSTANCEOF] 会按类型判断语义解析目标，
+ * [InjectionPoint.JUMP] 会按条件跳转语义解析目标
+ * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向
+ * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断与条件跳转重定向
  * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
  * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配数组长度
  *
@@ -65,10 +69,10 @@ class RedirectInjector(
     private val args: Array<String> = emptyArray(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 替换目标方法中的匹配调用点、动态调用点、构造器调用点、字段读取点、字段写入点、数组元素访问点、数组长度点、类型转换点或类型判断点。
+     * 替换目标方法中的匹配调用点、动态调用点、构造器调用点、字段读取点、字段写入点、数组元素访问点、数组长度点、类型转换点、类型判断点或条件跳转点。
      *
      * @param target 目标方法
-     * @return 至少替换一个调用点、动态调用点、构造器调用点、字段读取点、字段写入点、数组元素访问点、数组长度点、类型转换点或类型判断点时返回 `true`
+     * @return 至少替换一个调用点、动态调用点、构造器调用点、字段读取点、字段写入点、数组元素访问点、数组长度点、类型转换点、类型判断点或条件跳转点时返回 `true`
      * @throws IllegalArgumentException 目标方法调用或字段签名无法解析时抛出
      * @throws RuntimeException 替换调用、字段访问或返回值适配失败时抛出
      *
@@ -81,7 +85,7 @@ class RedirectInjector(
      * 替换目标方法中的匹配点并返回实际重定向数量。
      *
      * @param target 目标方法
-     * @return 实际替换的调用点、动态调用点、构造器调用点、字段访问点、数组访问点、数组长度点、类型转换点或类型判断点数量
+     * @return 实际替换的调用点、动态调用点、构造器调用点、字段访问点、数组访问点、数组长度点、类型转换点、类型判断点或条件跳转点数量
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -90,6 +94,9 @@ class RedirectInjector(
         val arrayAccessMode = arrayAccessMode()
         if (arrayAccessMode != null) {
             return injectArrayAccessCount(target, arrayAccessMode)
+        }
+        if (isJumpRedirect()) {
+            return injectJumpCount(target)
         }
         if (isInstanceofRedirect()) {
             return injectInstanceofCount(target)
@@ -282,6 +289,8 @@ class RedirectInjector(
 
     private fun isCastRedirect(): Boolean = injectionPoint == InjectionPoint.CAST
 
+    private fun isJumpRedirect(): Boolean = injectionPoint == InjectionPoint.JUMP
+
     private fun isNewRedirect(): Boolean = injectionPoint == InjectionPoint.NEW
 
     private fun arrayAccessMode(): ArrayAccessMode? {
@@ -428,6 +437,44 @@ class RedirectInjector(
 
     private fun isCastReturnCompatible(castType: Type): Boolean =
         isReturnCompatible(castType, Type.getReturnType(asmMethod))
+
+    private fun injectJumpCount(target: MethodNode): Int {
+        val targetOpcode = parseJumpOpcodeTarget(redirectTarget)
+        if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
+            throw IllegalArgumentException(
+                "Redirect JUMP target must be a conditional JVM jump opcode: $redirectTarget",
+            )
+        }
+
+        val instructions = target.instructions
+        var injectionCount = 0
+        val insns = instructions.toArray()
+        var matchedOrdinal = 0
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (
+                insn !is JumpInsnNode ||
+                insn.opcode !in CONDITIONAL_JUMP_OPS ||
+                (targetOpcode != null && insn.opcode != targetOpcode)
+            ) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            replaceJump(target, instructions, insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
 
     private fun injectFieldReadCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
@@ -952,6 +999,35 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    private fun replaceJump(
+        target: MethodNode,
+        instructions: InsnList,
+        originalInsn: JumpInsnNode,
+    ) {
+        val targetParamCount = validateJumpHandlerSignature(target)
+        val originalTrue = LabelNode()
+        val afterOriginal = LabelNode()
+        val il = InsnList()
+
+        il.add(JumpInsnNode(originalInsn.opcode, originalTrue))
+        il.add(InsnNode(Opcodes.ICONST_0))
+        il.add(JumpInsnNode(Opcodes.GOTO, afterOriginal))
+        il.add(originalTrue)
+        il.add(InsnNode(Opcodes.ICONST_1))
+        il.add(afterOriginal)
+
+        if (isHandlerStatic()) {
+            loadTargetMethodParameters(il, target, targetParamCount)
+            addStaticHandlerCall(il)
+        } else {
+            addObjectJumpHandlerCall(target, il, targetParamCount)
+        }
+        il.add(JumpInsnNode(Opcodes.IFNE, originalInsn.label))
+
+        instructions.insertBefore(originalInsn, il)
+        instructions.remove(originalInsn)
+    }
+
     private fun addObjectFieldReadHandlerCall(
         target: MethodNode,
         originalInsn: FieldInsnNode,
@@ -1091,6 +1167,30 @@ class RedirectInjector(
         il.add(VarInsnNode(Opcodes.ASTORE, valueIndex))
         addHandlerOwner(il)
         il.add(VarInsnNode(Opcodes.ALOAD, valueIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+
+        val instanceType = Type.getType(asmInfo.asmClass)
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                instanceType.internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+    }
+
+    private fun addObjectJumpHandlerCall(
+        target: MethodNode,
+        il: InsnList,
+        targetParamCount: Int,
+    ) {
+        val branchIndex = nextLocalIndex(target)
+
+        il.add(VarInsnNode(Opcodes.ISTORE, branchIndex))
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ILOAD, branchIndex))
         loadTargetMethodParameters(il, target, targetParamCount)
 
         val instanceType = Type.getType(asmInfo.asmClass)
@@ -1395,6 +1495,38 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    private fun validateJumpHandlerSignature(target: MethodNode): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val expectedParams = arrayOf(Type.BOOLEAN_TYPE)
+        if (actualParams.isEmpty()) {
+            throw IllegalStateException(
+                "Redirect JUMP handler ${asmMethod.name} parameter count mismatch: " +
+                    "expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+        if (!isHandlerParameterCompatible(expectedParams[0], actualParams[0])) {
+            throw IllegalStateException(
+                "Redirect JUMP handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected stack type ${expectedParams[0]}, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (handlerReturnType != Type.BOOLEAN_TYPE) {
+            throw IllegalStateException(
+                "Redirect JUMP handler ${asmMethod.name} must return boolean, actual $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
     private fun validateArrayAccessHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -1550,6 +1682,25 @@ class RedirectInjector(
         }
 
         throw IllegalArgumentException("Redirect cannot find constructor call for NEW ${newInsn.desc}")
+    }
+
+    private fun parseJumpOpcodeTarget(target: String): Int? {
+        if (target.isEmpty()) {
+            return null
+        }
+
+        val normalized = target.trim().uppercase()
+        normalized.toIntOrNull()?.let { opcode ->
+            require(opcode in JUMP_OPS) {
+                "Redirect JUMP target opcode must be a JVM jump opcode: $target"
+            }
+            return opcode
+        }
+
+        return JUMP_OPCODE_NAMES[normalized]
+            ?: throw IllegalArgumentException(
+                "Redirect JUMP target must be a jump opcode name or number: $target",
+            )
     }
 
     private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
@@ -1751,5 +1902,28 @@ class RedirectInjector(
                 Opcodes.CASTORE,
                 Opcodes.SASTORE,
             )
+        private val JUMP_OPCODE_NAMES =
+            mapOf(
+                "IFEQ" to Opcodes.IFEQ,
+                "IFNE" to Opcodes.IFNE,
+                "IFLT" to Opcodes.IFLT,
+                "IFGE" to Opcodes.IFGE,
+                "IFGT" to Opcodes.IFGT,
+                "IFLE" to Opcodes.IFLE,
+                "IF_ICMPEQ" to Opcodes.IF_ICMPEQ,
+                "IF_ICMPNE" to Opcodes.IF_ICMPNE,
+                "IF_ICMPLT" to Opcodes.IF_ICMPLT,
+                "IF_ICMPGE" to Opcodes.IF_ICMPGE,
+                "IF_ICMPGT" to Opcodes.IF_ICMPGT,
+                "IF_ICMPLE" to Opcodes.IF_ICMPLE,
+                "IF_ACMPEQ" to Opcodes.IF_ACMPEQ,
+                "IF_ACMPNE" to Opcodes.IF_ACMPNE,
+                "GOTO" to Opcodes.GOTO,
+                "JSR" to Opcodes.JSR,
+                "IFNULL" to Opcodes.IFNULL,
+                "IFNONNULL" to Opcodes.IFNONNULL,
+            )
+        private val JUMP_OPS = JUMP_OPCODE_NAMES.values.toSet()
+        private val CONDITIONAL_JUMP_OPS = JUMP_OPS - setOf(Opcodes.GOTO, Opcodes.JSR)
     }
 }
