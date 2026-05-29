@@ -315,7 +315,10 @@ class InstructionPointInjector(
                         matchesLocalVariableIndex(insn, localVariableIndex)
             }
             InjectionPoint.THROW -> {
-                fun(insn: AbstractInsnNode): Boolean = insn.opcode == Opcodes.ATHROW
+                val normalizedTarget = target.replace('.', '/')
+                fun(insn: AbstractInsnNode): Boolean =
+                    insn.opcode == Opcodes.ATHROW &&
+                        (normalizedTarget.isEmpty() || directThrownTypeInternalName(insn) == normalizedTarget)
             }
             else -> {
                 fun(_: AbstractInsnNode): Boolean = false
@@ -327,6 +330,25 @@ class InstructionPointInjector(
         insn: VarInsnNode,
         requestedIndex: Int?,
     ): Boolean = requestedIndex == null || insn.`var` == requestedIndex
+
+    private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
+        val previous = previousRealInstruction(throwInsn)
+        if (previous is MethodInsnNode &&
+            previous.opcode == Opcodes.INVOKESPECIAL &&
+            previous.name == "<init>"
+        ) {
+            return previous.owner
+        }
+        return null
+    }
+
+    private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.previous
+        while (current != null && current.opcode < 0) {
+            current = current.previous
+        }
+        return current
+    }
 
     private fun buildHandlerCall(target: MethodNode): InsnList {
         val il = InsnList()
