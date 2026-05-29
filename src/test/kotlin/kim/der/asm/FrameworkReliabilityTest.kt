@@ -2274,6 +2274,30 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueThrowTargetFiltersDirectlyConstructedThrowable() {
+        AsmRegistry.register(ModifyExpressionValueTargetedThrowMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("TargetedThrowPointTarget", targetedThrowPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("TargetedThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("fail", Boolean::class.javaPrimitiveType)
+        val selectedException =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                method.invoke(instance, true)
+            }
+        val skippedException =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                method.invoke(instance, false)
+            }
+
+        assertEquals(true, selectedException.cause is IllegalArgumentException)
+        assertEquals("modified-state", selectedException.cause?.message)
+        assertEquals(true, skippedException.cause is UnsupportedOperationException)
+        assertEquals("unsupported", skippedException.cause?.message)
+    }
+
+    @Test
     fun modifyExpressionValueAtThrowCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueThrowWithTargetParamsMixin::class.java)
 
@@ -11888,6 +11912,16 @@ class FrameworkReliabilityTest {
             IllegalArgumentException("specific-${original.message}")
     }
 
+    @AsmMixin("TargetedThrowPointTarget")
+    object ModifyExpressionValueTargetedThrowMixin {
+        @ModifyExpressionValue(
+            method = "fail(Z)V",
+            at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+        )
+        @JvmStatic
+        fun modify(original: Throwable): Throwable = IllegalArgumentException("modified-${original.message}")
+    }
+
     @AsmMixin("ThrowPointTarget")
     object ModifyExpressionValueThrowWithTargetParamsMixin {
         @ModifyExpressionValue(
@@ -14673,6 +14707,39 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
             visitInsn(Opcodes.ATHROW)
             visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun targetedThrowPointTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "TargetedThrowPointTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "fail", "(Z)V", null, null).apply {
+            val skippedThrow = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFEQ, skippedThrow)
+            visitTypeInsn(Opcodes.NEW, "java/lang/IllegalStateException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("state")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ATHROW)
+            visitLabel(skippedThrow)
+            visitTypeInsn(Opcodes.NEW, "java/lang/UnsupportedOperationException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("unsupported")
+            visitMethodInsn(
+                Opcodes.INVOKESPECIAL,
+                "java/lang/UnsupportedOperationException",
+                "<init>",
+                "(Ljava/lang/String;)V",
+                false,
+            )
+            visitInsn(Opcodes.ATHROW)
+            visitMaxs(0, 0)
             visitEnd()
         }
         cw.visitEnd()
