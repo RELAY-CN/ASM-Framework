@@ -910,6 +910,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgAtInvokeInfersMethodAndCallTargetByHandlerSignature() {
+        AsmRegistry.register(InferredMethodAndInvokeModifyArgMixin::class.java)
+
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("prefix-inferred-method", result)
+    }
+
+    @Test
     fun modifyArgAtInvokeAcceptsObjectHandlerParameter() {
         AsmRegistry.register(InvokeModifyArgObjectParameterMixin::class.java)
 
@@ -1155,6 +1167,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("hello inferred", result)
+    }
+
+    @Test
+    fun modifyArgsAtInvokeInfersMethodAndCallTargetByHandlerSignature() {
+        AsmRegistry.register(InferredMethodAndInvokeModifyArgsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello inferred-method", result)
     }
 
     @Test
@@ -7377,6 +7401,18 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("InvokeModifyArgTarget")
+    object InferredMethodAndInvokeModifyArgMixin {
+        @ModifyArg(
+            index = 0,
+            at = At(value = InjectionPoint.INVOKE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun value(original: String): String = "inferred-method"
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
     object InvokeModifyArgObjectParameterMixin {
         @ModifyArg(
             method = "value()Ljava/lang/String;",
@@ -7587,6 +7623,20 @@ class FrameworkReliabilityTest {
         fun modify(args: Args) {
             args.set(0, "raw")
             args.set(1, "inferred")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object InferredMethodAndInvokeModifyArgsMixin {
+        @ModifyArgs(
+            at = At(value = InjectionPoint.INVOKE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun value(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "inferred-method")
         }
     }
 
