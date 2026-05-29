@@ -6552,6 +6552,25 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun jumpInjectTargetAcceptsNumericOpcodeInTestClass() {
+        AsmRegistry.register(JumpInstructionNumericTargetMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "recursiveMethod" && it.desc == "(I)I" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, JumpInstructionNumericTargetMixin::class.java, "inject")
+        val jumpIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.JumpInsnNode && it.opcode == Opcodes.IF_ICMPGT
+        }
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, jumpIndex >= 0)
+        assertEquals(jumpIndex - 1, handlerCallIndex)
+    }
+
+    @Test
     fun asmInjectCastSliceLimitsCheckcastsBetweenFromAndTo() {
         AsmRegistry.register(CastInstructionSliceMixin::class.java)
         CastInstructionSliceMixin.injectCount = 0
@@ -12666,6 +12685,18 @@ class FrameworkReliabilityTest {
             method = "exceptionTest(Z)Ljava/lang/String;",
             target = InjectionPoint.JUMP,
             at = At(value = InjectionPoint.JUMP, target = "IFEQ"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("Test")
+    object JumpInstructionNumericTargetMixin {
+        @AsmInject(
+            method = "recursiveMethod(I)I",
+            target = InjectionPoint.JUMP,
+            at = At(value = InjectionPoint.JUMP, target = "${Opcodes.IF_ICMPGT}"),
         )
         @JvmStatic
         fun inject() {
