@@ -25,6 +25,8 @@ import java.lang.reflect.Modifier
  *
  * 根据 [kim.der.asm.api.annotation.AsmInject.at] 定位目标方法调用，
  * 并按 shift 语义在调用前、调用后或替换调用点插入 ASM 方法调用。
+ * 当普通 [InjectionPoint.INVOKE_ASSIGN] 使用默认 [Shift.BEFORE] 时，会按调用完成后处理；
+ * 需要调用前注入时应使用普通 [InjectionPoint.INVOKE]。
  * 当注解缺少目标调用签名时返回未修改。BEFORE/AFTER handler 可先接收原调用参数前缀，
  * 再继续接收目标方法参数前缀；REPLACE handler 保持替换原调用的参数与返回值语义。
  *
