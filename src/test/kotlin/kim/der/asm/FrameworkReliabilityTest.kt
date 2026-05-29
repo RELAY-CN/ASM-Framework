@@ -2702,6 +2702,40 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReceiverInfersMethodAndFieldReadTargetInTestClass() {
+        AsmRegistry.register(ModifyReceiverInferredMethodAndTestFieldReadMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+                ),
+            )
+        val original = clazz.getDeclaredConstructor(String::class.java).newInstance("original")
+        val replacement = clazz.getDeclaredConstructor(String::class.java).newInstance("replacement")
+
+        try {
+            ModifyReceiverInferredMethodAndTestFieldReadMixin.replacement = replacement
+
+            val result = clazz.getMethod("testA0").invoke(original)
+
+            assertEquals("replacement", result)
+        } finally {
+            ModifyReceiverInferredMethodAndTestFieldReadMixin.replacement = null
+        }
+    }
+
+    @Test
     fun modifyReceiverAtFieldReadCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyReceiverFieldReadWithTargetParamsMixin::class.java)
 
@@ -9272,6 +9306,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("Test")
+    object ModifyReceiverInferredMethodAndTestFieldReadMixin {
+        var replacement: Any? = null
+
+        @ModifyReceiver(
+            at = At(value = InjectionPoint.FIELD),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun testA0(original: Any): Any = replacement ?: original
     }
 
     @AsmMixin("FieldParamTarget")
