@@ -725,7 +725,7 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，省略类型目标时按 handler 首参与返回类型筛选兼容 `NEW`；
 `CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，省略类型目标时按 handler 首参与返回类型筛选兼容 `CHECKCAST`；不兼容的 `NEW` / `CHECKCAST` 候选不计入 `ordinal` 或命中数。数组读取模式通过 `args = ["array=get"]`
-指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`，且后续参数仍可接收目标方法参数前缀。
+指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`，且后续参数仍可接收目标方法参数前缀；`THROW` 指定类型目标时，只匹配 `ATHROW` 前一条真实指令为同类型 `<init>` 的直接构造异常，不追踪局部变量或方法返回值来源。
 `invokedynamic` 调用目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；字符串拼接可匹配
 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(...)`。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按表达式定位、表达式值类型、返回类型和追加目标参数匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
