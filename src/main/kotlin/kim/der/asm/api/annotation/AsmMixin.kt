@@ -342,6 +342,8 @@ annotation class ModifyReceiver(
  * [InjectionPoint.FIELD_ASSIGN] 可通过 `args = ["array=set"]` 包裹数组元素写入。
  * [InjectionPoint.INVOKE] 省略 [At.target] 时会按 handler 栈参数、[Operation] 位置与返回类型筛选兼容的
  * 普通调用、`invokedynamic` 调用或构造器调用，不兼容候选不计入 [ordinal] 或命中数。
+ * [InjectionPoint.FIELD] 省略 [At.target] 时会按 handler 字段 owner 参数、[Operation] 位置与返回类型筛选兼容的
+ * 字段读取，不兼容候选不计入 [ordinal] 或命中数。
  * 构造器调用可通过 [InjectionPoint.INVOKE] 与 `<init>` 目标指定，也可通过 [InjectionPoint.NEW]
  * 与类型目标指定，当前支持常见 `NEW/DUP/args/<init>` 形态。
  * 类型转换通过 [InjectionPoint.CAST] 与类型 internal name 或 binary name 指定；省略 [At.target] 时会按
@@ -373,6 +375,7 @@ annotation class ModifyReceiver(
  *   [InjectionPoint.NEW] 或 [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF]，并通过 [At.target]
  *   指定要匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、产生数组引用的字段、构造类型或类型目标；
  *   [InjectionPoint.INVOKE] 可省略 [At.target]，按 handler 签名筛选兼容调用或构造器候选；
+ *   [InjectionPoint.FIELD] 可省略 [At.target]，按 handler 签名筛选兼容字段读取候选；
  *   [InjectionPoint.CAST] 可省略 [At.target]，按 handler 返回类型筛选兼容 `CHECKCAST`；
  *   [InjectionPoint.INSTANCEOF] 可省略 [At.target]，匹配切片内全部类型判断
  * - [method] 为空时会按 handler 名称、操作点和 [Operation] handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
