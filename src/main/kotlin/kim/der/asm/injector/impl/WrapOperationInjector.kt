@@ -38,6 +38,8 @@ import java.lang.reflect.Modifier
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
  * [InjectionPoint.FIELD_ASSIGN] 字段写入。[InjectionPoint.FIELD] 可通过 `array=get` 包裹数组元素读取，
  * 通过 `array=length` 包裹数组长度读取；[InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；
+ * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 栈参数、[Operation] 位置与返回类型筛选兼容的普通调用、
+ * `invokedynamic` 调用或构造器调用，且不兼容候选不会计入 [WrapOperation.ordinal] 或命中数；
  * [InjectionPoint.INVOKE] 可通过 `<init>` 目标包裹常见 `NEW/DUP/args/INVOKESPECIAL` 构造器调用，
  * [InjectionPoint.NEW] 可通过类型目标直接包裹同一构造表达式；
  * [InjectionPoint.CAST] 可包裹 `CHECKCAST` 类型转换；省略类型目标时会按 handler 返回类型筛选兼容转换目标，
