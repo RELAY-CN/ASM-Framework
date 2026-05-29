@@ -31,10 +31,10 @@ import java.lang.reflect.Modifier
 /**
  * WrapOperation 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断或常量读取，
+ * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断、常量读取或即将抛出的异常，
  * 并用 handler 替换原操作。
  * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、构造器参数、字段写入值或
- * 数组访问参数、类型转换或类型判断输入值、原常量值、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
+ * 数组访问参数、类型转换或类型判断输入值、原常量值、即将抛出的异常、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
  * 执行原始操作，也可以跳过或改变调用参数。
  *
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
@@ -52,13 +52,14 @@ import java.lang.reflect.Modifier
  * 不兼容目标不会计入 [WrapOperation.ordinal] 或命中数。[InjectionPoint.INSTANCEOF] 可包裹类型判断；省略类型目标时
  * 会匹配切片内全部 `INSTANCEOF` 判断。[InjectionPoint.CONSTANT] 可包裹 `LDC`、`ACONST_NULL`、数值常量、
  * `BIPUSH` 与 `SIPUSH`；省略常量目标时会按 handler 常量参数与返回类型筛选兼容常量。
+ * [InjectionPoint.THROW] 可包裹 `ATHROW` 前的异常对象；指定目标时只匹配直接构造后抛出的同类型异常。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]
+ * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、
- * [InjectionPoint.CONSTANT] 操作包裹使用 INVOKE 边界缩小匹配范围
+ * [InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -118,8 +119,9 @@ class WrapOperationInjector(
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
+            InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF and CONSTANT injection points",
+                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, CONSTANT and THROW injection points",
             )
         }
 
@@ -507,6 +509,55 @@ class WrapOperationInjector(
         target: MethodNode,
         constantType: Type,
     ): Boolean = runCatching { validateConstantHandlerSignature(target, constantType) }.isSuccess
+
+    private fun injectThrow(target: MethodNode): Int {
+        val normalizedTarget = at.target.replace('.', '/')
+        val inferTarget = normalizedTarget.isEmpty()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ATHROW) {
+                continue
+            }
+            if (!inferTarget && directThrownTypeInternalName(insn) != normalizedTarget) {
+                continue
+            }
+            if (inferTarget && !isThrowHandlerCompatible(target)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateThrowHandlerSignature(target)
+            val il = buildThrowWrapper(target, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun isThrowHandlerCompatible(target: MethodNode): Boolean =
+        runCatching { validateThrowHandlerSignature(target) }.isSuccess
+
+    private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
+        val previous = previousRealInstruction(throwInsn)
+        if (previous is MethodInsnNode &&
+            previous.opcode == Opcodes.INVOKESPECIAL &&
+            previous.name == "<init>"
+        ) {
+            return previous.owner
+        }
+        return null
+    }
 
     private fun matchesConstant(
         insn: AbstractInsnNode,
@@ -944,6 +995,43 @@ class WrapOperationInjector(
         return il
     }
 
+    private fun buildThrowWrapper(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val throwableType = Type.getType(Throwable::class.java)
+        var nextTempIndex = nextLocalIndex(target)
+        val throwableIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val operationIndex = nextTempIndex
+
+        il.add(VarInsnNode(Opcodes.ASTORE, throwableIndex))
+
+        createThrowOperation(il)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ALOAD, throwableIndex))
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (throwableType != handlerReturnType) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, throwableType.internalName))
+        }
+
+        return il
+    }
+
     private fun createMethodOperation(
         il: InsnList,
         callInsn: MethodInsnNode,
@@ -1165,6 +1253,24 @@ class WrapOperationInjector(
                 operationType.internalName,
                 "<init>",
                 "(Ljava/lang/Object;Ljava/lang/Class;)V",
+                false,
+            ),
+        )
+    }
+
+    private fun createThrowOperation(il: InsnList) {
+        val operationType = Type.getType(Operation::class.java)
+        val throwableType = Type.getType(Throwable::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(LdcInsnNode(throwableType))
+        il.add(LdcInsnNode("<throw>"))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;)V",
                 false,
             ),
         )
@@ -1563,6 +1669,40 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    private fun validateThrowHandlerSignature(target: MethodNode): Int {
+        val expectedStackParams = arrayOf(Type.getType(Throwable::class.java))
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val throwableType = Type.getType(Throwable::class.java)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(throwableType, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original $throwableType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
     private fun buildExpectedStackParams(callInsn: MethodInsnNode): Array<Type> {
         val callParams = Type.getArgumentTypes(callInsn.desc).toList()
         return if (callInsn.opcode == Opcodes.INVOKESTATIC) {
@@ -1674,6 +1814,14 @@ class WrapOperationInjector(
         var cursor = insn.next
         while (cursor != null && cursor.opcode < 0) {
             cursor = cursor.next
+        }
+        return cursor
+    }
+
+    private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var cursor = insn.previous
+        while (cursor != null && cursor.opcode < 0) {
+            cursor = cursor.previous
         }
         return cursor
     }
