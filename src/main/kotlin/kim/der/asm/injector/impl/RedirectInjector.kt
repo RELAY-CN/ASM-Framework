@@ -313,9 +313,7 @@ class RedirectInjector(
 
     private fun injectInstanceofCount(target: MethodNode): Int {
         val typeTarget = redirectTarget.replace('.', '/')
-        if (typeTarget.isEmpty()) {
-            throw IllegalArgumentException("Redirect INSTANCEOF target type must not be empty")
-        }
+        val matchAnyTarget = typeTarget.isEmpty()
 
         val instructions = target.instructions
         var injectionCount = 0
@@ -327,7 +325,7 @@ class RedirectInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn is TypeInsnNode && insn.opcode == Opcodes.INSTANCEOF && insn.desc == typeTarget) {
+            if (insn is TypeInsnNode && insn.opcode == Opcodes.INSTANCEOF && (matchAnyTarget || insn.desc == typeTarget)) {
                 val currentOrdinal = matchedOrdinal++
                 if (!matchesOrdinal(currentOrdinal)) {
                     continue
