@@ -721,7 +721,8 @@ object ValidationMixin {
 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`，handler 先接收构造器参数，不接收未初始化 receiver；
 `GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；省略 `FIELD` 字段目标时，
 框架会按 handler 字段 owner 参数、`Operation` 位置与返回类型筛选兼容字段读取，不兼容字段读取不计入 `ordinal` 或命中数；`PUTFIELD` handler
-先接收字段 owner 和待写入值，`PUTSTATIC` handler 先接收待写入值；数组读取模式通过
+先接收字段 owner 和待写入值，`PUTSTATIC` handler 先接收待写入值；省略 `FIELD_ASSIGN` 字段目标时，会按 handler 字段 owner 参数、待写入值、`Operation`
+位置与返回类型筛选兼容字段写入，不兼容字段写入不计入 `ordinal` 或命中数；数组读取模式通过
 `FIELD + args = ["array=get"]` 指定，handler 接收数组引用、`Int` 索引与 `Operation<R>`；数组写入模式
 通过 `FIELD_ASSIGN + args = ["array=set"]` 指定，handler 接收数组引用、`Int` 索引、待写入元素值与
 `Operation<Unit>`；数组长度模式通过 `FIELD + args = ["array=length"]` 指定，handler 接收数组引用与
