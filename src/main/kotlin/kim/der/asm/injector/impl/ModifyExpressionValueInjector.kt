@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -95,9 +96,10 @@ class ModifyExpressionValueInjector(
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST, INSTANCEOF and THROW",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST, INSTANCEOF, CONSTANT and THROW",
             )
         }
     }
@@ -375,6 +377,42 @@ class ModifyExpressionValueInjector(
         return isHandlerReturnCompatible(expressionType, Type.getReturnType(asmMethod), allowThrowableSubtypeReturn)
     }
 
+    private fun injectConstant(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (!BytecodeUtil.isConstant(insn)) {
+                continue
+            }
+            if (!inferTarget && !matchesConstant(insn, at.target)) {
+                continue
+            }
+
+            val constantType = BytecodeUtil.getConstantType(insn) ?: continue
+            if (inferTarget && !isHandlerCompatible(constantType, allowThrowableSubtypeReturn = false)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, constantType)
+            val il = buildExpressionValueModification(target, constantType, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
     private fun injectInstanceof(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
@@ -447,6 +485,24 @@ class ModifyExpressionValueInjector(
             return previous.owner
         }
         return null
+    }
+
+    private fun matchesConstant(
+        insn: AbstractInsnNode,
+        expected: String,
+    ): Boolean {
+        val value = BytecodeUtil.getConstant(insn)
+        if (value == null) {
+            return expected == "null"
+        }
+        if (value is Type) {
+            return if (value.sort == Type.METHOD) {
+                value.descriptor == expected
+            } else {
+                value.internalName == expected.replace('.', '/')
+            }
+        }
+        return value.toString() == expected
     }
 
     private fun buildExpressionValueModification(
