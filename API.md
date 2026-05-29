@@ -505,7 +505,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 方法调用重定向会替换匹配的调用指令。`invokedynamic` 重定向同样使用 `at.value = InjectionPoint.INVOKE`，
 按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配；handler 不接收 receiver，
-只接收动态调用点描述符中的参数。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，
+只接收动态调用点描述符中的参数。省略 `INVOKE` 调用目标时，框架会按 handler 栈参数、返回类型和可选目标方法参数前缀筛选兼容的普通方法调用、构造器调用或 `invokedynamic` 调用；不兼容候选不计入 `ordinal` 或命中数。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，
 也可使用 `NEW` 与类型目标直接匹配构造表达式；两种形式都会替换常见 `NEW/DUP/args/INVOKESPECIAL <init>` 构造表达式。
 字段读取重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD`，
 会替换匹配的 `GETFIELD` / `GETSTATIC` 指令。字段写入重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD_ASSIGN`，
@@ -541,7 +541,7 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、重定向点和签名兼容规则推断唯一同名目标方法
 - `target: String = ""` - 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型或类型签名
-- `at: At = At()` - 注入位置；`at.value = InjectionPoint.FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配
+- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向中生效
 - `slice: Slice = Slice()` - 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换与类型判断重定向支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际重定向数必须不少于该值
