@@ -37,18 +37,18 @@ package kim.der.asm.api.annotation
  * 多个兼容重载需要显式指定 [method]。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`；为空时按 handler 名称和注入点兼容性推断唯一同名目标方法
- * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/THROW
+ * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/THROW
  * @param cancellable 是否声明该注入点允许取消；当前 HEAD 注入会据此允许 [CallbackInfo.cancel] 或
  * [CallbackInfo.setReturnValue] 触发提前返回分支
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
- * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/THROW 时用于描述具体指令点；
+ * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/THROW 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
  * 或 `var=N` 按 JVM 局部变量槽位过滤
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写指令点注入，以及普通 [InjectionPoint.NEW] /
- * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
@@ -136,10 +136,10 @@ enum class InjectionPoint {
  * 调用点定位信息。
  *
  * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 的匹配目标，
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 的匹配目标，
  * 并通过 [shift] 指定在匹配指令前/后插入 handler。普通 [AsmInject] 的
  * [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] /
- * [InjectionPoint.STORE] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 还可用 [by]
+ * [InjectionPoint.STORE] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.THROW] 还可用 [by]
  * 按真实字节码指令数移动锚点，偏移过程会跳过 label、frame 与 line number 等伪指令。
  *
  * 注意：
@@ -151,6 +151,7 @@ enum class InjectionPoint {
  *   当前实现会拒绝该配置。
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
+ * - 普通 JUMP 目标可省略；指定时为跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`。
  * - CONSTANT 目标为常量文本；`LDC` 类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符。
  * - 普通 THROW 目标可省略；指定时为异常类型 internal name 或 binary name，只匹配 `ATHROW` 前直接构造出的同类型异常。
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
@@ -166,11 +167,11 @@ enum class InjectionPoint {
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
- * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、常量文本或 THROW 直接构造异常类型签名
+ * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、跳转操作码、常量文本或 THROW 直接构造异常类型签名
  * @param shift 注入偏移策略
  * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
- * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
+ * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set` 与 `array=length`，
  * [WrapOperation] 支持 `array=get`、`array=set` 与 `array=length`，[WrapWithCondition] 支持 `array=set`，
  * [ModifyExpressionValue] 支持 `array=get` 与 `array=length`，普通 [AsmInject] 的 LOAD/STORE
@@ -209,7 +210,7 @@ enum class Shift {
  * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
  * [InjectionPoint.INVOKE] 注入、普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、
  * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写指令点注入、普通
- * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断与抛异常指令点注入、
+ * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转与抛异常指令点注入、
  * [Redirect] 的方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问与数组长度重定向，
  * [ModifyArg] / [ModifyArgs] 的
  * [InjectionPoint.INVOKE] 方法或构造器调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
