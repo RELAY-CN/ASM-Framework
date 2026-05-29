@@ -4924,6 +4924,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableExposesNameDiscriminatorParameter() {
+        val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Array<String>::class.java, methods["name"]?.returnType)
+    }
+
+    @Test
     fun modifyVariableAtHeadRewritesStaticMethodParameterByLocalIndex() {
         AsmRegistry.register(ModifyVariableStaticParamMixin::class.java)
 
