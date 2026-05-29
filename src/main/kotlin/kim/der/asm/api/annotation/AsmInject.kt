@@ -78,7 +78,7 @@ annotation class AsmInject(
  *
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[INVOKE_ASSIGN]、[FIELD]、
  * [FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP]、[CONSTANT] 与 [THROW]。
- * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [INSTANCEOF] 改写类型判断结果，通过 [CONSTANT] 改写常量表达式，
+ * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [INSTANCEOF] 改写类型判断结果，通过 [JUMP] 改写条件跳转分支结果，通过 [CONSTANT] 改写常量表达式，
  * 也可通过 [THROW] 改写即将抛出的异常。
  * 其中指令点注入会在匹配指令前后插入 handler，
  * 不会替换原始指令、自动传递栈顶操作数或局部变量值。
@@ -154,6 +154,7 @@ enum class InjectionPoint {
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - 普通 JUMP 目标可省略；指定时为跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`。
+ *   [ModifyExpressionValue] 的 JUMP 只支持条件跳转，handler 接收并返回 `Boolean` 分支结果。
  * - 普通 CONSTANT 目标可省略；指定时为常量文本。`LDC` 类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符。
  * - 普通 THROW 目标可省略；指定时为异常类型 internal name 或 binary name，只匹配 `ATHROW` 前直接构造出的同类型异常。
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
@@ -225,7 +226,7 @@ enum class Shift {
  * [InjectionPoint.FIELD_ASSIGN] 条件包裹，
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、数组读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写改写，以及 [ModifyConstant] 常量修改
  * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；
  * 起始边界之后、结束边界之前的候选点才会参与匹配，边界指令本身不会作为候选注入点。

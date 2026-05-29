@@ -771,20 +771,20 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 `@Redirect` 或 `@WrapOperation`。`INVOKE`、`FIELD_ASSIGN` 与 `array=set` 条件包裹可用 `Slice` 限制匹配范围；`from` 边界之后、
 `to` 边界之前的调用、字段写入或数组元素写入才会参与匹配，边界调用本身不会被包裹，`ordinal` 会在切片内重新计数。关键条件包裹可设置 `require` / `allow` / `expect`，按实际插入条件判断的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按条件包裹操作点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
-`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断、常量加载或抛异常指令但
-改写表达式结果的场景，handler 第一个参数接收匹配普通调用或 `invokedynamic` 调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象、转换后的对象、`INSTANCEOF` 判断结果、常量表达式值或即将抛出的 `Throwable` 并
+`@ModifyExpressionValue` 用于保留原调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断、条件跳转、常量加载或抛异常指令但
+改写表达式结果的场景，handler 第一个参数接收匹配普通调用或 `invokedynamic` 调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象、转换后的对象、`INSTANCEOF` 判断结果、条件跳转分支结果、常量表达式值或即将抛出的 `Throwable` 并
 返回同类型新值，后续参数可接收目标方法参数前缀；primitive 表达式的返回类型必须与表达式类型一致，引用类型表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类；对象或数组表达式的首参可声明为原值类型的父类、接口、`Any` 或 `Object`，
 它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引；`INVOKE` / `INVOKE_ASSIGN` 省略调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；
 字段读取省略目标时，会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC` 字段读取值；
 `NEW` 模式会在对应 `<init>` 完成后改写对象表达式，省略类型目标时按 handler 首参与返回类型筛选兼容 `NEW`；
 `CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，省略类型目标时按 handler 首参与返回类型筛选兼容 `CHECKCAST`；`CONSTANT` 模式会在常量加载后改写常量表达式值，省略常量目标时按 handler 首参与返回类型筛选兼容常量；不兼容的调用返回、字段读取、`NEW`、`CHECKCAST` 或常量候选不计入 `ordinal` 或命中数。数组读取模式通过 `args = ["array=get"]`
-指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`，且后续参数仍可接收目标方法参数前缀；`THROW` 指定类型目标时，只匹配 `ATHROW` 前一条真实指令为同类型 `<init>` 的直接构造异常，不追踪局部变量或方法返回值来源。
+指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`JUMP` 模式接收条件跳转原始分支结果并返回新的 `Boolean` 分支结果，`GOTO` 与 `JSR` 不支持表达式改写，`THROW` 模式接收即将抛出的 `Throwable`，且后续参数仍可接收目标方法参数前缀；`THROW` 指定类型目标时，只匹配 `ATHROW` 前一条真实指令为同类型 `<init>` 的直接构造异常，不追踪局部变量或方法返回值来源。
 `invokedynamic` 调用目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；字符串拼接可匹配
 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(...)`。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按表达式定位、表达式值类型、返回类型和追加目标参数匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
-`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF`、`CONSTANT` 与 `THROW` 表达式值修改可用
-`Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断或抛异常候选点才会参与匹配，
+`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、数组元素读取、数组长度、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`CONSTANT` 与 `THROW` 表达式值修改可用
+`Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的调用、字段读取、数组读取、数组长度、对象构造、类型转换、类型判断、条件跳转或抛异常候选点才会参与匹配，
 边界调用本身不会被改写，`THROW` 只会改写边界内的 `ATHROW` 候选，`ordinal` 会在切片内重新计数。
 关键表达式值补丁可设置 `require` / `allow` / `expect`，命中数按实际改写的表达式值数量计数。
 
@@ -1204,7 +1204,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选指令范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `JUMP` 可用跳转操作码名或数字操作码过滤；普通 `CONSTANT` 可用常量文本过滤；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。`NEW` 不支持 `Shift.AFTER` 和 `At.by`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `CONSTANT` 只能观察常量加载位置；如果需要替换常量值，可使用 `@ModifyConstant`、`@ModifyExpressionValue(at = At(value = InjectionPoint.CONSTANT, target = "..."))` 或 `@WrapOperation(at = At(value = InjectionPoint.CONSTANT, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果、类型判断结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选指令范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `JUMP` 可用跳转操作码名或数字操作码过滤；普通 `CONSTANT` 可用常量文本过滤；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。`NEW` 不支持 `Shift.AFTER` 和 `At.by`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `JUMP` 只能观察跳转位置；如果需要按原条件结果决定新控制流，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`。普通 `CONSTANT` 只能观察常量加载位置；如果需要替换常量值，可使用 `@ModifyConstant`、`@ModifyExpressionValue(at = At(value = InjectionPoint.CONSTANT, target = "..."))` 或 `@WrapOperation(at = At(value = InjectionPoint.CONSTANT, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果、类型判断结果、条件跳转结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
@@ -1318,6 +1318,13 @@ fun format(original: String): String = original.lowercase()
     allow = 1,
 )
 fun rewriteLabel(original: String): String = "relay-$original"
+
+@ModifyExpressionValue(
+    at = At(value = InjectionPoint.JUMP, target = "IFEQ"),
+    require = 1,
+    allow = 1,
+)
+fun keepBranch(original: Boolean): Boolean = original
 
 @ModifyConstant(method = "maxPlayers()I", constant = "20", require = 1, allow = 1)
 fun expandLimit(original: Int): Int = original * 2

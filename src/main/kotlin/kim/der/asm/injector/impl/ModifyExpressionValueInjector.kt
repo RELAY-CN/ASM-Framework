@@ -31,7 +31,7 @@ import java.lang.reflect.Modifier
  * ModifyExpressionValue 注入器。
  *
  * 该注入器会匹配目标方法内的指定普通方法调用、`invokedynamic` 调用、字段读取、数组元素读取、数组长度、对象构造、类型转换、
- * `INSTANCEOF` 判断或 `ATHROW` 抛异常指令，
+ * `INSTANCEOF` 判断、条件跳转或 `ATHROW` 抛异常指令，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
  * 对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收。
@@ -41,7 +41,7 @@ import java.lang.reflect.Modifier
  * 指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
- * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
+ * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
  * 可匹配字段读取值，省略字段目标时会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`；
  * 也可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值，
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 可显式匹配普通调用或按 bootstrap owner、动态调用名、bootstrap 名
@@ -50,12 +50,13 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值；未指定类型目标时，会按 handler 首参与返回类型筛选兼容的
  * `CHECKCAST` 候选；不兼容的调用返回、字段读取、`NEW` / `CHECKCAST` 候选不计入 [ModifyExpressionValue.ordinal] 或命中数。
  * [InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果，
+ * [InjectionPoint.JUMP] 匹配条件跳转的原始分支结果，handler 接收 `Boolean` 并返回新的分支结果；`GOTO` 与 `JSR` 不支持表达式改写，
  * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`，handler 可返回 `Throwable` 或其子类；
  * 指定类型目标时，只会匹配前一条真实指令为同类型 `<init>` 的直接构造异常
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
