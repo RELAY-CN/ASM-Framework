@@ -121,6 +121,9 @@ enum class InjectionPoint {
     /** instanceof 判断指令 */
     INSTANCEOF,
 
+    /** 常量表达式 */
+    CONSTANT,
+
     /** 抛出异常前 */
     THROW,
 }
