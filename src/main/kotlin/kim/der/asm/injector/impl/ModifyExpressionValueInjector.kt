@@ -34,7 +34,8 @@ import java.lang.reflect.Modifier
  * 对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收。
  * handler 返回类型对基础类型必须精确匹配，引用表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回表达式类型。
- * [InjectionPoint.THROW] 会在目标 `ATHROW` 前改写即将抛出的异常，也可继续追加目标方法参数。
+ * [InjectionPoint.THROW] 会在目标 `ATHROW` 前改写即将抛出的异常，也可继续追加目标方法参数；
+ * 指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
  * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
@@ -45,7 +46,8 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值；未指定类型目标时，会按 handler 首参与返回类型筛选兼容的
  * `CHECKCAST` 候选；不兼容的 `NEW` / `CHECKCAST` 候选不计入 [ModifyExpressionValue.ordinal] 或命中数。
  * [InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果，
- * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`，handler 可返回 `Throwable` 或其子类
+ * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`，handler 可返回 `Throwable` 或其子类；
+ * 指定类型目标时，只会匹配前一条真实指令为同类型 `<init>` 的直接构造异常
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
