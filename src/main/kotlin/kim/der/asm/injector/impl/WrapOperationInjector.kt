@@ -20,6 +20,8 @@ import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.IntInsnNode
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
+import org.objectweb.asm.tree.JumpInsnNode
+import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -31,10 +33,10 @@ import java.lang.reflect.Modifier
 /**
  * WrapOperation 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断、常量读取或即将抛出的异常，
+ * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断、条件跳转、常量读取或即将抛出的异常，
  * 并用 handler 替换原操作。
  * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、构造器参数、字段写入值或
- * 数组访问参数、类型转换或类型判断输入值、原常量值、即将抛出的异常、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
+ * 数组访问参数、类型转换或类型判断输入值、原条件跳转分支结果、原常量值、即将抛出的异常、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
  * 执行原始操作，也可以跳过或改变调用参数。
  *
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
@@ -50,15 +52,16 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.NEW] 可通过类型目标直接包裹同一构造表达式；
  * [InjectionPoint.CAST] 可包裹 `CHECKCAST` 类型转换；省略类型目标时会按 handler 返回类型筛选兼容转换目标，
  * 不兼容目标不会计入 [WrapOperation.ordinal] 或命中数。[InjectionPoint.INSTANCEOF] 可包裹类型判断；省略类型目标时
- * 会匹配切片内全部 `INSTANCEOF` 判断。[InjectionPoint.CONSTANT] 可包裹 `LDC`、`ACONST_NULL`、数值常量、
+ * 会匹配切片内全部 `INSTANCEOF` 判断。[InjectionPoint.JUMP] 可包裹条件跳转分支结果；`GOTO` 与 `JSR` 不支持包裹。
+ * [InjectionPoint.CONSTANT] 可包裹 `LDC`、`ACONST_NULL`、数值常量、
  * `BIPUSH` 与 `SIPUSH`；省略常量目标时会按 handler 常量参数与返回类型筛选兼容常量。
  * [InjectionPoint.THROW] 可包裹 `ATHROW` 前的异常对象；指定目标时只匹配直接构造后抛出的同类型异常。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
+ * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
- * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、
+ * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、
  * [InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -118,10 +121,11 @@ class WrapOperationInjector(
             InjectionPoint.NEW -> injectNewConstructor(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.JUMP -> injectJump(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, CONSTANT and THROW injection points",
+                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, JUMP, CONSTANT and THROW injection points",
             )
         }
 
@@ -458,6 +462,45 @@ class WrapOperationInjector(
 
             val targetParamCount = validateInstanceofHandlerSignature(target, insn)
             val il = buildInstanceofWrapper(target, insn, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            target.instructions.remove(insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectJump(target: MethodNode): Int {
+        val targetOpcode = parseJumpOpcodeTarget(at.target)
+        if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
+            throw IllegalArgumentException(
+                "@WrapOperation JUMP target must be a conditional JVM jump opcode: ${at.target}",
+            )
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (
+                insn !is JumpInsnNode ||
+                insn.opcode !in CONDITIONAL_JUMP_OPS ||
+                (targetOpcode != null && insn.opcode != targetOpcode)
+            ) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateJumpHandlerSignature(target)
+            val il = buildJumpWrapper(insn, target, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
             injectionCount++
@@ -995,6 +1038,56 @@ class WrapOperationInjector(
         return il
     }
 
+    private fun buildJumpWrapper(
+        jumpInsn: JumpInsnNode,
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val originalTrue = LabelNode()
+        val afterOriginal = LabelNode()
+        val il = InsnList()
+        il.add(JumpInsnNode(jumpInsn.opcode, originalTrue))
+        il.add(InsnNode(Opcodes.ICONST_0))
+        il.add(JumpInsnNode(Opcodes.GOTO, afterOriginal))
+        il.add(originalTrue)
+        il.add(InsnNode(Opcodes.ICONST_1))
+        il.add(afterOriginal)
+        il.add(buildJumpOperationCall(target, targetParamCount))
+        il.add(JumpInsnNode(Opcodes.IFNE, jumpInsn.label))
+        return il
+    }
+
+    private fun buildJumpOperationCall(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        var nextTempIndex = nextLocalIndex(target)
+        val branchIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val operationIndex = nextTempIndex
+
+        il.add(VarInsnNode(Opcodes.ISTORE, branchIndex))
+
+        createJumpOperation(il)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ILOAD, branchIndex))
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        return il
+    }
+
     private fun buildThrowWrapper(
         target: MethodNode,
         targetParamCount: Int,
@@ -1225,6 +1318,23 @@ class WrapOperationInjector(
         il.add(InsnNode(Opcodes.DUP))
         il.add(LdcInsnNode(instanceofType))
         il.add(LdcInsnNode("<instanceof>"))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;)V",
+                false,
+            ),
+        )
+    }
+
+    private fun createJumpOperation(il: InsnList) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(InstructionUtil.loadType(Type.BOOLEAN_TYPE))
+        il.add(LdcInsnNode("<jump>"))
         il.add(
             MethodInsnNode(
                 Opcodes.INVOKESPECIAL,
@@ -1664,6 +1774,39 @@ class WrapOperationInjector(
             throw IllegalArgumentException(
                 "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
                     "original $constantType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateJumpHandlerSignature(target: MethodNode): Int {
+        val expectedStackParams = arrayOf(Type.BOOLEAN_TYPE)
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(Type.BOOLEAN_TYPE, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original ${Type.BOOLEAN_TYPE}, handler $handlerReturnType",
             )
         }
         return targetParamCount
@@ -2196,6 +2339,23 @@ class WrapOperationInjector(
         return target.desc == null || insn.desc == target.desc
     }
 
+    private fun parseJumpOpcodeTarget(target: String): Int? {
+        if (target.isEmpty()) {
+            return null
+        }
+
+        val normalized = target.trim().uppercase()
+        normalized.toIntOrNull()?.let { opcode ->
+            require(opcode in JUMP_OPS) {
+                "@WrapOperation JUMP target opcode must be a JVM jump opcode: $target"
+            }
+            return opcode
+        }
+
+        return JUMP_OPCODE_NAMES[normalized]
+            ?: throw IllegalArgumentException("@WrapOperation JUMP target must be a jump opcode name or number: $target")
+    }
+
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
@@ -2259,5 +2419,28 @@ class WrapOperationInjector(
                 Opcodes.CASTORE,
                 Opcodes.SASTORE,
             )
+        private val JUMP_OPCODE_NAMES =
+            mapOf(
+                "IFEQ" to Opcodes.IFEQ,
+                "IFNE" to Opcodes.IFNE,
+                "IFLT" to Opcodes.IFLT,
+                "IFGE" to Opcodes.IFGE,
+                "IFGT" to Opcodes.IFGT,
+                "IFLE" to Opcodes.IFLE,
+                "IF_ICMPEQ" to Opcodes.IF_ICMPEQ,
+                "IF_ICMPNE" to Opcodes.IF_ICMPNE,
+                "IF_ICMPLT" to Opcodes.IF_ICMPLT,
+                "IF_ICMPGE" to Opcodes.IF_ICMPGE,
+                "IF_ICMPGT" to Opcodes.IF_ICMPGT,
+                "IF_ICMPLE" to Opcodes.IF_ICMPLE,
+                "IF_ACMPEQ" to Opcodes.IF_ACMPEQ,
+                "IF_ACMPNE" to Opcodes.IF_ACMPNE,
+                "GOTO" to Opcodes.GOTO,
+                "JSR" to Opcodes.JSR,
+                "IFNULL" to Opcodes.IFNULL,
+                "IFNONNULL" to Opcodes.IFNONNULL,
+            )
+        private val JUMP_OPS = JUMP_OPCODE_NAMES.values.toSet()
+        private val CONDITIONAL_JUMP_OPS = JUMP_OPS - setOf(Opcodes.GOTO, Opcodes.JSR)
     }
 }

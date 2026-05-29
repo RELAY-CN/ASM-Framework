@@ -106,7 +106,7 @@ val transformedBytes = processor.transform(
 - **@ModifyArg** - 修改方法参数
 - **@ModifyArgs** - 修改方法调用、构造器调用或 `invokedynamic` 调用参数组
 - **@ModifyReceiver** - 修改实例方法调用或实例字段访问 receiver
-- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、常量读取或即将抛出的异常
+- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、条件跳转、常量读取或即将抛出的异常
 - **@WrapMethod** - 用可调用原方法的 handler 包裹整个目标方法体
 - **@WrapWithCondition** - 按条件跳过 `void` 调用、`invokedynamic` 调用、字段写入或数组元素写入
 - **@ModifyExpressionValue** - 修改表达式值
@@ -477,6 +477,17 @@ object ValidationMixin {
     ): String = "wrapped-$value-${operation.call()}"
 
     @WrapOperation(
+        method = "choose(IZ)Ljava/lang/String;",
+        at = At(value = InjectionPoint.JUMP, target = "IFLE"),
+    )
+    fun wrapBranch(
+        original: Boolean,
+        operation: Operation<Boolean>,
+        score: Int,
+        forceFallback: Boolean,
+    ): Boolean = forceFallback || operation.call(original)
+
+    @WrapOperation(
         method = "failRoute(Ljava/lang/String;)V",
         at = At(value = InjectionPoint.THROW, target = "java.lang.IllegalStateException"),
     )
@@ -740,7 +751,7 @@ object ValidationMixin {
 
 `@ModifyArg` 默认使用目标方法入口参数索引；入口模式下 `index < 0` 时会按 handler 首参、返回类型和后续目标方法参数前缀推断唯一兼容参数，多个参数都兼容时需要显式写出 `index`。省略 `method` 时，入口参数模式会按 handler 名称、`index` 或推断出的目标参数、handler 首参、返回类型和后续目标方法参数前缀推断唯一同名目标方法，调用点模式会按实际兼容调用点推断唯一同名目标方法；若有多个兼容重载，应显式写出 `method`。当 `at.value = InjectionPoint.INVOKE` 时，会用 `at.target` 匹配目标方法调用、构造器调用或 `invokedynamic` 调用，并把 `index` 解释为目标调用的参数索引；调用点模式下 `index < 0` 时也会按 handler 首参、返回类型和目标方法参数前缀推断唯一兼容调用参数，多个调用参数都兼容时需要显式写出 `index`。省略 `at.target` 时，会按 `index` 指向或推断出的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀筛选兼容调用点，不兼容候选不计入 `ordinal` 或命中数。handler 第一个参数接收被修改的原参数并返回同类型的新值；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，返回值对引用类型可为原参数类型的可赋值子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原参数类型，基础类型仍需精确匹配。构造器调用使用 `<init>` 目标，只能修改构造器描述符内的参数，不暴露未初始化 receiver；`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；后续参数可继续接收目标方法参数前缀；调用点模式可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `Slice` 限制匹配范围。关键参数补丁可设置 `require` / `allow` 约束实际修改数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。`@ModifyArgs` 用于同一个方法调用、构造器调用或 `invokedynamic` 调用需要同时改写多个参数的场景，handler 第一个参数为 `Args`，可通过 `args.get<T>(index)` 读取调用参数，通过 `args.set(index, value)` 写回兼容类型的新值；省略 `method` 时会按 handler 名称、`at.target` 调用点、handler 签名和实际兼容调用点推断唯一同名目标方法，省略 `at.target` 时会扫描普通方法调用、构造器调用或 `invokedynamic` 调用，可用 `ordinal`、`Slice`、`require` / `allow` 或显式目标收窄。构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver，按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object`；后续参数同样可接收目标方法参数前缀，也支持用 `Slice` 限制匹配范围。关键参数组补丁同样可设置 `require` / `allow` / `expect`，按实际改写的调用点数量校验命中契约。`from` 边界之后、`to` 边界之前的调用才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyReceiver` 用于只替换实例方法调用、实例字段读取或实例字段写入的 receiver，handler 第一个参数接收原 receiver；省略 `method` 时会按 handler 名称、receiver 操作点、handler 签名和实际兼容候选推断唯一同名目标方法，省略 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN` 目标时也会按兼容候选参与推断。省略 `INVOKE` 调用目标时，会按 handler 首参与返回类型筛选兼容的实例调用 receiver，静态调用、构造器调用和不兼容实例调用不计入 `ordinal` 或命中数；省略 `FIELD` 字段目标时，会按 handler 首参与返回类型筛选兼容的实例字段读取 receiver，静态字段和不兼容字段读取不计入 `ordinal` 或命中数；省略 `FIELD_ASSIGN` 字段目标时，会按 handler 首参与返回类型筛选兼容的实例字段写入 receiver，静态字段和不兼容字段写入不计入 `ordinal` 或命中数。对象或数组 receiver 可声明为原 receiver 类型的父类、接口、`Any` 或 `Object`，并返回兼容的新 receiver，框架会在 handler 调用后把结果转换回原 receiver 类型。`INVOKE` 会保留原调用参数，`FIELD` 会继续读取新 receiver 上的字段，`FIELD_ASSIGN` 会把原待写入值写到新 receiver，三种模式都可用 `Slice` 限制 receiver 改写范围，后续参数可接收目标方法参数前缀。关键 receiver 补丁同样可设置 `require` / `allow` / `expect`，按实际改写的 receiver 数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。静态方法、构造器调用和静态字段没有可改写 receiver，会在转换阶段失败。
 
-`@WrapOperation` 用于把匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、常量读取或即将抛出的异常替换为 handler，并通过 `Operation`
+`@WrapOperation` 用于把匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、条件跳转、常量读取或即将抛出的异常替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；省略 `INVOKE` 调用目标时，
 框架会按 handler 栈参数、`Operation` 位置与返回类型筛选兼容的普通调用、`invokedynamic` 调用或构造器调用，不兼容候选不计入 `ordinal` 或命中数；
 `invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数，再接收 `Operation<R>`，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，`operation.call(...)` 只传动态调用点参数；构造器模式可通过 `INVOKE + <init>` 目标指定，也可通过 `NEW` 与类型目标指定；`NEW` 目标可写
@@ -756,11 +767,12 @@ object ValidationMixin {
 省略类型目标时会按 handler 返回类型筛选兼容的 `CHECKCAST`，不兼容目标不计入 `ordinal` 或命中数，
 `operation.call(value)` 会执行原始 `CHECKCAST` 语义；类型判断模式通过 `INSTANCEOF` 与类型目标指定，
 省略类型目标时会匹配切片内全部 `INSTANCEOF` 判断，handler 接收被判断对象与 `Operation<Boolean>`，
-`operation.call(value)` 会执行原始 `INSTANCEOF` 语义。常量模式通过 `CONSTANT` 与常量文本目标指定，handler 接收原始常量值与 `Operation<T>`，
+`operation.call(value)` 会执行原始 `INSTANCEOF` 语义。条件跳转模式通过 `JUMP` 与可选跳转操作码目标指定，handler 接收原始分支结果 `Boolean` 与 `Operation<Boolean>`，
+`operation.call(original)` 会返回原始分支结果；handler 返回 `Boolean` 决定是否跳到原标签，`GOTO` 与 `JSR` 不支持包裹。常量模式通过 `CONSTANT` 与常量文本目标指定，handler 接收原始常量值与 `Operation<T>`，
 `operation.call()` 会返回原始常量；省略常量目标时会按 handler 常量参数与返回类型筛选兼容常量，不兼容常量不计入 `ordinal` 或命中数。抛异常模式通过 `THROW` 与可选异常类型目标指定，handler 接收即将抛出的 `Throwable` 与 `Operation<Throwable>`，
 `operation.call(throwable)` 会返回原异常对象；handler 可返回 `Throwable` 或具体异常子类，指定类型目标时只匹配直接构造后抛出的同类型异常。handler 可用 `operation.call(...)` 调用、跳过或多次执行原操作，后续可接收目标方法
 参数前缀；handler 参数接收引用或数组栈值、目标方法参数时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型；构造器调用的 `operation.call(...)` 只传构造器参数，并返回原构造器 owner 类型兼容对象。`INVOKE`、`FIELD` 与
-`FIELD_ASSIGN`、`NEW`、`CAST`、`INSTANCEOF`、`CONSTANT`、`THROW` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
+`FIELD_ASSIGN`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`CONSTANT`、`THROW` 操作包裹可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的操作才会参与匹配，边界调用本身不会被包裹，
 `ordinal` 会在切片内重新计数。关键操作包裹可设置 `require` / `allow` / `expect`，按实际替换为 handler 调用的操作点数量校验命中契约；设置 `ordinal` 时最多命中对应序号的 1 个操作点。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按操作点和 `Operation` handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
@@ -1217,7 +1229,7 @@ object FieldPointMixin {
 }
 ```
 
-指令点注入默认不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选指令范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `JUMP` 可用跳转操作码名或数字操作码过滤；普通 `CONSTANT` 可用常量文本过滤，`Shift.REPLACE` 会用 handler 返回值替换原常量加载；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。`NEW` 不支持 `Shift.AFTER` 和 `At.by`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `JUMP` 只能观察跳转位置；如果需要按原条件结果决定新控制流，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`。如果常量替换需要读取原常量值，应使用 `@ModifyConstant`、`@ModifyExpressionValue(at = At(value = InjectionPoint.CONSTANT, target = "..."))` 或 `@WrapOperation(at = At(value = InjectionPoint.CONSTANT, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果、类型判断结果、条件跳转结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+指令点注入默认不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选指令范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `JUMP` 可用跳转操作码名或数字操作码过滤；普通 `CONSTANT` 可用常量文本过滤，`Shift.REPLACE` 会用 handler 返回值替换原常量加载；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。`NEW` 不支持 `Shift.AFTER` 和 `At.by`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `JUMP` 只能观察跳转位置；如果需要按原条件结果决定新控制流，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`，需要保留可调用原分支结果的操作句柄时可使用 `@WrapOperation(at = At(value = InjectionPoint.JUMP, target = "..."))`。如果常量替换需要读取原常量值，应使用 `@ModifyConstant`、`@ModifyExpressionValue(at = At(value = InjectionPoint.CONSTANT, target = "..."))` 或 `@WrapOperation(at = At(value = InjectionPoint.CONSTANT, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、类型转换结果、类型判断结果、条件跳转结果，优先使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
 
 ## 最佳实践
 
