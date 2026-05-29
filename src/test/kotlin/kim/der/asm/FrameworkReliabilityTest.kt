@@ -2183,6 +2183,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtCastWithoutTargetSkipsIncompatibleCheckcasts() {
+        AsmRegistry.register(AnyCastModifyExpressionValueMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiCastInstructionTarget", multiCastInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiCastInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("cast", Any::class.java, Any::class.java)
+
+        assertEquals("raw-modified", method.invoke(instance, StringBuilder("ignored"), "raw"))
+    }
+
+    @Test
     fun modifyExpressionValueCastWithMismatchedHandlerParametersFailsDuringTransform() {
         AsmRegistry.register(MismatchedModifyExpressionValueCastMixin::class.java)
 
@@ -8416,6 +8428,16 @@ class FrameworkReliabilityTest {
             original: String,
             input: Any,
         ): String = "$original-$input"
+    }
+
+    @AsmMixin("MultiCastInstructionTarget")
+    object AnyCastModifyExpressionValueMixin {
+        @ModifyExpressionValue(
+            method = "cast(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-modified"
     }
 
     @AsmMixin("CastInstructionTarget")
