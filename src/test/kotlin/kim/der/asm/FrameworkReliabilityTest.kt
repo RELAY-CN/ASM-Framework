@@ -1146,6 +1146,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsAtInvokeInfersCallTargetByHandlerSignature() {
+        AsmRegistry.register(InferredInvokeModifyArgsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello inferred", result)
+    }
+
+    @Test
     fun modifyArgsInfersTargetWhenMethodIsOmitted() {
         AsmRegistry.register(InferredModifyArgsTargetMixin::class.java)
 
@@ -7560,6 +7572,21 @@ class FrameworkReliabilityTest {
         fun modify(args: Args) {
             args.set(0, "raw")
             args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object InferredInvokeModifyArgsMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "inferred")
         }
     }
 
