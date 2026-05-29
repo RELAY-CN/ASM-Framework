@@ -5649,6 +5649,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtInvokeInfersMethodAndCallTargetByHandlerSignature() {
+        AsmRegistry.register(InferredMethodAndInvokeRedirectTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("inferred-method-value", result)
+    }
+
+    @Test
     fun redirectMethodCallCanUseTargetMethodParameters() {
         AsmRegistry.register(RedirectWithTargetParamsMixin::class.java)
 
@@ -6687,6 +6699,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): String = "inferred-call-${value.trim()}"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InferredMethodAndInvokeRedirectTargetMixin {
+        @Redirect(
+            at = At(value = InjectionPoint.INVOKE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun call(value: String): String = "inferred-method-${value.trim()}"
     }
 
     @AsmMixin("RedirectParamTarget")
