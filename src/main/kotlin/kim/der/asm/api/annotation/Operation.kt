@@ -48,6 +48,7 @@ class Operation<T> private constructor(
     private val dynamicReturnType: Class<*>? = null,
     private val bootstrapHandle: MethodHandle? = null,
     private val bootstrapArgs: Array<Any?> = emptyArray(),
+    private val constantValue: Any? = null,
 ) {
     /**
      * 创建方法调用操作句柄。
@@ -251,6 +252,29 @@ class Operation<T> private constructor(
     )
 
     /**
+     * 创建常量读取操作句柄。
+     *
+     * [call] 不接收参数，返回原始常量值。`ACONST_NULL` 会返回 `null`，基本类型常量会以对应装箱类型返回。
+     *
+     * @param value 原常量值
+     * @param constantType 原常量运行时类型；`null` 常量由 handler 参数类型决定
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-29
+     */
+    constructor(
+        value: Any?,
+        constantType: Class<*>,
+    ) : this(
+        constantType,
+        "<constant>",
+        constantType.name,
+        true,
+        emptyArray(),
+        OperationKind.CONSTANT,
+        constantValue = value,
+    )
+
+    /**
      * 执行原始操作。
      *
      * 普通实例方法调用和 `GETFIELD` 读取的 [args] 第一个元素必须是 receiver，后续元素为原方法参数；`PUTFIELD`
@@ -296,6 +320,9 @@ class Operation<T> private constructor(
         }
         if (kind == OperationKind.INVOKE_DYNAMIC) {
             return invokeDynamic(args) as T
+        }
+        if (kind == OperationKind.CONSTANT) {
+            return readConstant(args) as T
         }
 
         val usesBoundReceiver = receiverBound && !staticCall
@@ -428,6 +455,14 @@ class Operation<T> private constructor(
         return constructor.newInstance(*args)
     }
 
+    private fun readConstant(args: Array<out Any?>): Any? {
+        require(args.isEmpty()) {
+            "Operation constant $desc expects 0 argument(s), actual ${args.size}"
+        }
+
+        return constantValue
+    }
+
     private fun findMethod(ownerClass: Class<*>): Method =
         try {
             ownerClass.getDeclaredMethod(name, *parameterTypes)
@@ -460,6 +495,7 @@ class Operation<T> private constructor(
         CAST,
         INSTANCEOF,
         INVOKE_DYNAMIC,
+        CONSTANT,
     }
 
     private companion object {
