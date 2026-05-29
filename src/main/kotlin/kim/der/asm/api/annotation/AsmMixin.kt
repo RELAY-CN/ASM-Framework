@@ -199,6 +199,8 @@ annotation class Unique
  * 默认在目标方法入口直接写回参数槽位；当 [at] 指向 [InjectionPoint.INVOKE] 时，会改写匹配调用点的指定参数。
  * 入口参数模式下可省略 [method]，框架会按 handler 方法名、[index]、首个参数类型、返回类型和后续目标方法参数前缀，
  * 在目标类中推断唯一同名方法；若存在多个兼容重载，需要显式声明 [method]。
+ * INVOKE 模式下 [At.target] 可省略，框架会按 [index] 指向的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀
+ * 筛选兼容调用点；不兼容候选不会计入 [ordinal] 或实际命中数。
  *
  * ASM 方法要求：
  *
@@ -210,10 +212,11 @@ annotation class Unique
  * - [require] / [allow] 可约束实际参数修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名；入口参数模式可省略并按 handler 名称推断唯一兼容目标，INVOKE 调用点模式建议显式声明
+ * @param method 目标方法签名；入口参数模式可省略并按 handler 名称推断唯一兼容目标，INVOKE 调用点模式建议显式声明目标方法
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
  * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用、构造器调用或
- * `invokedynamic` 调用；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配
+ * `invokedynamic` 调用，为空则按 handler 签名推断兼容调用点；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
+ * 以及动态调用点描述符匹配
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，当前仅在 INVOKE 模式下生效
  * @param slice 切片范围；当前 INVOKE 调用点参数修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE] 边界缩小查找范围

@@ -22,12 +22,15 @@ import java.lang.reflect.Modifier
  * 在目标方法开头读取指定参数槽位，调用 ASM 方法得到新值后写回原槽位。
  * 默认按参数索引直接修改方法入口处的参数值；当 [at] 指向 [InjectionPoint.INVOKE] 时，
  * 会改写匹配普通方法调用、构造器调用或 `invokedynamic` 调用点的指定调用参数。
+ * [At.target] 为空时，会按 [argIndex] 指向的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀
+ * 筛选兼容调用点；不兼容候选不会计入 [ordinal] 或命中数。
  * handler 的第一个参数是被修改的原参数；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
  * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原参数类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回原参数类型。后续可按顺序接收目标方法参数前缀。
  *
  * @param argIndex 要修改的目标参数索引，从 0 开始
- * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标方法调用、构造器调用或 `invokedynamic` 调用
+ * @param at 调用点定位；[InjectionPoint.INVOKE] 时使用 [At.target] 匹配目标方法调用、构造器调用或 `invokedynamic` 调用，
+ * 为空则按 handler 签名推断兼容调用点
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前仅 [InjectionPoint.INVOKE] 调用点参数修改使用 INVOKE 边界缩小匹配范围
  *
