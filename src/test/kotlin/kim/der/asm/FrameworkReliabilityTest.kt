@@ -5049,6 +5049,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableAtStoreSelectsLocalVariableByNameInTestClass() {
+        AsmRegistry.register(ModifyVariableNamedStoreTestMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+                ),
+            )
+        val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("raw")
+        val result = clazz.getMethod("localNameDiscriminatorTest", String::class.java).invoke(instance, "value")
+
+        assertEquals("value-first:named-value-second", result)
+    }
+
+    @Test
     fun modifyVariableRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeModifyVariableMixin::class.java)
 
@@ -11604,6 +11630,19 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("Test")
+    object ModifyVariableNamedStoreTestMixin {
+        @ModifyVariable(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            name = ["second"],
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "named-$original"
     }
 
     @AsmMixin("StoreOrdinalVariableTarget")

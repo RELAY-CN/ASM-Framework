@@ -98,6 +98,12 @@ public class Test extends TestParent implements TestInterface {
         System.out.println("testC0 called with: " + dynamicString);
         return dynamicString;
     }
+
+    public String localNameDiscriminatorTest(String input) {
+        String first = input + "-first";
+        String second = input + "-second";
+        return first + ":" + second;
+    }
     
     public synchronized String synchronizedMethod() {
         instanceCounter++;
