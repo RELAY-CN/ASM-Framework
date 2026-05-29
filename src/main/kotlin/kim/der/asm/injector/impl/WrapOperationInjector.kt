@@ -42,6 +42,8 @@ import java.lang.reflect.Modifier
  * `invokedynamic` 调用或构造器调用，且不兼容候选不会计入 [WrapOperation.ordinal] 或命中数；
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 字段 owner 参数、[Operation] 位置与返回类型筛选兼容的字段读取，
  * 且不兼容候选不会计入 [WrapOperation.ordinal] 或命中数；
+ * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 字段 owner 参数、待写入值、[Operation] 位置与
+ * `Unit` 返回类型筛选兼容的字段写入，且不兼容候选不会计入 [WrapOperation.ordinal] 或命中数；
  * [InjectionPoint.INVOKE] 可通过 `<init>` 目标包裹常见 `NEW/DUP/args/INVOKESPECIAL` 构造器调用，
  * [InjectionPoint.NEW] 可通过类型目标直接包裹同一构造表达式；
  * [InjectionPoint.CAST] 可包裹 `CHECKCAST` 类型转换；省略类型目标时会按 handler 返回类型筛选兼容转换目标，
