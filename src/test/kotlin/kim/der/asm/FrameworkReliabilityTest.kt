@@ -1945,6 +1945,26 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtFieldInfersTargetByCompatibleValueType() {
+        AsmRegistry.register(ModifyExpressionValueInferredFieldReadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "MixedFieldExpressionValueTarget",
+                mixedFieldExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("MixedFieldExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeValues", String::class.java, Int::class.javaPrimitiveType)
+            .invoke(instance, "raw", 7)
+        val result = clazz.getMethod("readSelected").invoke(instance)
+
+        assertEquals("raw-inferred-field", result)
+    }
+
+    @Test
     fun modifyExpressionValueFieldMatchesNameOnlyTarget() {
         AsmRegistry.register(ModifyExpressionValueFieldNameOnlyMixin::class.java)
 
@@ -8357,6 +8377,18 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "$original-field"
     }
 
+    @AsmMixin("MixedFieldExpressionValueTarget")
+    object ModifyExpressionValueInferredFieldReadMixin {
+        @ModifyExpressionValue(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-inferred-field"
+    }
+
     @AsmMixin("FieldPointTarget")
     object ModifyExpressionValueFieldNameOnlyMixin {
         @ModifyExpressionValue(
@@ -14545,6 +14577,39 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.PUTFIELD, "FieldPointTarget", "name", "Ljava/lang/String;")
             visitInsn(Opcodes.RETURN)
             visitMaxs(2, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun mixedFieldExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedFieldExpressionValueTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "score", "I", null, null).visitEnd()
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readSelected", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "MixedFieldExpressionValueTarget", "score", "I")
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "MixedFieldExpressionValueTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "writeValues", "(Ljava/lang/String;I)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitFieldInsn(Opcodes.PUTFIELD, "MixedFieldExpressionValueTarget", "score", "I")
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "MixedFieldExpressionValueTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()
