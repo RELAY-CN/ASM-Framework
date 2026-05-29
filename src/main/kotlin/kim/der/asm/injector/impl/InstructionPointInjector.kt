@@ -32,7 +32,8 @@ import java.lang.reflect.Method
  * 普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
  * 边界缩小候选指令查找范围，也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
- * `index=N` 或 `var=N` 限制 JVM 局部变量槽位。对象创建指令点当前不使用 `slice` 或 `At.by`。
+ * `index=N` 或 `var=N` 限制 JVM 局部变量槽位；THROW 指定 `At.target` 时只匹配 `ATHROW` 前直接构造出的同类型异常。
+ * 对象创建指令点当前不使用 `slice` 或 `At.by`。
  * 由于 JVM verifier 不允许在未初始化对象仍位于栈顶时插入普通方法调用，[InjectionPoint.NEW] 不支持 [Shift.AFTER]。
  *
  * @param method ASM 方法

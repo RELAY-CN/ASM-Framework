@@ -41,7 +41,7 @@ package kim.der.asm.api.annotation
  * @param cancellable 是否声明该注入点允许取消；当前 HEAD 注入会据此允许 [CallbackInfo.cancel] 或
  * [CallbackInfo.setReturnValue] 触发提前返回分支
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
- * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF 时用于描述具体指令点；
+ * @param at 当 [target] 为 INVOKE/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/THROW 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
  * 或 `var=N` 按 JVM 局部变量槽位过滤
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
@@ -129,7 +129,7 @@ enum class InjectionPoint {
  * 调用点定位信息。
  *
  * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST] 与 [InjectionPoint.INSTANCEOF] 的匹配目标，
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF] 与 [InjectionPoint.THROW] 的匹配目标，
  * 并通过 [shift] 指定在匹配指令前/后插入 handler。普通 [AsmInject] 的
  * [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.THROW] 还可用 [by]
@@ -144,6 +144,7 @@ enum class InjectionPoint {
  *   当前实现会拒绝该配置。
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
+ * - 普通 THROW 目标可省略；指定时为异常类型 internal name 或 binary name，只匹配 `ATHROW` 前直接构造出的同类型异常。
  * - REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
  * - [Redirect] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取。
@@ -157,7 +158,7 @@ enum class InjectionPoint {
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
- * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型或 INSTANCEOF 类型签名
+ * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型或 THROW 直接构造异常类型签名
  * @param shift 注入偏移策略
  * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
