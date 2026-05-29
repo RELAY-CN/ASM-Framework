@@ -35,6 +35,8 @@ import java.lang.reflect.Modifier
  * 返回 `false` 时跳过原指令。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的 `void`
  * 普通调用或 `invokedynamic` 调用；构造器、非 `void` 调用和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
+ * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选
+ * 兼容的字段写入，且不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
  * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]

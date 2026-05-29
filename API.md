@@ -385,7 +385,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容条件包裹操作点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
-`FIELD_ASSIGN` 模式默认匹配 `PUTFIELD` / `PUTSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。实例字段写入 handler 先接收字段 owner，再接收待写入值；静态字段写入 handler 接收待写入值；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。
+`FIELD_ASSIGN` 模式默认匹配 `PUTFIELD` / `PUTSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。实例字段写入 handler 先接收字段 owner，再接收待写入值；静态字段写入 handler 接收待写入值；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。省略 `At.target` 时，框架会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容的字段写入，不兼容字段写入不计入 `ordinal` 或命中数。
 
 字段写入和数组元素写入同样可用 `slice.from` / `slice.to` 把候选写入限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
@@ -393,7 +393,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 `Int` 索引与待写入元素值，后续可继续接收目标方法参数前缀。返回 `true` 时执行原 `xASTORE`，返回 `false`
 时跳过该数组写入。当前实现匹配简单数组字段访问形态，即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
 
-`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，`void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入与数组元素写入均按实际条件包裹数量计数；省略 `INVOKE` 调用目标时，不兼容调用候选不计入数量；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
+`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，`void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入与数组元素写入均按实际条件包裹数量计数；省略 `INVOKE` 调用目标或 `FIELD_ASSIGN` 字段目标时，不兼容候选不计入数量；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 

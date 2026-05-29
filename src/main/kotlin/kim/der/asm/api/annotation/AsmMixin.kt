@@ -464,6 +464,8 @@ annotation class WrapMethod(
  * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * [InjectionPoint.FIELD_ASSIGN] 模式匹配
  * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
+ * 省略 [At.target] 时会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容的字段写入，
+ * 不兼容候选不计入 [ordinal] 或命中数。
  * 数组元素写入使用 [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定，
  * 当前匹配由最近的目标数组字段读取产生数组引用的 `xASTORE` 指令。
  * [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice] 把候选调用、字段写入或数组元素写入
@@ -480,7 +482,8 @@ annotation class WrapMethod(
  * - 数组元素写入的 handler 参数先接收数组引用、`Int` 索引，再接收待写入元素值
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
- * - [At.target] 可指定要匹配的方法调用、动态调用或字段签名；[InjectionPoint.INVOKE] 可省略 [At.target] 按 handler 签名筛选兼容 `void` 调用
+ * - [At.target] 可指定要匹配的方法调用、动态调用或字段签名；[InjectionPoint.INVOKE] 与
+ *   [InjectionPoint.FIELD_ASSIGN] 可省略 [At.target]，按 handler 签名筛选兼容候选
  * - [method] 为空时会按 handler 名称、条件包裹操作点和 handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
  * @param method 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
