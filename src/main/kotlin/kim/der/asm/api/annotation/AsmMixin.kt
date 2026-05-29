@@ -522,7 +522,7 @@ annotation class WrapWithCondition(
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
  * - 数组长度目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象
- * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象
+ * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象；省略 [At.target] 时按 handler 首参与返回类型筛选兼容 `CHECKCAST`
  * - [InjectionPoint.INSTANCEOF] 的 [At.target] 为类型 internal name 或 binary name；handler 接收 `Boolean` 判断结果
  * - [InjectionPoint.THROW] 不需要 [At.target]；handler 接收即将抛出的 `Throwable` 并返回新的 `Throwable` 或具体异常子类，后续参数仍可接收目标方法参数前缀
  * - [method] 为空时会按 handler 名称、表达式定位、表达式值类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
