@@ -212,7 +212,7 @@ annotation class Unique
  * - [require] / [allow] 可约束实际参数修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名；入口参数模式可省略并按 handler 名称推断唯一兼容目标，INVOKE 调用点模式建议显式声明目标方法
+ * @param method 目标方法签名；可省略并按 handler 名称、参数类型和实际兼容调用点推断唯一兼容目标
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，INVOKE 模式下为目标调用参数索引
  * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用、构造器调用或
  * `invokedynamic` 调用，为空则按 handler 签名推断兼容调用点；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
@@ -263,7 +263,7 @@ annotation class ModifyArg(
  * - [require] / [allow] 可约束实际参数组修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望参数组修改数量，不一致时只输出警告，不阻断转换
  *
- * @param method 目标方法签名；可省略并按 handler 名称、调用点和 handler 签名推断唯一兼容目标
+ * @param method 目标方法签名；可省略并按 handler 名称、调用点、handler 签名和实际兼容调用点推断唯一兼容目标
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，
  * [At.target] 为空时按兼容调用点推断
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
