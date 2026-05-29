@@ -271,7 +271,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 **参数：**
 
-- `method: String = ""` - 目标方法签名；可省略并按 handler 名称、receiver 操作点和 handler 签名推断唯一兼容目标
+- `method: String = ""` - 目标方法签名；可省略并按 handler 名称、receiver 操作点、handler 签名和实际兼容候选推断唯一兼容目标
 - `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前支持 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN`
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
 - `slice: Slice = Slice()` - 切片范围；当前 `INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式支持用 `INVOKE` 边界缩小查找范围
@@ -280,7 +280,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyReceiver` handler 的第一个参数必须接收原 receiver；对象或数组 receiver 可用原 receiver 类型的父类、接口、`Any` 或 `Object` 接收，并返回兼容的新 receiver。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 指定的实例调用或实例字段访问、receiver 类型、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回 receiver 类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例调用 receiver，静态调用、构造器调用和 handler 不兼容的实例调用不计入 `ordinal` 或命中数；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例字段读取 receiver，`GETSTATIC` 和 handler 不兼容的字段读取不计入 `ordinal` 或命中数；字段读取不会把字段值传给 handler。`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例字段写入 receiver，`PUTSTATIC` 和 handler 不兼容的字段写入不计入 `ordinal` 或命中数；字段写入会保留原待写入值并写入新的 receiver。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyReceiver` handler 的第一个参数必须接收原 receiver；对象或数组 receiver 可用原 receiver 类型的父类、接口、`Any` 或 `Object` 接收，并返回兼容的新 receiver。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 receiver 操作点、实际可兼容候选、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；`At.target` 为空的 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN` 同样会按候选兼容性参与方法推断。多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回 receiver 类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例调用 receiver，静态调用、构造器调用和 handler 不兼容的实例调用不计入 `ordinal` 或命中数；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例字段读取 receiver，`GETSTATIC` 和 handler 不兼容的字段读取不计入 `ordinal` 或命中数；字段读取不会把字段值传给 handler。`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例字段写入 receiver，`PUTSTATIC` 和 handler 不兼容的字段写入不计入 `ordinal` 或命中数；字段写入会保留原待写入值并写入新的 receiver。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `@ModifyReceiver` 会统计实际写入 receiver 修改逻辑的操作点数量。未设置 `ordinal` 时，`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 会按实际改写的 receiver 数量计数；省略 `INVOKE` 调用目标、`FIELD` 字段目标或 `FIELD_ASSIGN` 字段目标时，不兼容候选不计入数量；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。显式设置 `require` / `allow` / 非默认 `expect` 时按实际 receiver 修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
