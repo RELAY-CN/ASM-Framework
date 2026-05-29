@@ -280,9 +280,9 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否重映射
 
-`@ModifyReceiver` handler 的第一个参数必须接收原 receiver；对象或数组 receiver 可用原 receiver 类型的父类、接口、`Any` 或 `Object` 接收，并返回兼容的新 receiver。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 指定的实例调用或实例字段访问、receiver 类型、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回 receiver 类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyReceiver` handler 的第一个参数必须接收原 receiver；对象或数组 receiver 可用原 receiver 类型的父类、接口、`Any` 或 `Object` 接收，并返回兼容的新 receiver。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 指定的实例调用或实例字段访问、receiver 类型、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回 receiver 类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例调用 receiver，静态调用、构造器调用和 handler 不兼容的实例调用不计入 `ordinal` 或命中数；原调用参数会按原顺序恢复并继续传给目标调用。`FIELD` 模式只支持 `GETFIELD`，`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；字段读取不会把字段值传给 handler，字段写入会保留原待写入值并写入新的 receiver，静态字段没有 receiver，会在转换阶段失败。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
-`@ModifyReceiver` 会统计实际写入 receiver 修改逻辑的操作点数量。未设置 `ordinal` 时，`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 会按实际改写的 receiver 数量计数；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。显式设置 `require` / `allow` / 非默认 `expect` 时按实际 receiver 修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
+`@ModifyReceiver` 会统计实际写入 receiver 修改逻辑的操作点数量。未设置 `ordinal` 时，`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 会按实际改写的 receiver 数量计数；省略 `INVOKE` 调用目标时，不兼容调用候选不计入数量；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。显式设置 `require` / `allow` / 非默认 `expect` 时按实际 receiver 修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
