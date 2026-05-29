@@ -388,6 +388,7 @@ class ModifyExpressionValueInjector(
     }
 
     private fun injectThrow(target: MethodNode): Int {
+        val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
         var matchedOrdinal = 0
         val insns = target.instructions.toArray()
@@ -397,6 +398,9 @@ class ModifyExpressionValueInjector(
                 continue
             }
             if (insn.opcode != Opcodes.ATHROW) {
+                continue
+            }
+            if (normalizedTarget.isNotEmpty() && directThrownTypeInternalName(insn) != normalizedTarget) {
                 continue
             }
 
@@ -413,6 +417,17 @@ class ModifyExpressionValueInjector(
         }
 
         return injectionCount
+    }
+
+    private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
+        val previous = previousRealInstruction(throwInsn)
+        if (previous is MethodInsnNode &&
+            previous.opcode == Opcodes.INVOKESPECIAL &&
+            previous.name == "<init>"
+        ) {
+            return previous.owner
+        }
+        return null
     }
 
     private fun buildExpressionValueModification(
@@ -580,6 +595,14 @@ class ModifyExpressionValueInjector(
         }
 
         throw IllegalArgumentException("@ModifyExpressionValue cannot find constructor call for NEW ${newInsn.desc}")
+    }
+
+    private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.previous
+        while (current != null && current.opcode < 0) {
+            current = current.previous
+        }
+        return current
     }
 
     private fun loadTargetMethodParameters(
