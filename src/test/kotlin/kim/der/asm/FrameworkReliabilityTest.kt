@@ -1499,6 +1499,33 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAtFieldAssignInfersTargetInTestClassConstructor() {
+        AsmRegistry.register(WrapConditionInferredTestFieldAssignMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+                ),
+            )
+
+        val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("blocked")
+        val result = clazz.getMethod("testA0").invoke(instance)
+
+        assertEquals("DynamicString", result)
+    }
+
+    @Test
     fun wrapWithConditionAtFieldAssignAllowsPutFieldWhenTrue() {
         AsmRegistry.register(WrapConditionFieldAssignAllowMixin::class.java)
 
@@ -7941,6 +7968,24 @@ class FrameworkReliabilityTest {
             target.hashCode()
             value.length
             return false
+        }
+    }
+
+    @AsmMixin("Test")
+    object WrapConditionInferredTestFieldAssignMixin {
+        @WrapWithCondition(
+            method = "<init>(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN),
+            require = 2,
+            allow = 2,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            return value == "DynamicString"
         }
     }
 
