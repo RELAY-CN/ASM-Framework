@@ -2128,6 +2128,22 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueNewWithInferredTargetSkipsIncompatibleConstructions() {
+        AsmRegistry.register(ModifyExpressionValueNewInferredTargetMixin::class.java)
+
+        val transformed = AsmProcessor().transform(
+            "MixedNewExpressionValueTarget",
+            mixedNewExpressionValueTargetBytes(),
+            javaClass.classLoader,
+        )
+        val clazz = loadClass("MixedNewExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("changed", result)
+    }
+
+    @Test
     fun modifyExpressionValueNewOrdinalSelectsSingleConstruction() {
         AsmRegistry.register(ModifyExpressionValueNewOrdinalMixin::class.java)
 
@@ -8380,6 +8396,19 @@ class FrameworkReliabilityTest {
         ): StringBuilder {
             original.length
             return StringBuilder("$prefix-$count")
+        }
+    }
+
+    @AsmMixin("MixedNewExpressionValueTarget")
+    object ModifyExpressionValueNewInferredTargetMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.NEW),
+        )
+        @JvmStatic
+        fun modify(original: StringBuilder): StringBuilder {
+            original.length
+            return StringBuilder("changed")
         }
     }
 
@@ -14902,6 +14931,41 @@ class FrameworkReliabilityTest {
                 "java/lang/String",
                 "concat",
                 "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun mixedNewExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedNewExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuffer")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuffer", "<init>", "()V", false)
+            visitInsn(Opcodes.POP)
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("original")
+            visitMethodInsn(
+                Opcodes.INVOKESPECIAL,
+                "java/lang/StringBuilder",
+                "<init>",
+                "(Ljava/lang/String;)V",
+                false,
+            )
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "toString",
+                "()Ljava/lang/String;",
                 false,
             )
             visitInsn(Opcodes.ARETURN)
