@@ -1267,6 +1267,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAtInvokeInfersTargetByCompatibleVoidSignature() {
+        AsmRegistry.register(WrapConditionInferredInvokeTargetMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "MixedWrapConditionTarget",
+                mixedWrapConditionTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("MixedWrapConditionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        val result = clazz.getMethod("run").invoke(instance)
+
+        assertEquals(null, result)
+    }
+
+    @Test
     fun wrapWithConditionAcceptsAssignableParentCallParameter() {
         AsmRegistry.register(WrapConditionAssignableParentParameterMixin::class.java)
 
@@ -7551,6 +7569,16 @@ class FrameworkReliabilityTest {
         fun shouldRun(value: String): Boolean = value == "raw"
     }
 
+    @AsmMixin("MixedWrapConditionTarget")
+    object WrapConditionInferredInvokeTargetMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE),
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean = value != "raw"
+    }
+
     @AsmMixin("WrapConditionStaticTarget")
     object WrapConditionAssignableParentParameterMixin {
         @WrapWithCondition(
@@ -13432,6 +13460,60 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.PUTSTATIC, "WrapConditionStaticTarget", "last", "Ljava/lang/String;")
             visitInsn(Opcodes.RETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun mixedWrapConditionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "MixedWrapConditionTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "last", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "MixedWrapConditionTarget",
+                "builder",
+                "()Ljava/lang/StringBuilder;",
+                false,
+            )
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("raw")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "MixedWrapConditionTarget",
+                "record",
+                "(Ljava/lang/String;)V",
+                false,
+            )
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "MixedWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "builder", "()Ljava/lang/StringBuilder;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("ignored")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "record", "(Ljava/lang/String;)V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitFieldInsn(Opcodes.PUTFIELD, "MixedWrapConditionTarget", "last", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 2)
             visitEnd()
         }
         cw.visitEnd()
