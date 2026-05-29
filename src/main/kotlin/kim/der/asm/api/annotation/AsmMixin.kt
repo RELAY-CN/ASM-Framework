@@ -297,6 +297,8 @@ annotation class ModifyArgs(
  * - 返回类型对基础类型仍需精确匹配；对象或数组类型可返回可赋值给原 receiver 类型的子类型，`Any` / `Object` 也可作为泛型引用返回类型
  * - 后续参数可按顺序接收目标方法参数前缀
  * - [At.value] 为 [InjectionPoint.INVOKE] 时，可通过 [At.target] 指定要匹配的实例方法调用；省略时按 handler 首参与返回类型筛选兼容 receiver
+ * - [At.value] 为 [InjectionPoint.FIELD] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段读取 receiver；
+ *   静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数
  * - [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice]
  *   把候选 receiver 改写限制在一段 INVOKE 边界之间，边界指令本身不参与匹配
  * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
