@@ -451,6 +451,8 @@ annotation class WrapMethod(
  * 相比 [Redirect]，该注解不替换原逻辑，只决定原指令是否继续执行，更适合“按条件跳过副作用调用或写入”的场景。
  *
  * [InjectionPoint.INVOKE] 模式要求目标普通调用或 `invokedynamic` 调用返回类型必须为 `void`。
+ * 省略 [At.target] 时会按 handler 参数和 boolean 返回类型筛选兼容的 `void` 普通调用或 `invokedynamic` 调用；
+ * 构造器、非 `void` 调用和 handler 不兼容的调用不会计入 [ordinal] 或命中数。
  * 构造器 `<init>` 不能作为条件包裹目标；跳过构造器会留下未初始化对象并生成不可验证字节码，转换阶段会失败。
  * 如需控制构造过程，应使用 [Redirect] 或 [WrapOperation]。
  * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
@@ -472,7 +474,7 @@ annotation class WrapMethod(
  * - 数组元素写入的 handler 参数先接收数组引用、`Int` 索引，再接收待写入元素值
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
- * - [At.target] 必须指定要匹配的方法调用、动态调用或字段签名
+ * - [At.target] 可指定要匹配的方法调用、动态调用或字段签名；[InjectionPoint.INVOKE] 可省略 [At.target] 按 handler 签名筛选兼容 `void` 调用
  * - [method] 为空时会按 handler 名称、条件包裹操作点和 handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
  * @param method 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
