@@ -32,6 +32,8 @@ import java.lang.reflect.Modifier
  * 静态调用、构造器调用和 handler 不兼容的实例调用不会计入 [ModifyReceiver.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 首参与返回类型筛选兼容的实例字段读取 receiver；
  * 静态字段和 handler 不兼容的字段读取不会计入 [ModifyReceiver.ordinal] 或命中数。
+ * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 首参与返回类型筛选兼容的实例字段写入 receiver；
+ * 静态字段和 handler 不兼容的字段写入不会计入 [ModifyReceiver.ordinal] 或命中数。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
