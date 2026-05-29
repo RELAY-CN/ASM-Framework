@@ -106,6 +106,7 @@ class InstructionPointInjector(
             point == InjectionPoint.STORE ||
             point == InjectionPoint.FIELD ||
             point == InjectionPoint.FIELD_ASSIGN ||
+            point == InjectionPoint.NEW ||
             point == InjectionPoint.CAST ||
             point == InjectionPoint.INSTANCEOF ||
             point == InjectionPoint.THROW
