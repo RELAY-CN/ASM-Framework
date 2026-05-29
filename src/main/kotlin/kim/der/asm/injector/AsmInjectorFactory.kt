@@ -51,6 +51,9 @@ object AsmInjectorFactory {
             InjectionPoint.STORE,
             InjectionPoint.THROW,
             -> InstructionPointInjector(method, asmInfo, injectionPoint)
+            InjectionPoint.CONSTANT -> throw IllegalArgumentException(
+                "InjectionPoint.CONSTANT is only supported by expression or constant modification annotations",
+            )
         }
 
     /**
