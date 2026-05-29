@@ -723,7 +723,8 @@ receiver（仅实例调用）和调用参数，字段写入模式下 handler 先
 改写表达式结果的场景，handler 第一个参数接收匹配普通调用或 `invokedynamic` 调用返回值、字段读取值、数组元素读取值、数组长度值、已初始化对象、转换后的对象、`INSTANCEOF` 判断结果或即将抛出的 `Throwable` 并
 返回同类型新值，后续参数可接收目标方法参数前缀；primitive 表达式的返回类型必须与表达式类型一致，引用类型表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类；对象或数组表达式的首参可声明为原值类型的父类、接口、`Any` 或 `Object`，
 它不会接收原调用参数、`GETFIELD` receiver、数组引用或
-数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，省略类型目标时按 handler 首参与返回类型筛选兼容 `CHECKCAST`，数组读取模式通过 `args = ["array=get"]`
+数组索引，`NEW` 模式会在对应 `<init>` 完成后改写对象表达式，省略类型目标时按 handler 首参与返回类型筛选兼容 `NEW`；
+`CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，省略类型目标时按 handler 首参与返回类型筛选兼容 `CHECKCAST`；不兼容的 `NEW` / `CHECKCAST` 候选不计入 `ordinal` 或命中数。数组读取模式通过 `args = ["array=get"]`
 指定，数组长度模式通过 `args = ["array=length"]` 指定并接收 `Int` 长度，`INSTANCEOF` 模式接收 `Boolean` 判断结果，`THROW` 模式接收即将抛出的 `Throwable`，且后续参数仍可接收目标方法参数前缀。
 `invokedynamic` 调用目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配；字符串拼接可匹配
 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(...)`。
