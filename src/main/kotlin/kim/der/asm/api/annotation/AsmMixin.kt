@@ -529,14 +529,14 @@ annotation class WrapWithCondition(
  *
  * 用于修改目标方法内某个表达式产生的值（语义参考 Mixin Extras 的 `@ModifyExpressionValue`）。
  * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]，可修改匹配普通方法调用或
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]，可修改匹配普通方法调用或
  * `invokedynamic` 调用完成后的非 `void` 返回值、字段读取值、数组元素读取值、数组长度值、对象构造完成后的实例、
- * `CHECKCAST` 完成后的类型转换结果、`INSTANCEOF` 判断后的 boolean 结果或常量表达式值，也可在 `ATHROW` 前改写即将抛出的异常对象。
- * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断或抛异常指令，只在表达式产生值后
+ * `CHECKCAST` 完成后的类型转换结果、`INSTANCEOF` 判断后的 boolean 结果、条件跳转的分支结果或常量表达式值，也可在 `ATHROW` 前改写即将抛出的异常对象。
+ * 相比 [Redirect]，该注解不替换原调用、字段读取、数组读取、构造器调用、类型转换、类型判断、条件跳转或抛异常指令，只在表达式产生值后
  * 把原值交给 handler 改写。
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、[InjectionPoint.FIELD] 字段读取、
  * 数组元素读取、数组长度、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式可使用 [slice] 把候选点限制在
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式可使用 [slice] 把候选点限制在
  * 一段 INVOKE 边界内，边界指令本身不参与匹配。
  *
  * ASM 方法要求：
@@ -554,6 +554,7 @@ annotation class WrapWithCondition(
  * - [InjectionPoint.CONSTANT] 的 [At.target] 为常量文本；省略时按 handler 首参与返回类型筛选兼容常量表达式，不兼容候选不计入 [ordinal] 或命中数
  * - 未指定调用、字段读取、[InjectionPoint.NEW]、[InjectionPoint.CAST] 或 [InjectionPoint.CONSTANT] 目标时，不兼容候选不计入 [ordinal] 或命中数
  * - [InjectionPoint.INSTANCEOF] 的 [At.target] 为类型 internal name 或 binary name；handler 接收 `Boolean` 判断结果
+ * - [InjectionPoint.JUMP] 的 [At.target] 为条件跳转操作码名或数字；handler 接收原始分支结果 `Boolean`，返回新的分支结果；`GOTO` 与 `JSR` 不支持表达式改写
  * - [InjectionPoint.THROW] 的 [At.target] 可省略；handler 接收即将抛出的 `Throwable` 并返回新的 `Throwable` 或具体异常子类，后续参数仍可接收目标方法参数前缀；指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常
  * - [method] 为空时会按 handler 名称、表达式定位、表达式值类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际表达式值修改数量，目标字节码漂移时会在转换阶段失败
@@ -561,11 +562,11 @@ annotation class WrapWithCondition(
  *
  * @param method 目标方法签名；为空时按 handler 名称、表达式定位和签名兼容规则推断唯一同名目标方法
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配表达式序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]
  * 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际表达式值修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
