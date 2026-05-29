@@ -2552,6 +2552,46 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapOperationAtThrowCanReplaceThrowableAndCallOriginalOperation() {
+        AsmRegistry.register(WrapOperationThrowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ThrowPointTarget", throwPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("fail").invoke(instance)
+            }
+
+        assertEquals(true, exception.cause is IllegalArgumentException)
+        assertEquals("wrapped-failed", exception.cause?.message)
+    }
+
+    @Test
+    fun wrapOperationThrowTargetFiltersDirectlyConstructedThrowable() {
+        AsmRegistry.register(WrapOperationTargetedThrowMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("TargetedThrowPointTarget", targetedThrowPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("TargetedThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("fail", Boolean::class.javaPrimitiveType)
+        val selectedException =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                method.invoke(instance, true)
+            }
+        val skippedException =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                method.invoke(instance, false)
+            }
+
+        assertEquals(true, selectedException.cause is IllegalArgumentException)
+        assertEquals("wrapped-state", selectedException.cause?.message)
+        assertEquals(true, skippedException.cause is UnsupportedOperationException)
+        assertEquals("unsupported", skippedException.cause?.message)
+    }
+
+    @Test
     fun modifyExpressionValueThrowSliceLimitsThrowsAfterFrom() {
         AsmRegistry.register(ModifyExpressionValueThrowSliceMixin::class.java)
 
@@ -13175,6 +13215,39 @@ class FrameworkReliabilityTest {
             prefix: String,
             count: Int,
         ): Throwable = IllegalArgumentException("$prefix-$count-${original.message}")
+    }
+
+    @AsmMixin("ThrowPointTarget")
+    object WrapOperationThrowMixin {
+        @WrapOperation(
+            method = "fail()V",
+            at = At(value = InjectionPoint.THROW),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: Throwable,
+            operation: Operation<Throwable>,
+        ): Throwable {
+            val thrown = operation.call(original)
+            return IllegalArgumentException("wrapped-${thrown.message}")
+        }
+    }
+
+    @AsmMixin("TargetedThrowPointTarget")
+    object WrapOperationTargetedThrowMixin {
+        @WrapOperation(
+            method = "fail(Z)V",
+            at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: Throwable,
+            operation: Operation<Throwable>,
+        ): Throwable = IllegalArgumentException("wrapped-${operation.call(original).message}")
     }
 
     @AsmMixin("SliceThrowInstructionTarget")

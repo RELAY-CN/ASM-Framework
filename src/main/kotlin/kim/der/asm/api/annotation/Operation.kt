@@ -17,12 +17,13 @@ import java.lang.reflect.Array as ReflectArray
  * 原始调用操作句柄。
  *
  * [WrapOperation] 与 [WrapMethod] handler 会接收该对象，用于按需执行被包裹的原始方法调用、构造器调用、
- * `invokedynamic` 调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、常量读取或整方法原始实现。
+ * `invokedynamic` 调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、常量读取、即将抛出的异常或整方法原始实现。
  * 实例方法调用与 `GETFIELD` 读取需要把 receiver 作为第一个参数传给 [call]，后续参数按原方法描述符顺序
  * 传入；`PUTFIELD` 写入需要传入 receiver 与新字段值。静态方法调用和 `invokedynamic` 调用只传入原调用参数，
  * `GETSTATIC` 读取不传入参数，`PUTSTATIC` 写入只传入新字段值。数组读取需要传入数组实例与索引，数组写入需要传入
  * 数组实例、索引与新元素值，数组长度读取只需传入数组实例。类型转换与类型判断只需传入待处理值。
- * 常量读取不传入参数，返回原始常量值。构造器调用只传入构造器参数，不传入未初始化 receiver。
+ * 常量读取不传入参数，返回原始常量值；抛异常操作传入即将抛出的 [Throwable]，返回同一个异常对象。
+ * 构造器调用只传入构造器参数，不传入未初始化 receiver。
  * [WrapMethod] 包裹实例目标方法时 receiver 已绑定到 [Operation]，此时 [call] 只传目标方法参数，不额外传 `this`。
  *
  * 该对象当前通过反射执行原始操作，适合普通可反射访问的方法、构造器和字段。若目标方法或构造器内部抛出异常，
@@ -229,13 +230,14 @@ class Operation<T> private constructor(
     )
 
     /**
-     * 创建类型检查操作句柄。
+     * 创建标记操作句柄。
      *
      * [marker] 为 `"<checkcast>"` 时，[call] 返回通过原始 `CHECKCAST` 目标类型校验后的值；
      * [marker] 为 `"<instanceof>"` 时，[call] 返回原始 `INSTANCEOF` 类型判断结果。
+     * [marker] 为 `"<throw>"` 时，[call] 返回传入的原始 [Throwable]。
      *
-     * @param targetClass 原类型检查目标类
-     * @param marker 类型检查标记；当前支持 `"<checkcast>"` 与 `"<instanceof>"`
+     * @param targetClass 原操作目标类
+     * @param marker 操作标记；当前支持 `"<checkcast>"`、`"<instanceof>"` 与 `"<throw>"`
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
@@ -283,7 +285,8 @@ class Operation<T> private constructor(
      * 读取的 [args] 必须为空，`PUTSTATIC` 写入的 [args] 必须只包含新字段值。构造器调用的 [args] 只包含
      * 构造器参数。数组读取的 [args] 必须依次包含数组实例与 `Int` 索引，数组写入的 [args] 必须依次包含
      * 数组实例、`Int` 索引与新元素值，数组长度读取的 [args] 必须只包含数组实例。类型转换与类型判断的
-     * [args] 必须只包含待处理值。常量读取的 [args] 必须为空。返回值类型由调用方的 handler 签名决定。
+     * [args] 必须只包含待处理值。常量读取的 [args] 必须为空。抛异常操作的 [args] 必须只包含即将抛出的 [Throwable]。
+     * 返回值类型由调用方的 handler 签名决定。
      *
      * @param args 原始操作参数；普通实例操作需包含 receiver，已绑定 receiver 的整方法包裹只传目标方法参数
      * @return 原始操作返回值
@@ -314,6 +317,9 @@ class Operation<T> private constructor(
         }
         if (kind == OperationKind.INSTANCEOF) {
             return instanceOf(args) as T
+        }
+        if (kind == OperationKind.THROW) {
+            return passThrowable(args) as T
         }
         if (kind == OperationKind.CONSTRUCTOR_CALL) {
             return construct(args) as T
@@ -445,6 +451,15 @@ class Operation<T> private constructor(
         return ownerClass.isInstance(args[0])
     }
 
+    private fun passThrowable(args: Array<out Any?>): Throwable {
+        require(args.size == 1) {
+            "Operation throw $desc expects 1 argument(s), actual ${args.size}"
+        }
+
+        return args[0] as? Throwable
+            ?: throw IllegalArgumentException("Operation throw $desc requires Throwable argument")
+    }
+
     private fun construct(args: Array<out Any?>): Any {
         require(args.size == parameterTypes.size) {
             "Operation ${ownerClass.name}$desc expects ${parameterTypes.size} argument(s), actual ${args.size}"
@@ -494,6 +509,7 @@ class Operation<T> private constructor(
         ARRAY_LENGTH,
         CAST,
         INSTANCEOF,
+        THROW,
         INVOKE_DYNAMIC,
         CONSTANT,
     }
@@ -503,6 +519,7 @@ class Operation<T> private constructor(
             when (marker) {
                 "<checkcast>" -> OperationKind.CAST
                 "<instanceof>" -> OperationKind.INSTANCEOF
+                "<throw>" -> OperationKind.THROW
                 else -> throw IllegalArgumentException("Unsupported Operation marker: $marker")
             }
     }
