@@ -6115,6 +6115,36 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun throwInjectTargetFiltersDirectlyConstructedThrowable() {
+        AsmRegistry.register(ThrowInstructionTargetedMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("TargetedThrowPointTarget", targetedThrowPointTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "fail" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(ThrowInstructionTargetedMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val throwIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn.opcode == Opcodes.ATHROW) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(true, throwIndexes.size >= 2)
+        assertEquals(throwIndexes.first() - 1, handlerCallIndexes.single())
+    }
+
+    @Test
     fun asmInjectThrowSliceLimitsThrowsAfterFrom() {
         AsmRegistry.register(ThrowInstructionSliceMixin::class.java)
 
@@ -11886,6 +11916,20 @@ class FrameworkReliabilityTest {
     @AsmMixin("ThrowPointTarget")
     object ThrowInstructionInjectMixin {
         @AsmInject(method = "fail()V", target = InjectionPoint.THROW)
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("TargetedThrowPointTarget")
+    object ThrowInstructionTargetedMixin {
+        @AsmInject(
+            method = "fail(Z)V",
+            target = InjectionPoint.THROW,
+            at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+            require = 1,
+            allow = 1,
+        )
         @JvmStatic
         fun inject() {
         }
