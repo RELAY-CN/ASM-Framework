@@ -6110,6 +6110,34 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtJumpReplacesBranchDecision() {
+        AsmRegistry.register(JumpRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("JumpOperationTarget", jumpOperationTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("JumpOperationTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("positive", method.invoke(instance, 5, false))
+        assertEquals("positive", method.invoke(instance, -1, false))
+        assertEquals("negative", method.invoke(instance, 5, true))
+    }
+
+    @Test
+    fun redirectAtJumpSupportsKotlinObjectHandler() {
+        AsmRegistry.register(ObjectInstanceJumpRedirectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("JumpOperationTarget", jumpOperationTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("JumpOperationTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("negative", method.invoke(instance, 5, false))
+        assertEquals("positive", method.invoke(instance, -1, false))
+        assertEquals("negative", method.invoke(instance, 5, true))
+    }
+
+    @Test
     fun redirectFieldReadReplacesGetFieldValue() {
         AsmRegistry.register(FieldReadRedirectMixin::class.java)
 
@@ -9614,6 +9642,41 @@ class FrameworkReliabilityTest {
             raw.hashCode()
             return value is StringBuilder
         }
+    }
+
+    @AsmMixin("JumpOperationTarget")
+    object JumpRedirectMixin {
+        @Redirect(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP, target = "IFLE"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            original: Boolean,
+            value: Int,
+            forceNegative: Boolean,
+        ): Boolean {
+            original.hashCode()
+            value.hashCode()
+            return forceNegative
+        }
+    }
+
+    @AsmMixin("JumpOperationTarget")
+    object ObjectInstanceJumpRedirectMixin {
+        @Redirect(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP, target = "IFLE"),
+            require = 1,
+            allow = 1,
+        )
+        fun redirect(
+            original: Boolean,
+            value: Int,
+            forceNegative: Boolean,
+        ): Boolean = (!original && value > 0) || forceNegative
     }
 
     @AsmMixin("InstanceofTarget")
