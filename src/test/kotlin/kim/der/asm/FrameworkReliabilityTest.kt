@@ -6035,6 +6035,50 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun newInjectSliceLimitsConstructionsAfterFrom() {
+        AsmRegistry.register(NewInstructionSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiNewTarget", multiNewTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "value" }
+        val instructions = method.instructions.toArray()
+        val mixinOwner = org.objectweb.asm.Type.getInternalName(NewInstructionSliceMixin::class.java)
+        val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                index
+            } else {
+                null
+            }
+        }
+        val boundaryIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode &&
+                insn.owner == "java/lang/String" &&
+                insn.name == "concat"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+        val newIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.TypeInsnNode &&
+                insn.opcode == Opcodes.NEW &&
+                insn.desc == "java/lang/StringBuilder"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+
+        assertEquals(1, handlerCallIndexes.size)
+        assertEquals(true, boundaryIndexes.isNotEmpty())
+        val inSliceNewIndexes = newIndexes.filter { it > boundaryIndexes.first() }
+        assertEquals(1, inSliceNewIndexes.size)
+        assertEquals(inSliceNewIndexes.single() - 1, handlerCallIndexes.single())
+    }
+
+    @Test
     fun castInjectInsertsHandlerBeforeMatchedCheckcastInstruction() {
         AsmRegistry.register(CastInstructionInjectMixin::class.java)
 
@@ -11850,6 +11894,23 @@ class FrameworkReliabilityTest {
             method = "create()Ljava/lang/StringBuilder;",
             target = InjectionPoint.NEW,
             at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("MultiNewTarget")
+    object NewInstructionSliceMixin {
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.NEW,
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun inject() {
