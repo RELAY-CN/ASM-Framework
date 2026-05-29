@@ -1625,7 +1625,7 @@ class TargetClassContext(
         val compatibleTargets =
             classNode.methods.filter { candidate ->
                 candidate.name == method.name &&
-                    isModifyArgEntryTargetCompatible(method, annotation, candidate)
+                    isModifyArgTargetCompatible(method, annotation, candidate)
             }
 
         if (compatibleTargets.isEmpty()) {
@@ -1643,16 +1643,23 @@ class TargetClassContext(
         return targetMethod to "${targetMethod.name}${targetMethod.desc}"
     }
 
+    private fun isModifyArgTargetCompatible(
+        handlerMethod: Method,
+        annotation: ModifyArg,
+        targetMethod: MethodNode,
+    ): Boolean =
+        if (annotation.at.value == InjectionPoint.INVOKE) {
+            hasCompatibleModifyArgInvokeCandidate(handlerMethod, annotation, targetMethod)
+        } else {
+            isModifyArgEntryTargetCompatible(handlerMethod, annotation, targetMethod)
+        }
+
     private fun isModifyArgEntryTargetCompatible(
         handlerMethod: Method,
         annotation: ModifyArg,
         targetMethod: MethodNode,
     ): Boolean =
         runCatching {
-            require(annotation.at.value != InjectionPoint.INVOKE) {
-                "@ModifyArg method inference currently supports only method-entry parameter mode"
-            }
-
             val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
             require(annotation.index >= 0 && annotation.index < targetParamTypes.size) {
                 "Invalid @ModifyArg index ${annotation.index} for ${targetMethod.name}${targetMethod.desc}"
@@ -1661,6 +1668,23 @@ class TargetClassContext(
             val targetParamType = targetParamTypes[annotation.index]
             validateModifyArgEntryHandlerSignature(handlerMethod, targetMethod, targetParamType)
         }.isSuccess
+
+    private fun hasCompatibleModifyArgInvokeCandidate(
+        handlerMethod: Method,
+        annotation: ModifyArg,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val injector = AsmInjectorFactory.createModifyArgInjector(
+                handlerMethod,
+                asmInfo,
+                annotation.index,
+                annotation.at,
+                annotation.ordinal,
+                annotation.slice,
+            )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     private fun validateModifyArgEntryHandlerSignature(
         handlerMethod: Method,
@@ -1822,7 +1846,7 @@ class TargetClassContext(
                 "@ModifyArgs currently supports only INVOKE injection point"
             }
             validateModifyArgsHandlerSignature(handlerMethod, targetMethod)
-            require(hasModifyArgsCallSite(targetMethod, annotation)) {
+            require(hasCompatibleModifyArgsCandidate(handlerMethod, annotation, targetMethod)) {
                 "@ModifyArgs target ${targetMethod.name}${targetMethod.desc} has no matching call site"
             }
         }.isSuccess
@@ -1865,6 +1889,22 @@ class TargetClassContext(
             }
         }
     }
+
+    private fun hasCompatibleModifyArgsCandidate(
+        handlerMethod: Method,
+        annotation: ModifyArgs,
+        targetMethod: MethodNode,
+    ): Boolean =
+        runCatching {
+            val injector = AsmInjectorFactory.createModifyArgsInjector(
+                handlerMethod,
+                asmInfo,
+                annotation.at,
+                annotation.ordinal,
+                annotation.slice,
+            )
+            injector.injectCount(cloneTargetMethod(targetMethod)) > 0
+        }.getOrDefault(false)
 
     private fun hasModifyArgsCallSite(
         targetMethod: MethodNode,
