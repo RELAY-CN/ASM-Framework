@@ -176,8 +176,9 @@ class ModifyExpressionValueInjector(
     }
 
     private fun injectFieldRead(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
+        if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target field signature")
         }
 
@@ -189,7 +190,16 @@ class ModifyExpressionValueInjector(
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
-            if (insn !is FieldInsnNode || insn.opcode !in FIELD_READ_OPS || !matchesTargetField(insn, fieldTarget)) {
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_READ_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
+                continue
+            }
+
+            val fieldType = Type.getType(insn.desc)
+            if (inferTarget && !isHandlerCompatible(fieldType, allowThrowableSubtypeReturn = false)) {
                 continue
             }
 
@@ -198,7 +208,6 @@ class ModifyExpressionValueInjector(
                 continue
             }
 
-            val fieldType = Type.getType(insn.desc)
             val targetParamCount = validateHandlerSignature(target, fieldType)
             val il = buildExpressionValueModification(target, fieldType, targetParamCount)
             target.instructions.insert(insn, il)
