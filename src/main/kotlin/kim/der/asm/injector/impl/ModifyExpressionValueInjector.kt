@@ -319,12 +319,16 @@ class ModifyExpressionValueInjector(
                 continue
             }
 
+            val expressionType = Type.getObjectType(insn.desc)
+            if (normalizedTarget.isEmpty() && !isCastHandlerCompatible(expressionType)) {
+                continue
+            }
+
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {
                 continue
             }
 
-            val expressionType = Type.getObjectType(insn.desc)
             val targetParamCount = validateHandlerSignature(target, expressionType)
             val il = buildExpressionValueModification(target, expressionType, targetParamCount)
             target.instructions.insert(insn, il)
@@ -332,6 +336,14 @@ class ModifyExpressionValueInjector(
         }
 
         return injectionCount
+    }
+
+    private fun isCastHandlerCompatible(expressionType: Type): Boolean {
+        val asmParamTypes = Type.getArgumentTypes(asmMethod)
+        if (asmParamTypes.isEmpty() || !isHandlerParameterCompatible(expressionType, asmParamTypes[0])) {
+            return false
+        }
+        return isHandlerReturnCompatible(expressionType, Type.getReturnType(asmMethod), allowThrowableSubtypeReturn = false)
     }
 
     private fun injectInstanceof(target: MethodNode): Int {
