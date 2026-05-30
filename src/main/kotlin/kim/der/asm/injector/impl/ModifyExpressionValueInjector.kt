@@ -136,6 +136,14 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 解析数组表达式访问模式。
+     *
+     * 未声明 `array=` 参数时按普通字段表达式处理；声明后只接受 `get`、`length` 或 `set`。
+     *
+     * @return 当前定位点对应的数组访问模式
+     * @throws IllegalArgumentException 声明了不支持的数组访问模式时抛出
+     */
     private fun arrayAccessMode(): ArrayAccessMode {
         val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return ArrayAccessMode.NONE
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
@@ -146,6 +154,16 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 改写普通方法调用或 `invokedynamic` 调用产生的返回值。
+     *
+     * 显式声明目标时按 owner、名称与描述符匹配；未声明目标时按 handler 首参与返回类型筛选所有非 `void` 调用返回。
+     * 注入逻辑插入在调用指令之后，使 handler 接收原返回值并将新值留在栈顶。
+     *
+     * @param target 目标方法
+     * @return 实际改写的调用返回值数量
+     * @throws IllegalArgumentException 目标签名不完整、匹配到 `void` 调用或 handler 签名不兼容时抛出
+     */
     private fun injectMethodCallReturn(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
@@ -208,6 +226,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写字段读取表达式产生的字段值。
+     *
+     * 显式声明字段目标时按字段 owner、名称与描述符匹配；未声明目标时按 handler 类型筛选兼容字段读取。
+     * 注入逻辑插入在 `GETFIELD` 或 `GETSTATIC` 之后，替换已压入栈顶的字段值。
+     *
+     * @param target 目标方法
+     * @return 实际改写的字段读取值数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -250,6 +278,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写字段写入指令即将消费的待写入值。
+     *
+     * 显式声明字段目标时按字段 owner、名称与描述符匹配；未声明目标时按 handler 类型筛选兼容字段写入。
+     * 注入逻辑插入在 `PUTFIELD` 或 `PUTSTATIC` 之前，让原字段写入继续消费 handler 返回的新值。
+     *
+     * @param target 目标方法
+     * @return 实际改写的字段写入值数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -292,6 +330,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写数组元素读取表达式产生的元素值。
+     *
+     * 该模式通过 `array=get` 启用，并要求 `at.target` 指向数组字段。
+     * 方法会从数组读取指令向前追踪数组字段来源，只改写来源字段匹配的元素读取结果。
+     *
+     * @param target 目标方法
+     * @return 实际改写的数组元素读取值数量
+     * @throws IllegalArgumentException 数组字段目标缺失或目标描述符不是数组类型时抛出
+     */
     private fun injectArrayRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
@@ -329,6 +377,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写数组长度表达式产生的 `Int` 值。
+     *
+     * 该模式通过 `array=length` 启用，并要求 `at.target` 指向数组字段。
+     * 方法会从 `ARRAYLENGTH` 向前追踪数组字段来源，只改写来源字段匹配的长度结果。
+     *
+     * @param target 目标方法
+     * @return 实际改写的数组长度表达式数量
+     * @throws IllegalArgumentException 数组字段目标缺失或目标描述符不是数组类型时抛出
+     */
     private fun injectArrayLength(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
@@ -365,6 +423,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写数组元素写入指令即将消费的待写入值。
+     *
+     * 该模式通过 `array=set` 启用，并要求 `at.target` 指向数组字段。
+     * 注入逻辑插入在数组写入指令之前，让原写入指令继续消费 handler 返回的新元素值。
+     *
+     * @param target 目标方法
+     * @return 实际改写的数组元素写入值数量
+     * @throws IllegalArgumentException 数组字段目标缺失或目标描述符不是数组类型时抛出
+     */
     private fun injectArrayWrite(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
@@ -402,6 +470,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写对象构造表达式完成后的实例值。
+     *
+     * 显式声明类型目标时只匹配该类型的 `NEW`；未声明目标时按 handler 类型筛选兼容构造结果。
+     * 注入逻辑插入在对应构造器调用之后，替换构造完成后留在栈顶的实例。
+     *
+     * @param target 目标方法
+     * @return 实际改写的新对象表达式数量
+     * @throws IllegalArgumentException 找不到 `NEW` 对应的构造器调用或 handler 签名不兼容时抛出
+     */
     private fun injectNewObject(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
@@ -439,6 +517,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写 `CHECKCAST` 表达式完成后的引用值。
+     *
+     * 显式声明类型目标时只匹配该 cast 类型；未声明目标时按 handler 类型筛选兼容 cast 结果。
+     * 注入逻辑插入在 `CHECKCAST` 之后，替换转换完成后留在栈顶的引用。
+     *
+     * @param target 目标方法
+     * @return 实际改写的类型转换表达式数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectCast(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
