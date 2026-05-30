@@ -84,4 +84,4 @@ Mixin，按照预定义的顺序应用各种转换规则，最终生成转换后
 
 ## 许可证
 
-Copyright 2020-2024 Dr (dr@der.kim) and contributors.
+Copyright 2020-2025 Dr (dr@der.kim) and contributors.
