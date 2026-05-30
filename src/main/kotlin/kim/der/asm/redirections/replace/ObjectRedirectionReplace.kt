@@ -12,10 +12,34 @@ import java.lang.reflect.Proxy
 import java.util.*
 import java.lang.reflect.Array as ReflectArray
 
+/**
+ * 对象类型默认替换器。
+ *
+ * 该替换器用于为未显式指定替换逻辑的引用类型调用点生成兜底返回值：
+ *
+ * - 接口类型返回动态代理，并把代理方法继续委托给 [manager]
+ * - 数组类型返回对应维度的空数组
+ * - 抽象类无法直接构造时返回 `null`
+ * - 普通类优先调用无参构造函数，缺失时尝试使用第一个构造函数和基础类型默认值构造实例
+ *
+ * @param manager 代理方法与嵌套重定向调用使用的替换管理器
+ *
+ * @author Dr (dr@der.kim)
+ * @date 2025-11-24
+ */
 @Suppress("UNUSED")
 class ObjectRedirectionReplace(
     private val manager: RedirectionReplaceManager,
 ) : RedirectionReplace {
+    /**
+     * 生成目标引用类型的默认返回值。
+     *
+     * @param obj 原始调用所属对象；当前实现不使用该参数
+     * @param desc 调用点描述符，仅用于诊断输出
+     * @param type 目标返回类型
+     * @param args 原调用参数；当前实现不使用该参数
+     * @return 目标类型的兜底对象；无法构造时返回 `null`
+     */
     override operator fun invoke(
         obj: Any,
         desc: String,
