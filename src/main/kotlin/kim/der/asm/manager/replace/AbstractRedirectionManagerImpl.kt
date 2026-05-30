@@ -66,10 +66,10 @@ abstract class AbstractRedirectionManagerImpl : RedirectionReplaceManager {
         type: Class<*>,
     ): RedirectionReplace =
         if (desc.startsWith(RedirectionReplace.CAST_PREFIX)) {
-            // TODO: 当前 cast 重定向 desc 形如：
+            // 当前 cast 重定向 desc 形如：
             //  <cast> java/lang/String
             //  <init> <cast> java/lang/String
-            //  该格式不包含调用方类信息，后续如需做精细化策略需要补齐上下文。
+            //  该格式不包含调用方类信息；如需做精细化策略，需要先扩展描述符上下文。
             cast
         } else {
             BasicDataRedirections.fallback(type, objectRedirectionListener)
