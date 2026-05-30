@@ -454,6 +454,16 @@ class ModifyConstantInjector(
         return BytecodeUtil.getConstantType(insn)
     }
 
+    /**
+     * 判断 handler 返回类型是否可替换原常量类型。
+     *
+     * 基础类型必须精确匹配且不能为 `void`。引用类型允许 handler 返回常量类型的子类型，
+     * 也允许声明为 `Any` / `Object`，后续会通过 `CHECKCAST` 恢复替换值的栈类型。
+     *
+     * @param constantType 原始常量类型
+     * @param handlerReturnType handler 返回类型
+     * @return handler 返回值可作为该常量替换值时返回 `true`
+     */
     private fun isHandlerReturnCompatible(
         constantType: Type,
         handlerReturnType: Type,
@@ -478,8 +488,24 @@ class ModifyConstantInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否属于对象或数组引用类型。
+     *
+     * @return 当前类型为对象或数组时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 解析 handler 返回值在后续字节码中应表现出的替换类型。
+     *
+     * `ACONST_NULL` 没有自身引用类型，优先使用 handler 首参类型作为后续栈类型；
+     * 原常量类型为泛化 `Object` 时使用 handler 返回类型，否则保持原常量类型。
+     *
+     * @param insn 原始常量加载指令
+     * @param constantType 原始常量类型
+     * @param handlerReturnType handler 返回类型
+     * @return 替换调用结束后应保留在栈上的类型
+     */
     private fun resolveReplacementType(
         insn: AbstractInsnNode,
         constantType: Type,
@@ -497,6 +523,15 @@ class ModifyConstantInjector(
         return constantType
     }
 
+    /**
+     * 在 handler 返回引用泛型类型时补充替换值转换。
+     *
+     * 当替换类型与 handler 返回类型不同且替换类型为引用类型时，插入 `CHECKCAST`，
+     * 让后续字节码和栈图计算继续看到原常量语义上的引用类型。
+     *
+     * @param il 正在构建的指令列表
+     * @param replacementType 替换后应暴露给后续字节码的类型
+     */
     private fun addConstantCastIfNeeded(
         il: InsnList,
         replacementType: Type,
@@ -507,6 +542,15 @@ class ModifyConstantInjector(
         }
     }
 
+    /**
+     * 使用 Mixin 类加载器解析引用类型对应的 Java Class。
+     *
+     * 引用兼容性校验需要真实类层级；数组类型使用描述符形式解析，对象类型使用类名解析。
+     *
+     * @param type 待解析的 ASM 引用类型
+     * @return 对应的 Java Class
+     * @throws ClassNotFoundException 类加载器无法解析该类型时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -518,10 +562,31 @@ class ModifyConstantInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 判断用户声明的常量文本是否为布尔字面量。
+     *
+     * @param value 常量过滤文本
+     * @return 文本为 `true` 或 `false` 时返回 `true`
+     */
     private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
 
+    /**
+     * 判断常量指令是否为 `null` 常量。
+     *
+     * @param insn 常量加载指令
+     * @return 指令为 [Opcodes.ACONST_NULL] 时返回 `true`
+     */
     private fun isNullConstant(insn: AbstractInsnNode): Boolean = insn.opcode == Opcodes.ACONST_NULL
 
+    /**
+     * 判断整数短常量指令是否表示指定布尔值。
+     *
+     * JVM 使用 `ICONST_0` 与 `ICONST_1` 承载 boolean 常量，只有用户按布尔文本过滤时才按此语义解释。
+     *
+     * @param insn 待检查的常量指令
+     * @param value 期望布尔值
+     * @return 指令与期望布尔值一致时返回 `true`
+     */
     private fun isBooleanConstantInsn(
         insn: AbstractInsnNode,
         value: Boolean,
