@@ -756,7 +756,16 @@ class ModifyArgInjector(
     }
 
     /**
-     * 分配临时变量
+     * 分配临时变量槽位。
+     *
+     * 该方法会避开目标方法参数与局部变量表中已有槽位，适合保存调用点参数改写过程中的临时值。
+     *
+     * @param target 目标方法
+     * @param type 待保存临时值的类型
+     * @return 临时变量的起始槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun allocateTempVariable(
         target: MethodNode,
@@ -781,7 +790,15 @@ class ModifyArgInjector(
     }
 
     /**
-     * 释放临时变量
+     * 释放临时变量槽位。
+     *
+     * 当前实现不做显式释放，局部变量槽位会随目标方法结束自然失效；保留该入口用于后续复用槽位优化。
+     *
+     * @param target 目标方法
+     * @param varIndex 待释放的临时变量起始槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun freeTempVariable(
         target: MethodNode,
@@ -792,7 +809,17 @@ class ModifyArgInjector(
     }
 
     /**
-     * 创建模拟方法节点用于参数加载
+     * 创建用于参数加载的模拟方法节点。
+     *
+     * 模拟节点只保留单个待修改参数，用于复用参数加载逻辑生成 handler 调用前的局部变量读取指令。
+     *
+     * @param target 原目标方法
+     * @param argIndex 待修改参数在调用点参数列表中的索引
+     * @param paramType 待修改参数类型
+     * @return 用于参数加载的模拟方法节点
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun createMockMethodNode(
         target: MethodNode,
@@ -805,7 +832,10 @@ class ModifyArgInjector(
     }
 
     /**
-     * 检查是否需要双槽
+     * 判断类型描述符是否需要占用两个局部变量槽位。
+     *
+     * @param desc JVM 类型描述符
+     * @return `long` 或 `double` 类型描述符返回 `true`
      */
     private fun needsDoubleSlot(desc: String): Boolean = desc == "J" || desc == "D"
 
