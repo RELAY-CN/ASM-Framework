@@ -954,6 +954,17 @@ class WrapOperationInjector(
         return value.toString() == expected
     }
 
+    /**
+     * 构造普通方法调用包裹的替代指令序列。
+     *
+     * 序列会保存原 receiver 与调用参数，创建可执行原调用的 [Operation] 句柄，
+     * 再按 handler 签名重新加载 receiver、参数、operation 与目标方法参数。
+     *
+     * @param target 目标方法
+     * @param callInsn 被包裹的方法调用指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原方法调用的指令列表
+     */
     private fun buildOperationWrapper(
         target: MethodNode,
         callInsn: MethodInsnNode,
@@ -1016,6 +1027,17 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造 `invokedynamic` 调用包裹的替代指令序列。
+     *
+     * 序列会保存动态调用参数，创建携带 bootstrap 信息的 [Operation] 句柄，
+     * 再调用 handler 取得替代返回值。
+     *
+     * @param target 目标方法
+     * @param callInsn 被包裹的 `invokedynamic` 指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原动态调用的指令列表
+     */
     private fun buildInvokeDynamicOperationWrapper(
         target: MethodNode,
         callInsn: InvokeDynamicInsnNode,
@@ -1066,6 +1088,17 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造对象构造操作包裹的替代指令序列。
+     *
+     * 序列会保存构造器参数，创建可执行原构造器的 [Operation] 句柄，
+     * 再调用 handler 返回构造结果对象。
+     *
+     * @param target 目标方法
+     * @param constructorInsn 被包裹的构造器调用指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原构造流程的指令列表
+     */
     private fun buildConstructorWrapper(
         target: MethodNode,
         constructorInsn: MethodInsnNode,
@@ -1112,6 +1145,17 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造字段写入操作包裹的替代指令序列。
+     *
+     * 序列会保存实例 receiver 与待写入值，创建字段写入 [Operation]，
+     * 再调用 handler 决定是否执行或改写原字段写入。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 被包裹的字段写入指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原字段写入的指令列表
+     */
     private fun buildFieldAssignWrapper(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -1157,6 +1201,17 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造字段读取操作包裹的替代指令序列。
+     *
+     * 序列会保存实例 receiver，创建字段读取 [Operation]，
+     * 再调用 handler 返回替代字段值。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 被包裹的字段读取指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原字段读取的指令列表
+     */
     private fun buildFieldReadWrapper(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -1204,6 +1259,18 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造数组访问操作包裹的替代指令序列。
+     *
+     * 序列会按访问模式保存数组、索引与待写入值，创建数组访问 [Operation]，
+     * 再调用 handler 包裹元素读取、元素写入或长度读取。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param mode 数组访问模式
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原数组访问的指令列表
+     */
     private fun buildArrayAccessWrapper(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -1270,6 +1337,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造 `CHECKCAST` 类型转换包裹的替代指令序列。
+     *
+     * 序列会保存待转换引用，创建 cast [Operation]，再调用 handler 返回转换后的引用值。
+     *
+     * @param target 目标方法
+     * @param castInsn 被包裹的 `CHECKCAST` 指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原类型转换的指令列表
+     */
     private fun buildCastWrapper(
         target: MethodNode,
         castInsn: TypeInsnNode,
@@ -1308,6 +1385,17 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造 `INSTANCEOF` 类型判断包裹的替代指令序列。
+     *
+     * 序列会保存待判断引用，创建 instanceof [Operation]，
+     * 再调用 handler 返回替代 boolean 结果。
+     *
+     * @param target 目标方法
+     * @param instanceofInsn 被包裹的 `INSTANCEOF` 指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原类型判断的指令列表
+     */
     private fun buildInstanceofWrapper(
         target: MethodNode,
         instanceofInsn: TypeInsnNode,
@@ -1341,6 +1429,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造局部变量读取包裹的追加指令序列。
+     *
+     * 序列会保存原读取结果，创建 load [Operation]，再调用 handler 返回替代读取值。
+     *
+     * @param target 目标方法
+     * @param loadType 局部变量读取值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到读取指令后的包裹指令列表
+     */
     private fun buildLoadWrapper(
         target: MethodNode,
         loadType: Type,
@@ -1378,6 +1476,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造局部变量写入包裹的追加指令序列。
+     *
+     * 序列会保存待写入值，创建 store [Operation]，再调用 handler 返回交给原 `xSTORE` 的新值。
+     *
+     * @param target 目标方法
+     * @param storeType 局部变量写入值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到写入指令前的包裹指令列表
+     */
     private fun buildStoreWrapper(
         target: MethodNode,
         storeType: Type,
@@ -1415,6 +1523,19 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造常量加载包裹的替代指令序列。
+     *
+     * 序列会创建常量 [Operation]，重新加载原常量值并调用 handler，
+     * 最后按原常量替换位置需要补充引用类型转换。
+     *
+     * @param target 目标方法
+     * @param constantInsn 被包裹的常量指令
+     * @param handlerConstantType handler 接收的常量类型
+     * @param replacementType 原常量位置期望的替换值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原常量指令的指令列表
+     */
     private fun buildConstantWrapper(
         target: MethodNode,
         constantInsn: AbstractInsnNode,
@@ -1446,6 +1567,17 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造条件跳转包裹的替代指令序列。
+     *
+     * 序列会先按原跳转条件生成 boolean 分支值，再调用 handler 包裹该值，
+     * 最后用 handler 返回结果决定是否跳向原目标标签。
+     *
+     * @param jumpInsn 被包裹的条件跳转指令
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原条件跳转的指令列表
+     */
     private fun buildJumpWrapper(
         jumpInsn: JumpInsnNode,
         target: MethodNode,
@@ -1465,6 +1597,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造条件跳转 handler 调用序列。
+     *
+     * 输入栈顶应为原始分支 boolean 值；序列会保存该值、创建 jump [Operation]，
+     * 并调用 handler 返回新的 boolean 分支值。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 调用 handler 并留下 boolean 结果的指令列表
+     */
     private fun buildJumpOperationCall(
         target: MethodNode,
         targetParamCount: Int,
@@ -1496,6 +1638,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造 switch selector 包裹的追加指令序列。
+     *
+     * 序列会保存原 selector，创建 switch [Operation]，
+     * 再调用 handler 返回交给原 switch 指令的新 selector。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到 switch 指令前的包裹指令列表
+     */
     private fun buildSwitchWrapper(
         target: MethodNode,
         targetParamCount: Int,
@@ -1527,6 +1679,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造异常抛出包裹的追加指令序列。
+     *
+     * 序列会保存原异常对象，创建 throw [Operation]，
+     * 再调用 handler 返回交给原 `ATHROW` 的异常对象。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到 `ATHROW` 指令前的包裹指令列表
+     */
     private fun buildThrowWrapper(
         target: MethodNode,
         targetParamCount: Int,
