@@ -1642,8 +1642,23 @@ class ModifyExpressionValueInjector(
      */
     private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
 
+    /**
+     * 判断当前表达式匹配序号是否满足用户声明的 ordinal 过滤。
+     *
+     * @param currentOrdinal 已通过目标、切片与 handler 兼容性过滤的候选序号
+     * @return 未声明 ordinal 或序号一致时返回 `true`
+     */
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
+    /**
+     * 解析表达式匹配使用的切片指令范围。
+     *
+     * `slice.from` 命中后从边界后一条指令开始匹配，`slice.to` 命中位置本身不参与匹配。
+     * 任一边界声明但无法命中时返回空范围，避免目标字节码漂移后误改写切片外表达式。
+     *
+     * @param insns 目标方法指令数组
+     * @return 可遍历的半开区间 `[start, end)`
+     */
     private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
         val startIndex =
             if (hasSliceBoundary(slice.from)) {
@@ -1662,10 +1677,34 @@ class ModifyExpressionValueInjector(
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
+    /**
+     * 判断切片边界是否声明了可匹配目标。
+     *
+     * @param at 切片边界注解配置
+     * @return `target` 非空时返回 `true`
+     */
     private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
 
+    /**
+     * 构造一个位于方法末尾的空切片范围。
+     *
+     * @param insns 目标方法指令数组
+     * @return 不会命中任何指令的半开区间
+     */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 
+    /**
+     * 从指定位置开始查找切片边界调用指令。
+     *
+     * 当前 `@ModifyExpressionValue` 的切片边界只支持 [InjectionPoint.INVOKE]，
+     * 可匹配普通方法调用、构造器调用或 `invokedynamic` 调用。
+     *
+     * @param insns 目标方法指令数组
+     * @param at 切片边界配置
+     * @param startIndex 起始搜索下标
+     * @return 匹配边界的指令下标；未命中时返回 `null`
+     * @throws IllegalArgumentException 边界注入点类型或目标方法签名不合法时抛出
+     */
     private fun findSliceBoundaryIndex(
         insns: Array<AbstractInsnNode>,
         at: At,
@@ -1699,6 +1738,15 @@ class ModifyExpressionValueInjector(
         return null
     }
 
+    /**
+     * 解析条件跳转定位点声明的 opcode 目标。
+     *
+     * 支持 JVM 跳转 opcode 名称或 opcode 数字；空字符串表示不按具体跳转类型过滤。
+     *
+     * @param target 注解中声明的跳转目标
+     * @return 对应 JVM opcode；未声明时返回 `null`
+     * @throws IllegalArgumentException 目标不是合法跳转 opcode 时抛出
+     */
     private fun parseJumpOpcodeTarget(target: String): Int? {
         if (target.isEmpty()) {
             return null
@@ -1718,6 +1766,15 @@ class ModifyExpressionValueInjector(
             )
     }
 
+    /**
+     * 解析注解中声明的方法目标签名。
+     *
+     * 支持 `owner/name(desc)`、`owner.name(desc)` 与 `name(desc)` 形式。
+     * 未携带 owner 时只按方法名与描述符匹配；未携带描述符时返回 `null` 描述符供调用方判定非法。
+     *
+     * @param signature 注解中声明的目标签名
+     * @return `owner`、`name`、`desc` 三元组；缺失部分以 `null` 表示
+     */
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
             return Triple(null, null, null)
@@ -1745,6 +1802,15 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 解析注解中声明的字段目标。
+     *
+     * 支持 `owner/name:desc`、`owner.name:desc`、`name:desc` 与仅字段名形式。
+     * 未携带 owner 时不限制字段 owner，未携带描述符时不限制字段描述符。
+     *
+     * @param signature 注解中声明的字段目标
+     * @return 解析后的字段 owner、名称与描述符
+     */
     private fun parseFieldTarget(signature: String): FieldTarget {
         if (signature.isEmpty()) {
             return FieldTarget(null, null, null)
@@ -1768,6 +1834,15 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 判断字段访问指令是否匹配字段目标。
+     *
+     * 字段 owner、名称与描述符均允许为空；为空的部分不会参与过滤。
+     *
+     * @param insn 待检查的字段访问指令
+     * @param target 解析后的字段目标
+     * @return 字段访问匹配目标时返回 `true`
+     */
     private fun matchesTargetField(
         insn: FieldInsnNode,
         target: FieldTarget,
@@ -1781,6 +1856,15 @@ class ModifyExpressionValueInjector(
         return target.desc == null || insn.desc == target.desc
     }
 
+    /**
+     * 判断普通方法调用是否匹配目标调用点。
+     *
+     * @param insn 待检查的方法调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名
+     * @param targetDesc 目标方法描述符；为 `null` 时不限制描述符
+     * @return 调用指令匹配目标时返回 `true`
+     */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -1796,6 +1880,17 @@ class ModifyExpressionValueInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 判断 `invokedynamic` 指令是否匹配目标调用点或切片边界。
+     *
+     * owner 匹配 bootstrap method owner；名称可匹配动态调用名或 bootstrap method 名。
+     *
+     * @param insn 待检查的 `invokedynamic` 指令
+     * @param targetOwner 目标 bootstrap owner；为 `null` 时不限制 owner
+     * @param targetName 目标动态调用名或 bootstrap method 名
+     * @param targetDesc 目标动态调用描述符；为 `null` 时不限制描述符
+     * @return 指令匹配目标时返回 `true`
+     */
     private fun matchesTargetInvokeDynamic(
         insn: InvokeDynamicInsnNode,
         targetOwner: String?,
@@ -1811,6 +1906,14 @@ class ModifyExpressionValueInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 提取调用指令的可读名称。
+     *
+     * 该名称只用于错误提示，非调用指令返回占位文本。
+     *
+     * @param insn 待描述的指令
+     * @return 普通调用或动态调用名称；非调用指令返回 `<unknown>`
+     */
     private fun callName(insn: AbstractInsnNode): String =
         when (insn) {
             is MethodInsnNode -> insn.name
@@ -1818,6 +1921,17 @@ class ModifyExpressionValueInjector(
             else -> "<unknown>"
         }
 
+    /**
+     * 向前追踪数组操作指令使用的数组字段来源。
+     *
+     * 追踪遇到字段读取且字段目标匹配时返回该字段；遇到方法调用、数组读写或不匹配字段时停止，
+     * 避免跨越可能改变栈形态的复杂表达式。
+     *
+     * @param arrayInsn 数组读取、写入或长度指令
+     * @param target 期望的数组字段目标
+     * @return 产生数组引用的字段读取指令；无法确认来源时返回 `null`
+     * @throws IllegalArgumentException 匹配字段不是数组类型时抛出
+     */
     private fun findArrayFieldProducer(
         arrayInsn: AbstractInsnNode,
         target: FieldTarget,
@@ -1844,6 +1958,15 @@ class ModifyExpressionValueInjector(
         return null
     }
 
+    /**
+     * 计算可用于暂存表达式值的下一个局部变量槽位。
+     *
+     * 方法会综合目标方法参数、LocalVariableTable 与现有 Var 指令的最大占用槽位，
+     * 避免新建临时槽位覆盖已有局部变量或宽类型的第二个槽位。
+     *
+     * @param target 目标方法
+     * @return 第一个可安全使用的局部变量槽位
+     */
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
@@ -1865,21 +1988,44 @@ class ModifyExpressionValueInjector(
         return maxIndex
     }
 
+    /**
+     * 字段表达式匹配使用的字段目标描述。
+     *
+     * @property owner 字段 owner；为 `null` 时不限制 owner
+     * @property name 字段名；为 `null` 时不限制字段名
+     * @property desc 字段描述符；为 `null` 时不限制描述符
+     */
     private data class FieldTarget(
         val owner: String?,
         val name: String?,
         val desc: String?,
     )
 
+    /**
+     * 局部变量槽位与其类型的配对信息。
+     *
+     * @property index JVM 局部变量槽位
+     * @property type 该槽位承载的值类型
+     */
     private data class LocalSlotType(
         val index: Int,
         val type: Type,
     )
 
+    /**
+     * `array=` 参数解析出的数组访问模式。
+     */
     private enum class ArrayAccessMode {
+        /** 不启用数组访问特殊模式。 */
         NONE,
+
+        /** 改写数组元素读取结果。 */
         GET,
+
+        /** 改写数组元素写入值。 */
         SET,
+
+        /** 改写数组长度结果。 */
         LENGTH,
     }
 
