@@ -597,6 +597,16 @@ class ModifyConstantInjector(
             else -> false
         }
 
+    /**
+     * 按 handler 签名需要加载目标方法参数前缀。
+     *
+     * 参数从目标方法声明顺序的第一个参数开始加载，实例方法会跳过 `this` 槽位，
+     * 并按参数类型宽度推进局部变量槽位。
+     *
+     * @param il 正在构建的指令列表
+     * @param target 目标方法
+     * @param requestedTargetParamCount 需要追加加载的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -615,6 +625,15 @@ class ModifyConstantInjector(
         }
     }
 
+    /**
+     * 为非静态 handler 加载调用接收者。
+     *
+     * Kotlin `object` 使用 `INSTANCE` 字段。普通 Mixin 类会在目标类上复用框架注入的单例字段，
+     * 字段为空时创建新实例并写回，避免每次常量替换调用都重复构造 handler。
+     *
+     * @param il 正在构建的指令列表
+     * @param instanceType handler 所属 Mixin 类类型
+     */
     private fun loadAsmHandlerReceiver(
         il: InsnList,
         instanceType: Type,
@@ -653,6 +672,16 @@ class ModifyConstantInjector(
         il.add(endLabel)
     }
 
+    /**
+     * 判断 handler 参数声明是否能接收期望类型的运行时值。
+     *
+     * 基础类型必须精确匹配；引用类型允许 handler 参数声明为期望类型的父类、接口、
+     * `java.lang.Object` 或 `kotlin.Any`。
+     *
+     * @param expected 注入点需要提供的值类型
+     * @param actual handler 参数声明类型
+     * @return handler 参数可以安全接收该值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
