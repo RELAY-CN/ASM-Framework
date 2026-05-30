@@ -93,6 +93,16 @@ class ModifyVariableInjector(
         }
     }
 
+    /**
+     * 在方法入口插入一次局部变量改写调用。
+     *
+     * 入口模式只能改写目标方法已有参数槽位。方法会先按显式槽位或 handler 首参类型解析参数，
+     * 再校验 handler 签名并把 handler 返回值写回同一个参数槽位。
+     *
+     * @param target 目标方法
+     * @return 固定返回 `1`，表示已插入入口改写逻辑
+     * @throws IllegalArgumentException 无法解析入口参数或 handler 签名不匹配时抛出
+     */
     private fun injectAtHeadCount(target: MethodNode): Int {
         val handlerVariableType = requireHandlerVariableArgumentType()
         val variable =
@@ -114,6 +124,16 @@ class ModifyVariableInjector(
         return 1
     }
 
+    /**
+     * 在匹配的局部变量读取指令前插入改写调用。
+     *
+     * 遍历切片范围内的 LOAD 指令，并按槽位、变量名、handler 首参类型与 ordinal 过滤候选。
+     * 插入的调用会在原读取发生前先读取当前槽位值、调用 handler，然后把新值写回同一槽位，
+     * 使后续原 LOAD 读取到修改后的值。
+     *
+     * @param target 目标方法
+     * @return 实际插入的 LOAD 改写数量
+     */
     private fun injectBeforeLoadCount(target: MethodNode): Int {
         val handlerVariableType = requireHandlerVariableArgumentType()
         var injectionCount = 0
@@ -155,6 +175,15 @@ class ModifyVariableInjector(
         return injectionCount
     }
 
+    /**
+     * 在匹配的局部变量写入指令后插入改写调用。
+     *
+     * 遍历切片范围内的 STORE 指令，并按槽位、变量名、handler 首参类型与 ordinal 过滤候选。
+     * 插入点位于原 STORE 之后，因此 handler 接收到的是刚刚写入槽位的新值。
+     *
+     * @param target 目标方法
+     * @return 实际插入的 STORE 改写数量
+     */
     private fun injectAfterStoreCount(target: MethodNode): Int {
         val handlerVariableType = requireHandlerVariableArgumentType()
         var injectionCount = 0
@@ -196,6 +225,18 @@ class ModifyVariableInjector(
         return injectionCount
     }
 
+    /**
+     * 解析 HEAD 模式下需要改写的入口参数。
+     *
+     * 显式指定槽位时优先按 JVM 局部变量槽位匹配；未指定槽位时，按 handler 首参类型收集候选，
+     * 并使用 [ordinal] 选择同类型参数。未指定 [ordinal] 时要求同类型候选唯一。
+     *
+     * @param target 目标方法
+     * @param index 显式 JVM 局部变量槽位；小于 0 表示按类型推断
+     * @param expectedType handler 首个参数声明的变量类型
+     * @param ordinal 同类型入口参数序号；小于 0 表示自动唯一推断
+     * @return 解析到的入口参数；无法唯一匹配时返回 `null`
+     */
     private fun resolveHeadVariable(
         target: MethodNode,
         index: Int,
@@ -215,6 +256,15 @@ class ModifyVariableInjector(
         return matchingVariables.getOrNull(ordinal)
     }
 
+    /**
+     * 收集目标方法入口处可被 HEAD 模式改写的参数槽位。
+     *
+     * 实例方法会跳过 `this` 所在的 0 号槽位，并按参数类型宽度推进槽位索引。
+     * 若目标方法包含 LocalVariableTable，则顺带记录对应参数名，供变量名过滤使用。
+     *
+     * @param target 目标方法
+     * @return 按声明顺序排列的入口参数槽位信息
+     */
     private fun collectHeadParameters(target: MethodNode): List<HeadVariable> {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         var slot = if (isStatic) 0 else 1
@@ -226,6 +276,14 @@ class ModifyVariableInjector(
         }
     }
 
+    /**
+     * 读取 handler 第一个参数声明的变量类型。
+     *
+     * `@ModifyVariable` 的 handler 至少需要接收原变量值；后续参数才表示目标方法参数前缀。
+     *
+     * @return handler 首个参数类型
+     * @throws IllegalArgumentException handler 未声明原变量值参数时抛出
+     */
     private fun requireHandlerVariableArgumentType(): Type {
         val handlerParams = Type.getArgumentTypes(asmMethod)
         if (handlerParams.isEmpty()) {
@@ -236,6 +294,18 @@ class ModifyVariableInjector(
         return handlerParams[0]
     }
 
+    /**
+     * 为显式槽位的引用类型变量恢复更精确的槽位类型。
+     *
+     * handler 可用 `Any` 或 `Object` 接收引用变量，但写回局部变量时仍应尽量保持真实槽位类型。
+     * 本方法依次尝试目标方法参数、LocalVariableTable 与槽位周边字节码用途来恢复类型。
+     * 只有显式指定槽位且 handler 首参为引用类型时才需要恢复。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 恢复出的引用类型；无需恢复或无法恢复时返回 `null`
+     */
     private fun resolveIndexedVariableType(
         target: MethodNode,
         index: Int,
@@ -261,6 +331,17 @@ class ModifyVariableInjector(
         return referencedTypeFromSlotInstructions(target, index, fallbackType)
     }
 
+    /**
+     * 通过同槽位的引用读写指令推断真实引用类型。
+     *
+     * 该推断用于没有入口参数或 LocalVariableTable 可用时的兜底类型恢复。
+     * 只检查 ALOAD/ASTORE，并保留能被 handler 首参兼容接收的类型。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 推断出的引用类型；无可靠证据时返回 `null`
+     */
     private fun referencedTypeFromSlotInstructions(
         target: MethodNode,
         index: Int,
