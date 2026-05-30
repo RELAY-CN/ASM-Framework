@@ -83,6 +83,15 @@ AsmRegistry.registerWithPathMatcher(MyAsm::class.java) { className ->
 }
 ```
 
+如果需要排查哪些类已注册、被跳过或加载失败，可使用带结果的扫描入口：
+
+```kotlin
+val scanResult = AsmScanner.scanPackageWithResult("com.example.asms")
+scanResult.failures.forEach { failure ->
+    println("${failure.className}: ${failure.reason}")
+}
+```
+
 3. **应用转换**
 
 ```kotlin
