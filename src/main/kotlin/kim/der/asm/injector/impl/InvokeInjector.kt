@@ -23,12 +23,13 @@ import java.lang.reflect.Modifier
 /**
  * INVOKE 注入器。
  *
- * 根据 [kim.der.asm.api.annotation.AsmInject.at] 定位目标方法调用，
+ * 根据 [kim.der.asm.api.annotation.AsmInject.at] 定位普通方法调用、构造器调用或 `invokedynamic` 调用，
  * 并按 shift 语义在调用前、调用后或替换调用点插入 ASM 方法调用。
  * 当普通 [InjectionPoint.INVOKE_ASSIGN] 使用默认 [Shift.BEFORE] 时，会按调用完成后处理；
  * 需要调用前注入时应使用普通 [InjectionPoint.INVOKE]。
  * 当注解缺少目标调用签名时返回未修改。BEFORE/AFTER handler 可先接收原调用参数前缀，
- * 再继续接收目标方法参数前缀；REPLACE handler 保持替换原调用的参数与返回值语义。
+ * 再继续接收目标方法参数前缀；`invokedynamic` 没有 receiver，handler 从动态调用点描述符的参数开始接收。
+ * REPLACE handler 保持替换原调用的参数与返回值语义。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -38,6 +39,12 @@ class InvokeInjector(
     asmInfo: AsmInfo,
     private val injectionPoint: InjectionPoint = InjectionPoint.INVOKE,
 ) : AbstractAsmInjector(method, asmInfo) {
+    private data class CallSite(
+        val insn: AbstractInsnNode,
+        val desc: String,
+        val hasReceiver: Boolean,
+    )
+
     /**
      * 在匹配的调用点附近注入 ASM 调用。
      *
@@ -85,34 +92,31 @@ class InvokeInjector(
         val insns = instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns, injectAnnotation.slice)
 
-        // 查找所有匹配的方法调用
+        // 查找所有匹配的调用点
         var matchedOrdinal = 0
         for ((index, insn) in insns.withIndex()) {
             if (index < sliceStartIndex || index >= sliceEndIndex) {
                 continue
             }
 
-            if (insn is MethodInsnNode) {
-                if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                    val currentOrdinal = matchedOrdinal++
-                    if (!matchesOrdinal(currentOrdinal, injectAnnotation.ordinal)) {
-                        continue
-                    }
+            val callSite = matchCallSite(insn, targetOwner, targetName, targetDesc) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal, injectAnnotation.ordinal)) {
+                continue
+            }
 
-                    when (shift) {
-                        Shift.BEFORE -> {
-                            injectBeforeCall(instructions, insn, target)
-                            injectionCount++
-                        }
-                        Shift.AFTER -> {
-                            injectAfterCall(instructions, insn, target)
-                            injectionCount++
-                        }
-                        Shift.REPLACE -> {
-                            replaceCall(instructions, insn, target)
-                            injectionCount++
-                        }
-                    }
+            when (shift) {
+                Shift.BEFORE -> {
+                    injectBeforeCall(instructions, callSite, target)
+                    injectionCount++
+                }
+                Shift.AFTER -> {
+                    injectAfterCall(instructions, callSite, target)
+                    injectionCount++
+                }
+                Shift.REPLACE -> {
+                    replaceCall(instructions, callSite, target)
+                    injectionCount++
                 }
             }
         }
@@ -151,7 +155,7 @@ class InvokeInjector(
         startIndex: Int,
     ): Int? {
         require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @AsmInject(INVOKE): ${at.value}"
+            "Only INVOKE slice boundaries are supported for @AsmInject(INVOKE/INVOKE_ASSIGN): ${at.value}"
         }
 
         val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
@@ -165,6 +169,12 @@ class InvokeInjector(
         for (index in startIndex until insns.size) {
             val insn = insns[index]
             if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
                 return index
             }
         }
@@ -238,20 +248,57 @@ class InvokeInjector(
         return true
     }
 
+    private fun matchCallSite(
+        insn: AbstractInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String,
+    ): CallSite? =
+        when (insn) {
+            is MethodInsnNode ->
+                if (matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                    CallSite(insn = insn, desc = insn.desc, hasReceiver = insn.opcode != Opcodes.INVOKESTATIC)
+                } else {
+                    null
+                }
+            is InvokeDynamicInsnNode ->
+                if (matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc)) {
+                    CallSite(insn = insn, desc = insn.desc, hasReceiver = false)
+                } else {
+                    null
+                }
+            else -> null
+        }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return insn.desc == targetDesc
+    }
+
     /**
      * 在方法调用前注入
      */
     private fun injectBeforeCall(
         instructions: InsnList,
-        callInsn: MethodInsnNode,
+        callSite: CallSite,
         targetMethod: MethodNode,
     ) {
         val il = InsnList()
 
         // 保存方法调用的参数到局部变量
-        val paramTypes = Type.getArgumentTypes(callInsn.desc)
+        val paramTypes = Type.getArgumentTypes(callSite.desc)
         val savedParams = mutableListOf<Int>()
-        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
+        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callSite.hasReceiver)
 
         // 保存所有参数（从右到左）
         for (i in paramTypes.indices.reversed()) {
@@ -264,7 +311,7 @@ class InvokeInjector(
 
         // 如果是实例方法调用，保存实例引用
         var savedInstanceIndex: Int? = null
-        if (callInsn.opcode != Opcodes.INVOKESTATIC) {
+        if (callSite.hasReceiver) {
             nextVarIndex -= 1
             savedInstanceIndex = nextVarIndex
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
@@ -294,7 +341,7 @@ class InvokeInjector(
         }
 
         // 在调用前插入
-        instructions.insertBefore(callInsn, il)
+        instructions.insertBefore(callSite.insn, il)
     }
 
     /**
@@ -302,14 +349,14 @@ class InvokeInjector(
      */
     private fun injectAfterCall(
         instructions: InsnList,
-        callInsn: MethodInsnNode,
+        callSite: CallSite,
         targetMethod: MethodNode,
     ) {
         // 查找调用后的位置
-        val nextInsn = callInsn.next
-        val paramTypes = Type.getArgumentTypes(callInsn.desc)
+        val nextInsn = callSite.insn.next
+        val paramTypes = Type.getArgumentTypes(callSite.desc)
         val savedParams = mutableListOf<Int>()
-        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
+        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callSite.hasReceiver)
         val beforeCall = InsnList()
 
         for (i in paramTypes.indices.reversed()) {
@@ -321,7 +368,7 @@ class InvokeInjector(
         }
 
         var savedInstanceIndex: Int? = null
-        if (callInsn.opcode != Opcodes.INVOKESTATIC) {
+        if (callSite.hasReceiver) {
             nextVarIndex -= 1
             savedInstanceIndex = nextVarIndex
             beforeCall.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
@@ -338,11 +385,11 @@ class InvokeInjector(
         }
 
         if (beforeCall.size() > 0) {
-            instructions.insertBefore(callInsn, beforeCall)
+            instructions.insertBefore(callSite.insn, beforeCall)
         }
 
         // 跳过调用本身（如果有返回值，跳过返回值）
-        val returnType = Type.getReturnType(callInsn.desc)
+        val returnType = Type.getReturnType(callSite.desc)
         if (returnType != Type.VOID_TYPE) {
             // 返回值在栈顶，需要保存
             val il = InsnList()
@@ -391,19 +438,19 @@ class InvokeInjector(
     }
 
     /**
-     * 替换方法调用
+     * 替换调用点
      */
     private fun replaceCall(
         instructions: InsnList,
-        callInsn: MethodInsnNode,
+        callSite: CallSite,
         targetMethod: MethodNode,
     ) {
         val il = InsnList()
 
         // 保存参数
-        val paramTypes = Type.getArgumentTypes(callInsn.desc)
+        val paramTypes = Type.getArgumentTypes(callSite.desc)
         val savedParams = mutableListOf<Int>()
-        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callInsn.opcode != Opcodes.INVOKESTATIC)
+        var nextVarIndex = allocateVariablesForParams(targetMethod, paramTypes, callSite.hasReceiver)
 
         for (i in paramTypes.indices.reversed()) {
             val paramType = paramTypes[i]
@@ -414,7 +461,7 @@ class InvokeInjector(
         }
 
         var savedInstanceIndex: Int? = null
-        if (callInsn.opcode != Opcodes.INVOKESTATIC) {
+        if (callSite.hasReceiver) {
             nextVarIndex -= 1
             savedInstanceIndex = nextVarIndex
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
@@ -423,18 +470,17 @@ class InvokeInjector(
         val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
 
         // 调用 ASM 方法替换原调用
-        val mockTarget = createMockMethodNode(targetMethod, callInsn)
-        validateReplaceSignature(callInsn)
-        AsmMethodCallGenerator.generateMethodCall(
+        validateReplaceSignature(callSite.desc)
+        generateCallSiteHandlerCall(
             il,
-            asmMethod,
-            asmInfo,
-            mockTarget,
+            targetMethod,
+            paramTypes,
+            savedParams,
             callbackVarIndex,
         )
 
         // 处理返回值类型转换
-        val originalReturnType = Type.getReturnType(callInsn.desc)
+        val originalReturnType = Type.getReturnType(callSite.desc)
         val asmReturnType = Type.getReturnType(asmMethod)
 
         if (asmReturnType != originalReturnType) {
@@ -447,8 +493,8 @@ class InvokeInjector(
         }
 
         // 替换原始调用
-        instructions.insertBefore(callInsn, il)
-        instructions.remove(callInsn)
+        instructions.insertBefore(callSite.insn, il)
+        instructions.remove(callSite.insn)
     }
 
     private fun dropUnusedHandlerReturnValue(il: InsnList) {
@@ -663,8 +709,8 @@ class InvokeInjector(
         il.add(loadInsn)
     }
 
-    private fun validateReplaceSignature(callInsn: MethodInsnNode) {
-        val originalReturnType = Type.getReturnType(callInsn.desc)
+    private fun validateReplaceSignature(callDesc: String) {
+        val originalReturnType = Type.getReturnType(callDesc)
         val asmReturnType = Type.getReturnType(asmMethod)
         if (!isReplaceReturnCompatible(originalReturnType, asmReturnType)) {
             throw IllegalStateException(
@@ -772,24 +818,5 @@ class InvokeInjector(
         targetMethod: MethodNode,
         returnType: Type,
     ): Int = findLocalEnd(targetMethod)
-
-    /**
-     * 创建模拟方法节点
-     */
-    private fun createMockMethodNode(
-        targetMethod: MethodNode,
-        callInsn: MethodInsnNode,
-    ): MethodNode {
-        val paramTypes = Type.getArgumentTypes(callInsn.desc)
-        val returnType = Type.getReturnType(asmMethod)
-        val mockDesc = Type.getMethodDescriptor(returnType, *paramTypes)
-        return MethodNode(
-            targetMethod.access,
-            targetMethod.name,
-            mockDesc,
-            targetMethod.signature,
-            targetMethod.exceptions?.toTypedArray(),
-        )
-    }
 
 }

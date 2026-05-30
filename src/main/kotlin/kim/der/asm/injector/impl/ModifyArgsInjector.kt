@@ -38,7 +38,8 @@ import java.lang.reflect.Modifier
  *
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，目标为空时按兼容调用点推断
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
- * @param slice 切片范围；当前使用 INVOKE 边界缩小匹配范围
+ * @param slice 切片范围；当前使用 INVOKE 边界缩小匹配范围，边界可匹配普通方法调用、构造器调用或
+ * `invokedynamic` 调用
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -399,6 +400,12 @@ class ModifyArgsInjector(
         for (index in startIndex until insns.size) {
             val insn = insns[index]
             if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
                 return index
             }
         }

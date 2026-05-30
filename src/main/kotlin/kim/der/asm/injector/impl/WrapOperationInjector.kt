@@ -23,8 +23,10 @@ import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
+import org.objectweb.asm.tree.TableSwitchInsnNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
@@ -33,10 +35,10 @@ import java.lang.reflect.Modifier
 /**
  * WrapOperation 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断、条件跳转、常量读取或即将抛出的异常，
+ * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断、条件跳转、switch selector、常量读取或即将抛出的异常，
  * 并用 handler 替换原操作。
  * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、构造器参数、字段写入值或
- * 数组访问参数、类型转换或类型判断输入值、原条件跳转分支结果、原常量值、即将抛出的异常、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
+ * 数组访问参数、类型转换或类型判断输入值、局部变量读取值、局部变量待写入值、原条件跳转分支结果、switch selector、原常量值、即将抛出的异常、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
  * 执行原始操作，也可以跳过或改变调用参数。
  *
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
@@ -53,16 +55,21 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.CAST] 可包裹 `CHECKCAST` 类型转换；省略类型目标时会按 handler 返回类型筛选兼容转换目标，
  * 不兼容目标不会计入 [WrapOperation.ordinal] 或命中数。[InjectionPoint.INSTANCEOF] 可包裹类型判断；省略类型目标时
  * 会匹配切片内全部 `INSTANCEOF` 判断。[InjectionPoint.JUMP] 可包裹条件跳转分支结果；`GOTO` 与 `JSR` 不支持包裹。
+ * [InjectionPoint.SWITCH] 可包裹 `tableswitch` 与 `lookupswitch` 消费前的 `Int` selector；该模式不支持 [At.target]。
  * [InjectionPoint.CONSTANT] 可包裹 `LDC`、`ACONST_NULL`、数值常量、
  * `BIPUSH` 与 `SIPUSH`；省略常量目标时会按 handler 常量参数与返回类型筛选兼容常量。
+ * [InjectionPoint.LOAD] 可包裹 `xLOAD` 读取出的局部变量表达式值，可通过 [At.args] 中的 `index=N` 或 `var=N`
+ * 按 JVM 局部变量槽位过滤；handler 返回值只替换这一次读取结果，不写回原槽位。
+ * [InjectionPoint.STORE] 可包裹 `xSTORE` 消费前的局部变量待写入值，可通过 [At.args] 中的 `index=N` 或 `var=N`
+ * 按 JVM 局部变量槽位过滤；handler 返回值交给原 `xSTORE` 继续写入槽位。
  * [InjectionPoint.THROW] 可包裹 `ATHROW` 前的异常对象；指定目标时只匹配直接构造后抛出的同类型异常。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
+ * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、
- * [InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用 INVOKE 边界缩小匹配范围
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -121,11 +128,14 @@ class WrapOperationInjector(
             InjectionPoint.NEW -> injectNewConstructor(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.LOAD -> injectLoad(target)
+            InjectionPoint.STORE -> injectStore(target)
             InjectionPoint.JUMP -> injectJump(target)
+            InjectionPoint.SWITCH -> injectSwitch(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, JUMP, CONSTANT and THROW injection points",
+                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, LOAD, STORE, JUMP, SWITCH, CONSTANT and THROW injection points",
             )
         }
 
@@ -509,6 +519,100 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    private fun injectLoad(target: MethodNode): Int {
+        require(at.target.isEmpty()) {
+            "@WrapOperation LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
+        }
+        val localVariableIndex = parseLocalVariableIndex("LOAD")
+        val handlerLoadType = requireHandlerLocalArgumentType("LOAD")
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is VarInsnNode || insn.opcode !in LOAD_OPS) {
+                continue
+            }
+            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+                continue
+            }
+            if (!isLoadCompatibleWithHandler(insn.opcode, handlerLoadType)) {
+                continue
+            }
+
+            val resolvedLoadType = resolveIndexedLoadType(target, insn.`var`, handlerLoadType)
+            if (localVariableIndex == null && handlerLoadType.isReferenceType() && resolvedLoadType == null) {
+                continue
+            }
+            val loadType = resolvedLoadType ?: handlerLoadType
+            if (localVariableIndex == null && !isLoadHandlerCompatible(target, loadType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateLoadHandlerSignature(target, loadType)
+            val il = buildLoadWrapper(target, loadType, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectStore(target: MethodNode): Int {
+        require(at.target.isEmpty()) {
+            "@WrapOperation STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
+        }
+        val localVariableIndex = parseLocalVariableIndex("STORE")
+        val handlerStoreType = requireHandlerLocalArgumentType("STORE")
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
+                continue
+            }
+            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+                continue
+            }
+            if (!isStoreCompatibleWithHandler(insn.opcode, handlerStoreType)) {
+                continue
+            }
+
+            val resolvedStoreType = resolveIndexedLoadType(target, insn.`var`, handlerStoreType)
+            if (localVariableIndex == null && handlerStoreType.isReferenceType() && resolvedStoreType == null) {
+                continue
+            }
+            val storeType = resolvedStoreType ?: handlerStoreType
+            if (localVariableIndex == null && !isLoadHandlerCompatible(target, storeType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateLoadHandlerSignature(target, storeType)
+            val il = buildStoreWrapper(target, storeType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
     private fun injectConstant(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         var injectionCount = 0
@@ -542,6 +646,37 @@ class WrapOperationInjector(
             val il = buildConstantWrapper(target, insn, handlerConstantType, replacementType, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectSwitch(target: MethodNode): Int {
+        if (at.target.isNotEmpty()) {
+            throw IllegalArgumentException("@WrapOperation SWITCH does not support at.target")
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is TableSwitchInsnNode && insn !is LookupSwitchInsnNode) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateSwitchHandlerSignature(target)
+            val il = buildSwitchWrapper(target, targetParamCount)
+            target.instructions.insertBefore(insn, il)
             injectionCount++
         }
 
@@ -1007,6 +1142,80 @@ class WrapOperationInjector(
         return il
     }
 
+    private fun buildLoadWrapper(
+        target: MethodNode,
+        loadType: Type,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        var nextTempIndex = nextLocalIndex(target)
+        val valueIndex = nextTempIndex.also { nextTempIndex += loadType.size }
+        val operationIndex = nextTempIndex
+
+        storeStackValue(il, loadType, valueIndex)
+
+        createLoadOperation(il, loadType)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        loadFromVariable(il, loadType, valueIndex)
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (loadType != handlerReturnType && loadType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, loadType.internalName))
+        }
+
+        return il
+    }
+
+    private fun buildStoreWrapper(
+        target: MethodNode,
+        storeType: Type,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        var nextTempIndex = nextLocalIndex(target)
+        val valueIndex = nextTempIndex.also { nextTempIndex += storeType.size }
+        val operationIndex = nextTempIndex
+
+        storeStackValue(il, storeType, valueIndex)
+
+        createStoreOperation(il, storeType)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        loadFromVariable(il, storeType, valueIndex)
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (storeType != handlerReturnType && storeType.isReferenceType()) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, storeType.internalName))
+        }
+
+        return il
+    }
+
     private fun buildConstantWrapper(
         target: MethodNode,
         constantInsn: AbstractInsnNode,
@@ -1073,6 +1282,37 @@ class WrapOperationInjector(
 
         addHandlerOwner(il)
         il.add(VarInsnNode(Opcodes.ILOAD, branchIndex))
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+
+        return il
+    }
+
+    private fun buildSwitchWrapper(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        var nextTempIndex = nextLocalIndex(target)
+        val selectorIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val operationIndex = nextTempIndex
+
+        il.add(VarInsnNode(Opcodes.ISTORE, selectorIndex))
+
+        createSwitchOperation(il)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ILOAD, selectorIndex))
         il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
         loadTargetMethodParameters(il, target, targetParamCount)
         il.add(
@@ -1329,12 +1569,69 @@ class WrapOperationInjector(
         )
     }
 
+    private fun createLoadOperation(
+        il: InsnList,
+        loadType: Type,
+    ) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(InstructionUtil.loadType(loadType))
+        il.add(LdcInsnNode("<load>"))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;)V",
+                false,
+            ),
+        )
+    }
+
+    private fun createStoreOperation(
+        il: InsnList,
+        storeType: Type,
+    ) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(InstructionUtil.loadType(storeType))
+        il.add(LdcInsnNode("<store>"))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;)V",
+                false,
+            ),
+        )
+    }
+
     private fun createJumpOperation(il: InsnList) {
         val operationType = Type.getType(Operation::class.java)
         il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
         il.add(InsnNode(Opcodes.DUP))
         il.add(InstructionUtil.loadType(Type.BOOLEAN_TYPE))
         il.add(LdcInsnNode("<jump>"))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESPECIAL,
+                operationType.internalName,
+                "<init>",
+                "(Ljava/lang/Class;Ljava/lang/String;)V",
+                false,
+            ),
+        )
+    }
+
+    private fun createSwitchOperation(il: InsnList) {
+        val operationType = Type.getType(Operation::class.java)
+        il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(InstructionUtil.loadType(Type.INT_TYPE))
+        il.add(LdcInsnNode("<switch>"))
         il.add(
             MethodInsnNode(
                 Opcodes.INVOKESPECIAL,
@@ -1743,6 +2040,42 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    private fun validateLoadHandlerSignature(
+        target: MethodNode,
+        loadType: Type,
+    ): Int {
+        val expectedStackParams = arrayOf(loadType)
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(loadType, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original $loadType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
     private fun validateConstantHandlerSignature(
         target: MethodNode,
         constantType: Type,
@@ -1807,6 +2140,39 @@ class WrapOperationInjector(
             throw IllegalArgumentException(
                 "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
                     "original ${Type.BOOLEAN_TYPE}, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    private fun validateSwitchHandlerSignature(target: MethodNode): Int {
+        val expectedStackParams = arrayOf(Type.INT_TYPE)
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        expectedStackParams.forEachIndexed { index, expected ->
+            val actual = actualParams[index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapOperation handler ${asmMethod.name} parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(Type.INT_TYPE, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} return type mismatch: " +
+                    "original ${Type.INT_TYPE}, handler $handlerReturnType",
             )
         }
         return targetParamCount
@@ -1882,6 +2248,194 @@ class WrapOperationInjector(
             ArrayAccessMode.LENGTH -> arrayOf(arrayType)
         }
     }
+
+    private fun parseLocalVariableIndex(pointName: String): Int? {
+        val values =
+            at.args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                when {
+                    trimmed.startsWith("index=") -> trimmed.substringAfter("index=")
+                    trimmed.startsWith("var=") -> trimmed.substringAfter("var=")
+                    else -> null
+                }
+            }
+
+        if (values.isEmpty()) {
+            return null
+        }
+        require(values.size == 1) {
+            "@WrapOperation $pointName supports only one local variable slot filter in At.args"
+        }
+
+        val index =
+            values.single().toIntOrNull()
+                ?: throw IllegalArgumentException(
+                    "@WrapOperation $pointName local variable slot filter must be an integer: ${values.single()}",
+                )
+        require(index >= 0) {
+            "@WrapOperation $pointName local variable slot filter must be non-negative: $index"
+        }
+        return index
+    }
+
+    private fun requireHandlerLocalArgumentType(pointName: String): Type {
+        val handlerParams = Type.getArgumentTypes(asmMethod)
+        if (handlerParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapOperation handler ${asmMethod.name} must take at least one argument for the local variable $pointName value",
+            )
+        }
+        return handlerParams[0]
+    }
+
+    private fun isLoadHandlerCompatible(
+        target: MethodNode,
+        loadType: Type,
+    ): Boolean = runCatching { validateLoadHandlerSignature(target, loadType) }.isSuccess
+
+    private fun resolveIndexedLoadType(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? {
+        if (!fallbackType.isReferenceType()) {
+            return null
+        }
+
+        val headVariable = collectHeadParameters(target).firstOrNull { it.index == index }
+        if (headVariable != null) {
+            return headVariable.type
+        }
+
+        val localVariable =
+            target.localVariables
+                .filter { it.index == index }
+                .mapNotNull { runCatching { Type.getType(it.desc) }.getOrNull() }
+                .firstOrNull { it.isReferenceType() && isHandlerParameterCompatible(it, fallbackType) }
+        if (localVariable != null) {
+            return localVariable
+        }
+
+        return referencedTypeFromSlotInstructions(target, index, fallbackType)
+    }
+
+    private fun collectHeadParameters(target: MethodNode): List<LocalSlotType> {
+        val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
+        var slot = if (isStatic) 0 else 1
+        return buildList {
+            for (argumentType in Type.getArgumentTypes(target.desc)) {
+                add(LocalSlotType(slot, argumentType))
+                slot += argumentType.size
+            }
+        }
+    }
+
+    private fun referencedTypeFromSlotInstructions(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? =
+        target.instructions.toArray()
+            .asSequence()
+            .filterIsInstance<VarInsnNode>()
+            .filter { it.`var` == index && it.opcode in SLOT_REFERENCE_OPS }
+            .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
+            .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
+
+    private fun inferReferenceTypeAroundSlotInstruction(
+        target: MethodNode,
+        insn: VarInsnNode,
+    ): Type? {
+        if (insn.opcode == Opcodes.ASTORE) {
+            val previous = previousRealInstruction(insn)
+            if (previous is TypeInsnNode && previous.opcode == Opcodes.CHECKCAST) {
+                return Type.getObjectType(previous.desc)
+            }
+            if (previous is LdcInsnNode && previous.cst is String) {
+                return Type.getType(String::class.java)
+            }
+            inferReferenceTypeFromNextLoadConsumer(target, insn)?.let { return it }
+            return null
+        }
+
+        val next = nextRealInstruction(insn)
+        return when (next) {
+            is MethodInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.INVOKEVIRTUAL || next.opcode == Opcodes.INVOKEINTERFACE) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is FieldInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.GETFIELD || next.opcode == Opcodes.PUTFIELD) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is TypeInsnNode ->
+                if (next.opcode == Opcodes.CHECKCAST) {
+                    Type.getObjectType(next.desc)
+                } else {
+                    null
+                }
+            else ->
+                if (next?.opcode == Opcodes.ARETURN) {
+                    val returnType = Type.getReturnType(target.desc)
+                    if (returnType.isReferenceType()) returnType else null
+                } else {
+                    null
+                }
+        }
+    }
+
+    private fun inferReferenceTypeFromNextLoadConsumer(
+        target: MethodNode,
+        storeInsn: VarInsnNode,
+    ): Type? {
+        var current = storeInsn.next
+        while (current != null) {
+            if (current is VarInsnNode && current.`var` == storeInsn.`var`) {
+                if (current.opcode == Opcodes.ALOAD) {
+                    return inferReferenceTypeAroundSlotInstruction(target, current)
+                }
+                if (current.opcode in STORE_OPS) {
+                    return null
+                }
+            }
+            current = current.next
+        }
+        return null
+    }
+
+    private fun isLoadCompatibleWithHandler(
+        opcode: Int,
+        handlerType: Type,
+    ): Boolean =
+        when (opcode) {
+            Opcodes.ILOAD -> handlerType.sort in INT_VARIABLE_TYPE_SORTS
+            Opcodes.LLOAD -> handlerType == Type.LONG_TYPE
+            Opcodes.FLOAD -> handlerType == Type.FLOAT_TYPE
+            Opcodes.DLOAD -> handlerType == Type.DOUBLE_TYPE
+            Opcodes.ALOAD -> handlerType.sort == Type.OBJECT || handlerType.sort == Type.ARRAY
+            else -> false
+        }
+
+    private fun isStoreCompatibleWithHandler(
+        opcode: Int,
+        handlerType: Type,
+    ): Boolean =
+        when (opcode) {
+            Opcodes.ISTORE -> handlerType.sort in INT_VARIABLE_TYPE_SORTS
+            Opcodes.LSTORE -> handlerType == Type.LONG_TYPE
+            Opcodes.FSTORE -> handlerType == Type.FLOAT_TYPE
+            Opcodes.DSTORE -> handlerType == Type.DOUBLE_TYPE
+            Opcodes.ASTORE -> handlerType.sort == Type.OBJECT || handlerType.sort == Type.ARRAY
+            else -> false
+        }
 
     private fun findArrayFieldProducer(
         arrayInsn: AbstractInsnNode,
@@ -2388,6 +2942,11 @@ class WrapOperationInjector(
         val dupInsn: AbstractInsnNode,
     )
 
+    private data class LocalSlotType(
+        val index: Int,
+        val type: Type,
+    )
+
     private enum class ArrayAccessMode {
         GET,
         SET,
@@ -2397,6 +2956,10 @@ class WrapOperationInjector(
     private companion object {
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+        private val LOAD_OPS = setOf(Opcodes.ILOAD, Opcodes.LLOAD, Opcodes.FLOAD, Opcodes.DLOAD, Opcodes.ALOAD)
+        private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
+        private val SLOT_REFERENCE_OPS = setOf(Opcodes.ALOAD, Opcodes.ASTORE)
+        private val INT_VARIABLE_TYPE_SORTS = setOf(Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR)
         private val ARRAY_READ_OPS =
             setOf(
                 Opcodes.IALOAD,

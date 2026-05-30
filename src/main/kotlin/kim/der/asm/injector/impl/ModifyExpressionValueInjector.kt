@@ -20,8 +20,11 @@ import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
+import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
+import org.objectweb.asm.tree.TableSwitchInsnNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
@@ -30,8 +33,8 @@ import java.lang.reflect.Modifier
 /**
  * ModifyExpressionValue 注入器。
  *
- * 该注入器会匹配目标方法内的指定普通方法调用、`invokedynamic` 调用、字段读取、数组元素读取、数组长度、对象构造、类型转换、
- * `INSTANCEOF` 判断、条件跳转或 `ATHROW` 抛异常指令，
+ * 该注入器会匹配目标方法内的指定普通方法调用、`invokedynamic` 调用、字段读取、字段写入值、数组元素读取、数组元素写入值、数组长度、对象构造、类型转换、
+ * `INSTANCEOF` 判断、局部变量读取值、局部变量写入值、条件跳转、`tableswitch` / `lookupswitch` selector 或 `ATHROW` 抛异常指令，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
  * 对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收。
@@ -41,22 +44,30 @@ import java.lang.reflect.Modifier
  * 指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
- * [InjectionPoint.FIELD]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
+ * [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
  * 可匹配字段读取值，省略字段目标时会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`；
- * 也可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值，
+ * [InjectionPoint.FIELD_ASSIGN] 可匹配 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，省略字段目标时会按 handler 首参与返回类型筛选兼容字段写入；
+ * [InjectionPoint.FIELD] 也可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值；
+ * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 匹配数组元素写入前的待写入值，
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 可显式匹配普通调用或按 bootstrap owner、动态调用名、bootstrap 名
  * 以及动态调用点描述符匹配 `invokedynamic` 返回值；未指定调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；
  * [InjectionPoint.NEW] 匹配对象构造完成后的实例，未指定类型目标时，会按 handler 首参与返回类型筛选兼容的 `NEW` 候选；
  * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值；未指定类型目标时，会按 handler 首参与返回类型筛选兼容的
- * `CHECKCAST` 候选；不兼容的调用返回、字段读取、`NEW` / `CHECKCAST` 候选不计入 [ModifyExpressionValue.ordinal] 或命中数。
+ * `CHECKCAST` 候选；不兼容的调用返回、字段读取、字段写入、数组写入、`NEW` / `CHECKCAST` 候选不计入 [ModifyExpressionValue.ordinal] 或命中数。
  * [InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果，
+ * [InjectionPoint.LOAD] 匹配 `xLOAD` 读取出的栈顶表达式值，可用 [At.args] 中的 `index=N` 或 `var=N` 按 JVM 局部变量槽位过滤；
+ * handler 返回的新值只替换这一次读取表达式，不写回原局部变量槽位，
+ * [InjectionPoint.STORE] 匹配 `xSTORE` 消费前的待写入表达式值，可用 [At.args] 中的 `index=N` 或 `var=N` 按 JVM 局部变量槽位过滤；
+ * handler 返回的新值交给原 `xSTORE` 继续写入槽位，
  * [InjectionPoint.JUMP] 匹配条件跳转的原始分支结果，handler 接收 `Boolean` 并返回新的分支结果；`GOTO` 与 `JSR` 不支持表达式改写，
+ * [InjectionPoint.SWITCH] 匹配 `tableswitch` 或 `lookupswitch` 消费前的 `Int` selector，handler 返回的新 selector 会继续交给原 switch 指令分派，
  * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`，handler 可返回 `Throwable` 或其子类；
  * 指定类型目标时，只会匹配前一条真实指令为同类型 `<init>` 的直接构造异常
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
- * [InjectionPoint.FIELD] 字段读取、数组元素读取、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组元素读取、数组元素写入值、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围，
+ * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -95,15 +106,32 @@ class ModifyExpressionValueInjector(
                     ArrayAccessMode.NONE -> injectFieldRead(target)
                     ArrayAccessMode.GET -> injectArrayRead(target)
                     ArrayAccessMode.LENGTH -> injectArrayLength(target)
+                    ArrayAccessMode.SET -> throw IllegalArgumentException(
+                        "@ModifyExpressionValue array=set requires FIELD_ASSIGN injection point",
+                    )
+                }
+            InjectionPoint.FIELD_ASSIGN ->
+                when (arrayAccessMode()) {
+                    ArrayAccessMode.NONE -> injectFieldAssign(target)
+                    ArrayAccessMode.SET -> injectArrayWrite(target)
+                    ArrayAccessMode.GET -> throw IllegalArgumentException(
+                        "@ModifyExpressionValue array=get requires FIELD injection point",
+                    )
+                    ArrayAccessMode.LENGTH -> throw IllegalArgumentException(
+                        "@ModifyExpressionValue array=length requires FIELD injection point",
+                    )
                 }
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.LOAD -> injectLoad(target)
+            InjectionPoint.STORE -> injectStore(target)
             InjectionPoint.JUMP -> injectJump(target)
+            InjectionPoint.SWITCH -> injectSwitch(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, NEW, CAST, INSTANCEOF, JUMP, CONSTANT and THROW",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, LOAD, STORE, JUMP, SWITCH, CONSTANT and THROW",
             )
         }
     }
@@ -113,9 +141,7 @@ class ModifyExpressionValueInjector(
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
             "get" -> ArrayAccessMode.GET
             "length" -> ArrayAccessMode.LENGTH
-            "set" -> throw IllegalArgumentException(
-                "@ModifyExpressionValue array access supports only array=get and array=length",
-            )
+            "set" -> ArrayAccessMode.SET
             else -> throw IllegalArgumentException("Unsupported @ModifyExpressionValue array access mode: $arrayArg")
         }
     }
@@ -224,6 +250,48 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    private fun injectFieldAssign(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
+        val fieldTarget = parseFieldTarget(at.target)
+        if (!inferTarget && fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyExpressionValue FIELD_ASSIGN requires at.target field signature")
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (
+                insn !is FieldInsnNode ||
+                insn.opcode !in FIELD_WRITE_OPS ||
+                !(inferTarget || matchesTargetField(insn, fieldTarget))
+            ) {
+                continue
+            }
+
+            val fieldType = Type.getType(insn.desc)
+            if (inferTarget && !isHandlerCompatible(fieldType, allowThrowableSubtypeReturn = false)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, fieldType)
+            val il = buildExpressionValueModification(target, fieldType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
     private fun injectArrayRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
@@ -291,6 +359,43 @@ class ModifyExpressionValueInjector(
             val targetParamCount = validateHandlerSignature(target, Type.INT_TYPE)
             val il = buildExpressionValueModification(target, Type.INT_TYPE, targetParamCount)
             target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectArrayWrite(target: MethodNode): Int {
+        val fieldTarget = parseFieldTarget(at.target)
+        if (fieldTarget.name == null) {
+            throw IllegalArgumentException("@ModifyExpressionValue array write requires at.target array field signature")
+        }
+        if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
+            throw IllegalArgumentException("@ModifyExpressionValue array write target must be an array field: ${at.target}")
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode !in ARRAY_WRITE_OPS) {
+                continue
+            }
+
+            val fieldInsn = findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val expressionType = Type.getType(fieldInsn.desc).elementType
+            val targetParamCount = validateHandlerSignature(target, expressionType)
+            val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
             injectionCount++
         }
 
@@ -370,6 +475,98 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    private fun injectLoad(target: MethodNode): Int {
+        require(at.target.isEmpty()) {
+            "@ModifyExpressionValue LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
+        }
+        val localVariableIndex = parseLocalVariableIndex("LOAD")
+        val handlerExpressionType = requireHandlerExpressionArgumentType()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is VarInsnNode || insn.opcode !in LOAD_OPS) {
+                continue
+            }
+            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+                continue
+            }
+            if (!isLoadCompatibleWithHandler(insn.opcode, handlerExpressionType)) {
+                continue
+            }
+
+            val resolvedExpressionType = resolveIndexedLocalExpressionType(target, insn.`var`, handlerExpressionType)
+            if (localVariableIndex == null && handlerExpressionType.isReferenceType() && resolvedExpressionType == null) {
+                continue
+            }
+            val expressionType = resolvedExpressionType ?: handlerExpressionType
+            if (localVariableIndex == null && !isHandlerCompatible(expressionType, allowThrowableSubtypeReturn = false)) {
+                continue
+            }
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, expressionType)
+            val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun injectStore(target: MethodNode): Int {
+        require(at.target.isEmpty()) {
+            "@ModifyExpressionValue STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
+        }
+        val localVariableIndex = parseLocalVariableIndex("STORE")
+        val handlerExpressionType = requireHandlerExpressionArgumentType()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
+                continue
+            }
+            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+                continue
+            }
+            if (!isStoreCompatibleWithHandler(insn.opcode, handlerExpressionType)) {
+                continue
+            }
+
+            val resolvedExpressionType = resolveIndexedLocalExpressionType(target, insn.`var`, handlerExpressionType)
+            if (localVariableIndex == null && handlerExpressionType.isReferenceType() && resolvedExpressionType == null) {
+                continue
+            }
+            val expressionType = resolvedExpressionType ?: handlerExpressionType
+            if (localVariableIndex == null && !isHandlerCompatible(expressionType, allowThrowableSubtypeReturn = false)) {
+                continue
+            }
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, expressionType)
+            val il = buildExpressionValueModification(target, expressionType, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
     private fun isHandlerCompatible(
         expressionType: Type,
         allowThrowableSubtypeReturn: Boolean,
@@ -380,6 +577,188 @@ class ModifyExpressionValueInjector(
         }
         return isHandlerReturnCompatible(expressionType, Type.getReturnType(asmMethod), allowThrowableSubtypeReturn)
     }
+
+    private fun parseLocalVariableIndex(pointName: String): Int? {
+        val values =
+            at.args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                when {
+                    trimmed.startsWith("index=") -> trimmed.substringAfter("index=")
+                    trimmed.startsWith("var=") -> trimmed.substringAfter("var=")
+                    else -> null
+                }
+            }
+
+        if (values.isEmpty()) {
+            return null
+        }
+        require(values.size == 1) {
+            "@ModifyExpressionValue $pointName supports only one local variable slot filter in At.args"
+        }
+
+        val index =
+            values.single().toIntOrNull()
+                ?: throw IllegalArgumentException(
+                    "@ModifyExpressionValue $pointName local variable slot filter must be an integer: ${values.single()}",
+                )
+        require(index >= 0) {
+            "@ModifyExpressionValue $pointName local variable slot filter must be non-negative: $index"
+        }
+        return index
+    }
+
+    private fun requireHandlerExpressionArgumentType(): Type {
+        val handlerParams = Type.getArgumentTypes(asmMethod)
+        if (handlerParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue handler ${asmMethod.name} must take at least one argument for the original expression value",
+            )
+        }
+        return handlerParams[0]
+    }
+
+    private fun resolveIndexedLocalExpressionType(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? {
+        if (!fallbackType.isReferenceType()) {
+            return null
+        }
+
+        val headVariable = collectHeadParameters(target).firstOrNull { it.index == index }
+        if (headVariable != null) {
+            return headVariable.type
+        }
+
+        val localVariable = target.localVariables
+            .filter { it.index == index }
+            .mapNotNull { runCatching { Type.getType(it.desc) }.getOrNull() }
+            .firstOrNull { it.isReferenceType() && isHandlerParameterCompatible(it, fallbackType) }
+        if (localVariable != null) {
+            return localVariable
+        }
+
+        return referencedTypeFromSlotInstructions(target, index, fallbackType)
+    }
+
+    private fun collectHeadParameters(target: MethodNode): List<LocalSlotType> {
+        val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
+        var slot = if (isStatic) 0 else 1
+        return buildList {
+            for (argumentType in Type.getArgumentTypes(target.desc)) {
+                add(LocalSlotType(slot, argumentType))
+                slot += argumentType.size
+            }
+        }
+    }
+
+    private fun referencedTypeFromSlotInstructions(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? =
+        target.instructions.toArray()
+            .asSequence()
+            .filterIsInstance<VarInsnNode>()
+            .filter { it.`var` == index && it.opcode in SLOT_REFERENCE_OPS }
+            .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
+            .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
+
+    private fun inferReferenceTypeAroundSlotInstruction(
+        target: MethodNode,
+        insn: VarInsnNode,
+    ): Type? {
+        if (insn.opcode == Opcodes.ASTORE) {
+            val previous = previousRealInstruction(insn)
+            if (previous is TypeInsnNode && previous.opcode == Opcodes.CHECKCAST) {
+                return Type.getObjectType(previous.desc)
+            }
+            if (previous is LdcInsnNode && previous.cst is String) {
+                return Type.getType(String::class.java)
+            }
+            inferReferenceTypeFromNextLoadConsumer(target, insn)?.let { return it }
+            return null
+        }
+
+        val next = nextRealInstruction(insn)
+        return when (next) {
+            is MethodInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.INVOKEVIRTUAL || next.opcode == Opcodes.INVOKEINTERFACE) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is FieldInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.GETFIELD || next.opcode == Opcodes.PUTFIELD) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is TypeInsnNode ->
+                if (next.opcode == Opcodes.CHECKCAST) {
+                    Type.getObjectType(next.desc)
+                } else {
+                    null
+                }
+            else ->
+                if (next?.opcode == Opcodes.ARETURN) {
+                    val returnType = Type.getReturnType(target.desc)
+                    if (returnType.isReferenceType()) returnType else null
+                } else {
+                    null
+                }
+        }
+    }
+
+    private fun inferReferenceTypeFromNextLoadConsumer(
+        target: MethodNode,
+        storeInsn: VarInsnNode,
+    ): Type? {
+        var current = storeInsn.next
+        while (current != null) {
+            if (current is VarInsnNode && current.`var` == storeInsn.`var`) {
+                if (current.opcode == Opcodes.ALOAD) {
+                    return inferReferenceTypeAroundSlotInstruction(target, current)
+                }
+                if (current.opcode in STORE_OPS) {
+                    return null
+                }
+            }
+            current = current.next
+        }
+        return null
+    }
+
+    private fun isLoadCompatibleWithHandler(
+        opcode: Int,
+        handlerType: Type,
+    ): Boolean =
+        when (opcode) {
+            Opcodes.ILOAD -> handlerType.sort in INT_VARIABLE_TYPE_SORTS
+            Opcodes.LLOAD -> handlerType == Type.LONG_TYPE
+            Opcodes.FLOAD -> handlerType == Type.FLOAT_TYPE
+            Opcodes.DLOAD -> handlerType == Type.DOUBLE_TYPE
+            Opcodes.ALOAD -> handlerType.sort == Type.OBJECT || handlerType.sort == Type.ARRAY
+            else -> false
+        }
+
+    private fun isStoreCompatibleWithHandler(
+        opcode: Int,
+        handlerType: Type,
+    ): Boolean =
+        when (opcode) {
+            Opcodes.ISTORE -> handlerType.sort in INT_VARIABLE_TYPE_SORTS
+            Opcodes.LSTORE -> handlerType == Type.LONG_TYPE
+            Opcodes.FSTORE -> handlerType == Type.FLOAT_TYPE
+            Opcodes.DSTORE -> handlerType == Type.DOUBLE_TYPE
+            Opcodes.ASTORE -> handlerType.sort == Type.OBJECT || handlerType.sort == Type.ARRAY
+            else -> false
+        }
 
     private fun injectConstant(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
@@ -504,6 +883,37 @@ class ModifyExpressionValueInjector(
         il.add(buildExpressionValueModification(target, Type.BOOLEAN_TYPE, targetParamCount))
         il.add(JumpInsnNode(Opcodes.IFNE, jumpInsn.label))
         return il
+    }
+
+    private fun injectSwitch(target: MethodNode): Int {
+        if (at.target.isNotEmpty()) {
+            throw IllegalArgumentException("@ModifyExpressionValue SWITCH does not support at.target")
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is TableSwitchInsnNode && insn !is LookupSwitchInsnNode) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, Type.INT_TYPE)
+            val il = buildExpressionValueModification(target, Type.INT_TYPE, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
     }
 
     private fun injectThrow(target: MethodNode): Int {
@@ -742,6 +1152,14 @@ class ModifyExpressionValueInjector(
         return current
     }
 
+    private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.next
+        while (current != null && current.opcode < 0) {
+            current = current.next
+        }
+        return current
+    }
+
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -858,6 +1276,12 @@ class ModifyExpressionValueInjector(
         for (index in startIndex until insns.size) {
             val insn = insns[index]
             if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
                 return index
             }
         }
@@ -1002,7 +1426,7 @@ class ModifyExpressionValueInjector(
                 }
                 return null
             }
-            if (cursor is MethodInsnNode || cursor.opcode in ARRAY_READ_OPS) {
+            if (cursor is MethodInsnNode || cursor.opcode in ARRAY_READ_OPS || cursor.opcode in ARRAY_WRITE_OPS) {
                 return null
             }
             cursor = cursor.previous
@@ -1037,14 +1461,25 @@ class ModifyExpressionValueInjector(
         val desc: String?,
     )
 
+    private data class LocalSlotType(
+        val index: Int,
+        val type: Type,
+    )
+
     private enum class ArrayAccessMode {
         NONE,
         GET,
+        SET,
         LENGTH,
     }
 
     private companion object {
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+        private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+        private val LOAD_OPS = setOf(Opcodes.ILOAD, Opcodes.LLOAD, Opcodes.FLOAD, Opcodes.DLOAD, Opcodes.ALOAD)
+        private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
+        private val SLOT_REFERENCE_OPS = setOf(Opcodes.ALOAD, Opcodes.ASTORE)
+        private val INT_VARIABLE_TYPE_SORTS = setOf(Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR)
         private val ARRAY_READ_OPS =
             setOf(
                 Opcodes.IALOAD,
@@ -1055,6 +1490,17 @@ class ModifyExpressionValueInjector(
                 Opcodes.BALOAD,
                 Opcodes.CALOAD,
                 Opcodes.SALOAD,
+            )
+        private val ARRAY_WRITE_OPS =
+            setOf(
+                Opcodes.IASTORE,
+                Opcodes.LASTORE,
+                Opcodes.FASTORE,
+                Opcodes.DASTORE,
+                Opcodes.AASTORE,
+                Opcodes.BASTORE,
+                Opcodes.CASTORE,
+                Opcodes.SASTORE,
             )
         private val JUMP_OPCODE_NAMES =
             mapOf(

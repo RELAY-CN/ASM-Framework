@@ -19,9 +19,12 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
+import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
+import org.objectweb.asm.tree.TableSwitchInsnNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
@@ -29,13 +32,14 @@ import java.lang.reflect.Method
 /**
  * 指令点注入器。
  *
- * 用于处理字段访问、字段赋值、局部变量读写、对象创建、类型转换、类型判断、跳转、常量与抛异常等单条字节码指令附近的普通 `@AsmInject`。
+ * 用于处理字段访问、字段赋值、局部变量读写、对象创建、类型转换、类型判断、跳转、switch、常量与抛异常等单条字节码指令附近的普通 `@AsmInject`。
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
  * 普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] /
- * [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
- * 边界缩小候选指令查找范围，也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
- * `index=N` 或 `var=N` 限制 JVM 局部变量槽位；JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，CONSTANT
+ * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
+ * 边界缩小候选指令查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；
+ * 也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
+ * `index=N` 或 `var=N` 限制 JVM 局部变量槽位；JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，SWITCH 不支持 `At.target`，CONSTANT
  * 指定 `At.target` 时按常量文本过滤，THROW 指定 `At.target`
  * 时只匹配 `ATHROW` 前直接构造出的同类型异常。
  * [InjectionPoint.CONSTANT] 搭配 [Shift.REPLACE] 时会删除原常量加载指令，并用 handler 返回值作为新的常量表达式值；
@@ -129,6 +133,7 @@ class InstructionPointInjector(
             point == InjectionPoint.CAST ||
             point == InjectionPoint.INSTANCEOF ||
             point == InjectionPoint.JUMP ||
+            point == InjectionPoint.SWITCH ||
             point == InjectionPoint.CONSTANT ||
             point == InjectionPoint.THROW
 
@@ -247,6 +252,12 @@ class InstructionPointInjector(
             if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
                 return index
             }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
         }
 
         return null
@@ -330,6 +341,13 @@ class InstructionPointInjector(
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is JumpInsnNode &&
                         (targetOpcode == null || insn.opcode == targetOpcode)
+            }
+            InjectionPoint.SWITCH -> {
+                require(target.isEmpty()) {
+                    "@AsmInject SWITCH does not support At.target"
+                }
+                fun(insn: AbstractInsnNode): Boolean =
+                    insn is TableSwitchInsnNode || insn is LookupSwitchInsnNode
             }
             InjectionPoint.CONSTANT -> {
                 fun(insn: AbstractInsnNode): Boolean =
@@ -611,6 +629,21 @@ class InstructionPointInjector(
             return false
         }
         if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
             return false
         }
         return targetDesc == null || insn.desc == targetDesc

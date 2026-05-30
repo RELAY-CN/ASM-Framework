@@ -15,6 +15,7 @@ import org.objectweb.asm.Type
 import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.MethodInsnNode
@@ -42,7 +43,8 @@ import java.lang.reflect.Modifier
  * @param variableIndex 要修改的 JVM 局部变量槽位索引
  * @param variableNames 要匹配的局部变量名；为空时不按名称过滤
  * @param ordinal 未指定 [variableIndex] 时，同类型入口参数、读取点或写入点的序号
- * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 INVOKE 边界缩小匹配范围
+ * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 INVOKE 边界缩小匹配范围，
+ * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -643,6 +645,12 @@ class ModifyVariableInjector(
             if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
                 return index
             }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
         }
 
         return null
@@ -685,6 +693,21 @@ class ModifyVariableInjector(
             return false
         }
         if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
             return false
         }
         return targetDesc == null || insn.desc == targetDesc
