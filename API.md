@@ -1018,6 +1018,92 @@ val callback = CallbackInfo.cancellable()
 val callback = CallbackInfo.returnable("value")
 ```
 
+### Args
+
+`Args` 是 `@ModifyArgs` handler 接收的调用参数容器，用于读取和改写匹配方法调用、构造器调用或 `invokedynamic` 调用的整组参数。
+
+索引按目标调用描述符中的参数声明顺序计算，不包含实例方法调用的 receiver。构造器调用只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver。
+
+#### 方法
+
+##### `size(): Int`
+
+返回当前调用点的方法参数数量。
+
+##### `get<T>(index: Int): T`
+
+读取指定位置的参数。
+
+**参数：**
+
+- `index`: 参数索引，从 0 开始
+
+**返回：**
+
+- `T`: 指定位置的参数值
+
+**异常：**
+
+- `IndexOutOfBoundsException`: `index` 不在参数范围内
+- `ClassCastException`: 调用方指定的泛型类型与实际值不兼容
+
+##### `set(index: Int, value: Any?)`
+
+改写指定位置的参数。容器不会在写入时执行类型检查；如果写入值与原调用参数类型不兼容，后续字节码恢复调用参数时会抛出 `ClassCastException` 或拆箱异常。
+
+**参数：**
+
+- `index`: 参数索引，从 0 开始
+- `value`: 新参数值；必须与原调用参数类型兼容
+
+##### `toArray(): Array<Any?>`
+
+返回底层可变参数数组。该数组主要供注入器生成的字节码读取修改后的参数使用，调用方直接修改它会影响当前容器内容。
+
+**示例：**
+
+```kotlin
+@ModifyArgs(method = "target()V", at = At(value = InjectionPoint.INVOKE, target = "join(Ljava/lang/String;I)V"))
+fun rewriteArgs(args: Args) {
+    args.set(0, args.get<String>(0).trim())
+    args.set(1, args.get<Int>(1) + 1)
+}
+```
+
+### Operation
+
+`Operation<T>` 是 `@WrapOperation` 与 `@WrapMethod` handler 接收的原始操作句柄，用于按需调用、跳过或多次执行被包裹的原操作。
+
+不同注入点的 `call(...)` 参数形态与原操作栈参数一致：实例方法调用和 `GETFIELD` 读取需要把 receiver 作为第一个参数；静态方法调用、`GETSTATIC` 读取、构造器调用、`invokedynamic` 调用、数组访问、局部变量读写、类型转换、类型判断、条件跳转、switch、常量读取和抛异常点各自使用对应的参数形态。`@WrapMethod` 包裹实例目标方法时 receiver 已绑定到 `Operation` 内部，调用 `call(...)` 时只传目标方法参数。
+
+#### 方法
+
+##### `call(vararg args: Any?): T`
+
+执行原始操作并返回原始操作结果。目标方法或构造器内部抛出异常时，反射调用可能把异常包装为 `java.lang.reflect.InvocationTargetException`。
+
+**参数：**
+
+- `args`: 原始操作参数；参数数量和顺序必须符合被包裹操作的形态
+
+**返回：**
+
+- `T`: 原始操作返回值
+
+**异常：**
+
+- `IllegalArgumentException`: 参数数量或参数类型不符合原操作形态
+- `ReflectiveOperationException`: 目标方法、构造器或字段无法解析，或反射调用失败
+
+**示例：**
+
+```kotlin
+@WrapOperation(method = "target()Ljava/lang/String;", at = At(value = InjectionPoint.INVOKE, target = "load()Ljava/lang/String;"))
+fun wrapLoad(operation: Operation<String>): String {
+    return operation.call().trim()
+}
+```
+
 ### InjectionPoint
 
 注入点枚举，定义代码注入的位置。
