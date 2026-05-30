@@ -130,6 +130,26 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 }
 ```
 
+### AsmTransformer
+
+`AsmTransformer` 是基于 ASM Tree API 的字节码转换器基类，用于实现自定义 classfile 读写与转换流程。
+
+#### 方法
+
+**公开方法：**
+
+- `transform(className: String, classfileBuffer: ByteArray, loader: ClassLoader?): ByteArray` - 转换类字节码；实现方应在无需改写时返回原始字节码
+- `shouldTransform(className: String): Boolean` - 快速判断目标类是否需要转换；默认始终返回 `true`
+
+**受保护工具方法：**
+
+- `readClass(className: String, basicClass: ByteArray): ClassNode` - 使用 `ClassReader.EXPAND_FRAMES` 读取 classfile 字节码
+- `readClassWithReader(className: String, basicClass: ByteArray)` - 读取 `ClassNode` 并返回同一次解析使用的 `ClassReader`
+- `writeClass(classNode: ClassNode, loader: ClassLoader? = null): ByteArray` - 将 `ClassNode` 写回字节码
+- `writeClass(classNode: ClassNode, loader: ClassLoader? = null, classReader: ClassReader? = null): ByteArray` - 写回字节码，并可复用同一次读取得到的 `ClassReader` 辅助 frame 计算
+
+写回时会使用 `ClassWriter.COMPUTE_FRAMES` 与 `SafeClassWriter` 解析公共父类。读写上下文由单次转换持有，避免复用同一个转换器实例时出现跨线程缓存污染。
+
 ### Transformer
 
 `Transformer` 是基于 ASM Tree API 的类节点转换接口，适合在框架外部扩展自定义 `ClassNode` 改写逻辑。
