@@ -962,7 +962,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 解释为“匹配字段写入或数组元素写入前的条件判断”，把 `JUMP` 解释为“匹配条件跳转分支结果前的条件判断”，把 `THROW` 解释为“匹配即将抛出的异常前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`，并支持 `At.by` 按真实字节码指令数移动插入锚点；
 普通 `@AsmInject(NEW)` 只支持
-`Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 可用 `Slice`
+`Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 可用 `Slice`
 把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
 不会把局部变量值传给 handler，也可以用
 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；需要只替换本次读取表达式值时使用 `@ModifyExpressionValue(LOAD)`，需要改写本次写入前栈值并让原 `xSTORE` 继续写入时使用 `@ModifyExpressionValue(STORE)`，需要保留可调用原读取值的操作句柄时使用 `@WrapOperation(LOAD)`，需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时使用 `@WrapOperation(STORE)`，需要读取并写回变量值时使用 `@ModifyVariable`。
