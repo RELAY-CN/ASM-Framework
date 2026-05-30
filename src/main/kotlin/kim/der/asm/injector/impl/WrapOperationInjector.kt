@@ -2223,6 +2223,17 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 校验普通方法调用包裹 handler 签名。
+     *
+     * handler 参数需依次接收原调用 receiver（实例调用时）、原调用参数、[Operation]，
+     * 以及可选的目标方法参数；返回类型必须兼容原调用返回类型。
+     *
+     * @param target 目标方法
+     * @param callInsn 被包裹的方法调用指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         callInsn: MethodInsnNode,
@@ -2260,6 +2271,17 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 `invokedynamic` 调用包裹 handler 签名。
+     *
+     * handler 参数需依次接收动态调用参数、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容动态调用返回类型。
+     *
+     * @param target 目标方法
+     * @param callInsn 被包裹的 `invokedynamic` 指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateInvokeDynamicHandlerSignature(
         target: MethodNode,
         callInsn: InvokeDynamicInsnNode,
@@ -2297,6 +2319,16 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 `INSTANCEOF` 包裹 handler 签名。
+     *
+     * handler 需接收待判断引用、[Operation] 与可选目标方法参数，并返回 boolean 兼容值。
+     *
+     * @param target 目标方法
+     * @param instanceofInsn 被包裹的 `INSTANCEOF` 指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateInstanceofHandlerSignature(
         target: MethodNode,
         instanceofInsn: TypeInsnNode,
@@ -2334,6 +2366,16 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 `CHECKCAST` 包裹 handler 签名。
+     *
+     * handler 需接收待转换引用、[Operation] 与可选目标方法参数，并返回兼容 cast 目标类型的引用。
+     *
+     * @param target 目标方法
+     * @param castInsn 被包裹的 `CHECKCAST` 指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateCastHandlerSignature(
         target: MethodNode,
         castInsn: TypeInsnNode,
@@ -2371,6 +2413,17 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验构造器包裹 handler 签名。
+     *
+     * handler 参数需依次接收原构造器参数、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容构造完成后的对象类型。
+     *
+     * @param target 目标方法
+     * @param constructorInsn 被包裹的构造器调用指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateConstructorHandlerSignature(
         target: MethodNode,
         constructorInsn: MethodInsnNode,
@@ -2408,6 +2461,17 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验字段写入包裹 handler 签名。
+     *
+     * handler 参数需接收实例 receiver（实例字段时）、待写入值、[Operation] 与可选目标方法参数；
+     * 返回类型必须为 `Unit` / `void` 兼容类型。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 被包裹的字段写入指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateFieldAssignHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -2444,6 +2508,17 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验字段读取包裹 handler 签名。
+     *
+     * handler 参数需接收实例 receiver（实例字段时）、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容字段值类型。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 被包裹的字段读取指令
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateFieldHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -2481,6 +2556,18 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验数组访问包裹 handler 签名。
+     *
+     * handler 参数需按访问模式接收数组引用、索引、待写入值、[Operation] 与可选目标方法参数；
+     * 返回类型按读取、写入或长度访问分别校验为元素类型、`Unit` / `void` 或 `Int`。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param mode 数组访问模式
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateArrayAccessHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -2539,6 +2626,17 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验局部变量读写包裹 handler 签名。
+     *
+     * handler 参数需接收局部变量表达式值、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容局部变量表达式类型。
+     *
+     * @param target 目标方法
+     * @param loadType 局部变量表达式值类型
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateLoadHandlerSignature(
         target: MethodNode,
         loadType: Type,
@@ -2575,6 +2673,17 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验常量包裹 handler 签名。
+     *
+     * handler 参数需接收常量值、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容原常量位置期望的值类型。
+     *
+     * @param target 目标方法
+     * @param constantType handler 接收的常量类型
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateConstantHandlerSignature(
         target: MethodNode,
         constantType: Type,
@@ -2611,6 +2720,16 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验条件跳转包裹 handler 签名。
+     *
+     * handler 参数需接收原始 boolean 分支结果、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容 boolean。
+     *
+     * @param target 目标方法
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateJumpHandlerSignature(target: MethodNode): Int {
         val expectedStackParams = arrayOf(Type.BOOLEAN_TYPE)
         val operationType = Type.getType(Operation::class.java)
@@ -2644,6 +2763,16 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 switch selector 包裹 handler 签名。
+     *
+     * handler 参数需接收原始 `Int` selector、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容 `Int`。
+     *
+     * @param target 目标方法
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateSwitchHandlerSignature(target: MethodNode): Int {
         val expectedStackParams = arrayOf(Type.INT_TYPE)
         val operationType = Type.getType(Operation::class.java)
@@ -2677,6 +2806,16 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验异常抛出包裹 handler 签名。
+     *
+     * handler 参数需接收原异常对象、[Operation] 与可选目标方法参数；
+     * 返回类型必须兼容 [Throwable]。
+     *
+     * @param target 目标方法
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
     private fun validateThrowHandlerSignature(target: MethodNode): Int {
         val expectedStackParams = arrayOf(Type.getType(Throwable::class.java))
         val operationType = Type.getType(Operation::class.java)
