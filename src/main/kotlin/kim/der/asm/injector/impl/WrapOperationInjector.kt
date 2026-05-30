@@ -508,6 +508,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹 `CHECKCAST` 类型转换操作。
+     *
+     * 显式声明类型目标时只匹配该 cast 类型；未声明目标时按 handler 返回类型筛选兼容转换目标。
+     * 匹配后会把原 `CHECKCAST` 替换为 handler 调用，handler 可通过 [Operation.call] 执行原转换。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的类型转换数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectCast(target: MethodNode): Int {
         val castTarget = at.target.replace('.', '/')
         val matchAnyTarget = castTarget.isEmpty()
@@ -542,9 +552,25 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 判断目标推断模式下 handler 返回类型是否兼容候选 cast 类型。
+     *
+     * @param castType 候选 `CHECKCAST` 的目标类型
+     * @return handler 返回类型可放回该 cast 结果位置时返回 `true`
+     */
     private fun isCastReturnCompatible(castType: Type): Boolean =
         isReturnCompatible(castType, Type.getReturnType(asmMethod))
 
+    /**
+     * 包裹 `INSTANCEOF` 类型判断操作。
+     *
+     * 显式声明类型目标时只匹配该 `INSTANCEOF` 类型；未声明目标时匹配切片内全部类型判断。
+     * 匹配后会把原 `INSTANCEOF` 替换为 handler 调用，handler 可通过 [Operation.call] 执行原判断。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的类型判断数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectInstanceof(target: MethodNode): Int {
         val typeTarget = at.target.replace('.', '/')
         val matchAnyTarget = typeTarget.isEmpty()
@@ -576,6 +602,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹条件跳转操作的 boolean 分支结果。
+     *
+     * `at.target` 可声明具体条件跳转 opcode 名称或数字；未声明时匹配所有条件跳转。
+     * 原跳转会被替换为 handler 调用后的 `IFNE` 分派，handler 可通过 [Operation.call] 取得原分支结果。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的条件跳转数量
+     * @throws IllegalArgumentException 目标 opcode 不是条件跳转或 handler 签名不兼容时抛出
+     */
     private fun injectJump(target: MethodNode): Int {
         val targetOpcode = parseJumpOpcodeTarget(at.target)
         if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
@@ -615,6 +651,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹局部变量读取操作产生的表达式值。
+     *
+     * `LOAD` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * 注入逻辑插入在读取指令之后，只替换本次读取压入栈顶的值，不回写局部变量槽位。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的局部变量读取数量
+     * @throws IllegalArgumentException 声明了 `at.target`、槽位过滤参数非法或 handler 签名不兼容时抛出
+     */
     private fun injectLoad(target: MethodNode): Int {
         require(at.target.isEmpty()) {
             "@WrapOperation LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
@@ -662,6 +708,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹局部变量写入操作即将消费的表达式值。
+     *
+     * `STORE` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * 注入逻辑插入在写入指令之前，让原 `xSTORE` 继续把 handler 返回的新值写入局部变量槽位。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的局部变量写入数量
+     * @throws IllegalArgumentException 声明了 `at.target`、槽位过滤参数非法或 handler 签名不兼容时抛出
+     */
     private fun injectStore(target: MethodNode): Int {
         require(at.target.isEmpty()) {
             "@WrapOperation STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
