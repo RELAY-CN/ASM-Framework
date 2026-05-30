@@ -1726,6 +1726,16 @@ class WrapOperationInjector(
         return il
     }
 
+    /**
+     * 构造普通方法调用对应的 [Operation] 句柄实例。
+     *
+     * 句柄记录调用 owner、方法名、描述符、是否静态以及调用参数类型，
+     * 供 handler 通过 [Operation.call] 重新执行原方法调用。
+     *
+     * @param il 待追加的指令列表
+     * @param callInsn 原方法调用指令
+     * @param callParamTypes 原调用参数类型
+     */
     private fun createMethodOperation(
         il: InsnList,
         callInsn: MethodInsnNode,
@@ -1757,6 +1767,15 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造 `invokedynamic` 调用对应的 [Operation] 句柄实例。
+     *
+     * 句柄记录 bootstrap handle、动态调用名、调用描述符、返回类型、调用参数类型与 bootstrap 参数。
+     *
+     * @param il 待追加的指令列表
+     * @param callInsn 原 `invokedynamic` 指令
+     * @param callParamTypes 原动态调用参数类型
+     */
     private fun createInvokeDynamicOperation(
         il: InsnList,
         callInsn: InvokeDynamicInsnNode,
@@ -1783,6 +1802,15 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造对象构造器调用对应的 [Operation] 句柄实例。
+     *
+     * 句柄记录构造目标类型、构造器描述符与构造器参数类型，供 handler 重新执行原构造流程。
+     *
+     * @param il 待追加的指令列表
+     * @param constructorInsn 原构造器调用指令
+     * @param constructorParamTypes 原构造器参数类型
+     */
     private fun createConstructorOperation(
         il: InsnList,
         constructorInsn: MethodInsnNode,
@@ -1812,6 +1840,14 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造字段读取对应的 [Operation] 句柄实例。
+     *
+     * 句柄记录字段 owner、字段名、字段描述符与是否静态，供 handler 执行原字段读取。
+     *
+     * @param il 待追加的指令列表
+     * @param fieldInsn 原字段读取指令
+     */
     private fun createFieldReadOperation(
         il: InsnList,
         fieldInsn: FieldInsnNode,
@@ -1834,6 +1870,14 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造字段写入对应的 [Operation] 句柄实例。
+     *
+     * 句柄记录字段 owner、字段名、字段描述符、是否静态以及写入标记，供 handler 执行原字段写入。
+     *
+     * @param il 待追加的指令列表
+     * @param fieldInsn 原字段写入指令
+     */
     private fun createFieldWriteOperation(
         il: InsnList,
         fieldInsn: FieldInsnNode,
@@ -1857,6 +1901,15 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造数组访问对应的 [Operation] 句柄实例。
+     *
+     * 数组长度模式只记录数组类型；元素读写模式额外记录是否为写入操作。
+     *
+     * @param il 待追加的指令列表
+     * @param arrayType 数组类型
+     * @param mode 数组访问模式
+     */
     private fun createArrayOperation(
         il: InsnList,
         arrayType: Type,
@@ -1890,6 +1943,14 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造 `CHECKCAST` 类型转换对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<checkcast>` 作为内部操作名，并记录 cast 目标类型。
+     *
+     * @param il 待追加的指令列表
+     * @param castType cast 目标类型
+     */
     private fun createCastOperation(
         il: InsnList,
         castType: Type,
@@ -1910,6 +1971,14 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造 `INSTANCEOF` 类型判断对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<instanceof>` 作为内部操作名，并记录判断目标类型。
+     *
+     * @param il 待追加的指令列表
+     * @param instanceofType `INSTANCEOF` 目标类型
+     */
     private fun createInstanceofOperation(
         il: InsnList,
         instanceofType: Type,
@@ -1930,6 +1999,14 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造局部变量读取对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<load>` 作为内部操作名，并记录读取值类型。
+     *
+     * @param il 待追加的指令列表
+     * @param loadType 局部变量读取值类型
+     */
     private fun createLoadOperation(
         il: InsnList,
         loadType: Type,
@@ -1950,6 +2027,14 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造局部变量写入对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<store>` 作为内部操作名，并记录写入值类型。
+     *
+     * @param il 待追加的指令列表
+     * @param storeType 局部变量写入值类型
+     */
     private fun createStoreOperation(
         il: InsnList,
         storeType: Type,
@@ -1970,6 +2055,13 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造条件跳转对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<jump>` 作为内部操作名，并固定记录 boolean 分支值类型。
+     *
+     * @param il 待追加的指令列表
+     */
     private fun createJumpOperation(il: InsnList) {
         val operationType = Type.getType(Operation::class.java)
         il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
@@ -1987,6 +2079,13 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造 switch selector 对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<switch>` 作为内部操作名，并固定记录 `Int` selector 类型。
+     *
+     * @param il 待追加的指令列表
+     */
     private fun createSwitchOperation(il: InsnList) {
         val operationType = Type.getType(Operation::class.java)
         il.add(TypeInsnNode(Opcodes.NEW, operationType.internalName))
@@ -2004,6 +2103,15 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造常量加载对应的 [Operation] 句柄实例。
+     *
+     * 句柄保存装箱后的常量值与常量类型，供 handler 通过 [Operation.call] 取得原常量。
+     *
+     * @param il 待追加的指令列表
+     * @param constantInsn 原常量指令
+     * @param constantType 常量值类型
+     */
     private fun createConstantOperation(
         il: InsnList,
         constantInsn: AbstractInsnNode,
@@ -2026,6 +2134,13 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 构造异常抛出对应的 [Operation] 句柄实例。
+     *
+     * 句柄使用 `<throw>` 作为内部操作名，并固定记录 [Throwable] 类型。
+     *
+     * @param il 待追加的指令列表
+     */
     private fun createThrowOperation(il: InsnList) {
         val operationType = Type.getType(Operation::class.java)
         val throwableType = Type.getType(Throwable::class.java)
@@ -2044,6 +2159,12 @@ class WrapOperationInjector(
         )
     }
 
+    /**
+     * 将 ASM 类型数组转换为运行时 `Class[]` 并压入栈顶。
+     *
+     * @param il 待追加的指令列表
+     * @param types 需要转换为 `Class` 的 ASM 类型数组
+     */
     private fun pushClassArray(
         il: InsnList,
         types: Array<Type>,
@@ -2058,6 +2179,14 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 将 bootstrap 参数数组转换为 `Object[]` 并压入栈顶。
+     *
+     * 基础数值参数会在写入数组前装箱，保证 `Object[]` 元素类型正确。
+     *
+     * @param il 待追加的指令列表
+     * @param bootstrapArgs `invokedynamic` bootstrap 参数数组
+     */
     private fun pushBootstrapArgumentArray(
         il: InsnList,
         bootstrapArgs: Array<Any>,
@@ -2072,6 +2201,15 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 将单个 bootstrap 参数压入栈顶并按需装箱。
+     *
+     * ASM 会把 `int`、`long`、`float`、`double` bootstrap 参数作为基础类型常量压栈，
+     * 写入 `Object[]` 前需要显式装箱。
+     *
+     * @param il 待追加的指令列表
+     * @param value bootstrap 参数值
+     */
     private fun pushBootstrapArgument(
         il: InsnList,
         value: Any,
