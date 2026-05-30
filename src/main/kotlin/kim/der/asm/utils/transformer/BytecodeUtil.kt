@@ -11,12 +11,16 @@ import org.objectweb.asm.ConstantDynamic
 import org.objectweb.asm.tree.*
 
 /**
- * 字节码工具类
- * 提供常量检查和类型判断等功能
+ * 字节码工具类。
+ *
+ * 提供常量指令识别、常量值与常量类型推断，以及 ASM 节点访问标志判断等通用能力。
+ *
+ * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object BytecodeUtil {
     /**
-     * 所有常量操作码
+     * JVM 短常量操作码集合。
      */
     private val CONSTANTS_ALL =
         intArrayOf(
@@ -38,7 +42,7 @@ object BytecodeUtil {
         )
 
     /**
-     * 常量值数组
+     * 与 [CONSTANTS_ALL] 顺序对应的常量值。
      */
     private val CONSTANTS_VALUES =
         arrayOf<Any?>(
@@ -60,7 +64,7 @@ object BytecodeUtil {
         )
 
     /**
-     * 常量类型数组
+     * 与 [CONSTANTS_ALL] 顺序对应的常量类型描述符。
      */
     private val CONSTANTS_TYPES =
         arrayOf(
@@ -82,7 +86,15 @@ object BytecodeUtil {
         )
 
     /**
-     * 检查指令是否为常量指令
+     * 判断指令是否为框架支持的常量加载指令。
+     *
+     * 支持 JVM 短常量指令、`LDC`，以及 `BIPUSH` / `SIPUSH`。
+     *
+     * @param insn 待检查的指令；可为 `null`
+     * @return 指令为常量加载指令时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun isConstant(insn: AbstractInsnNode?): Boolean {
         if (insn == null) {
@@ -94,7 +106,16 @@ object BytecodeUtil {
     }
 
     /**
-     * 获取常量值
+     * 读取常量加载指令对应的常量值。
+     *
+     * 非常量指令或 `null` 会返回 `null`；非法的 [IntInsnNode] 操作码会抛出异常。
+     *
+     * @param insn 待读取的指令；可为 `null`
+     * @return 指令加载的常量值
+     * @throws IllegalArgumentException 当 [IntInsnNode] 不是 `BIPUSH` 或 `SIPUSH` 时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun getConstant(insn: AbstractInsnNode?): Any? {
         if (insn == null) {
@@ -116,7 +137,16 @@ object BytecodeUtil {
     }
 
     /**
-     * 获取常量的类型
+     * 推断常量加载指令的栈类型。
+     *
+     * `Type` 常量会区分类字面量与方法类型字面量；`ConstantDynamic` 使用自身描述符作为结果类型。
+     *
+     * @param insn 待读取的指令；可为 `null`
+     * @return 常量入栈后的 ASM [Type]；无法推断时返回 `null`
+     * @throws IllegalArgumentException 当 [IntInsnNode] 不是 `BIPUSH` 或 `SIPUSH` 时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun getConstantType(insn: AbstractInsnNode?): Type? {
         if (insn == null) {
@@ -158,6 +188,16 @@ object BytecodeUtil {
 
     /**
      * 检查常量指令是否匹配注解中的文本目标。
+     *
+     * 文本目标支持 `null`、`true` / `false`、数字、字符串、类字面量 internal name 或 binary name、
+     * 方法类型描述符、方法句柄 `owner.name(desc)`，以及动态常量的 `name` 或 `name:descriptor`。
+     *
+     * @param insn 常量加载指令
+     * @param value 注解中声明的文本目标
+     * @return 常量值与文本目标匹配时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun matchesConstantText(
         insn: AbstractInsnNode,
@@ -203,7 +243,11 @@ object BytecodeUtil {
         }
 
     /**
-     * 检查方法是否有指定标志
+     * 检查方法是否带有指定访问标志。
+     *
+     * @param method 方法节点
+     * @param flag ASM 访问标志
+     * @return 方法访问标志完整包含 [flag] 时返回 `true`
      */
     fun hasFlag(
         method: MethodNode,
@@ -211,7 +255,11 @@ object BytecodeUtil {
     ): Boolean = (method.access and flag) == flag
 
     /**
-     * 检查类是否有指定标志
+     * 检查类是否带有指定访问标志。
+     *
+     * @param classNode 类节点
+     * @param flag ASM 访问标志
+     * @return 类访问标志完整包含 [flag] 时返回 `true`
      */
     fun hasFlag(
         classNode: ClassNode,
@@ -219,7 +267,11 @@ object BytecodeUtil {
     ): Boolean = (classNode.access and flag) == flag
 
     /**
-     * 检查字段是否有指定标志
+     * 检查字段是否带有指定访问标志。
+     *
+     * @param field 字段节点
+     * @param flag ASM 访问标志
+     * @return 字段访问标志完整包含 [flag] 时返回 `true`
      */
     fun hasFlag(
         field: FieldNode,
