@@ -165,6 +165,7 @@ object AsmMethodCallGenerator {
      * 生成创建 CallbackInfo 实例的指令。
      *
      * @param il 指令列表
+     * @param cancellable 创建的 CallbackInfo 是否允许取消目标方法
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
