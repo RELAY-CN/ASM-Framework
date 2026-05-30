@@ -186,7 +186,16 @@ class HeadInjector(
     }
 
     /**
-     * 分配局部变量索引
+     * 分配新的局部变量槽位。
+     *
+     * 该方法会避开目标方法参数、局部变量表以及已有变量访问指令，适合为 HEAD 注入创建 CallbackInfo 临时变量。
+     *
+     * @param target 目标方法
+     * @param type 待分配局部变量的类型
+     * @return 新局部变量的起始槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun allocateLocalVariable(
         target: MethodNode,
