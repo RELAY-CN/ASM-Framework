@@ -354,6 +354,17 @@ class ModifyVariableInjector(
             .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
             .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
 
+    /**
+     * 从引用槽位指令周边的字节码用途推断真实引用类型。
+     *
+     * 对 ASTORE，会优先读取写入前的 `CHECKCAST` 或字符串常量证据；若没有直接证据，
+     * 则继续观察下一次同槽位 ALOAD 的消费位置。对 ALOAD，会根据后续实例调用、实例字段访问、
+     * `CHECKCAST` 或引用返回指令推断该槽位在当前上下文中应保持的类型。
+     *
+     * @param target 目标方法
+     * @param insn 待分析的 ALOAD 或 ASTORE 指令
+     * @return 推断出的引用类型；证据不足时返回 `null`
+     */
     private fun inferReferenceTypeAroundSlotInstruction(
         target: MethodNode,
         insn: VarInsnNode,
@@ -404,6 +415,16 @@ class ModifyVariableInjector(
         }
     }
 
+    /**
+     * 从 ASTORE 后同槽位的下一次读取用途推断引用类型。
+     *
+     * 当 STORE 前没有足够类型证据时，本方法向后扫描到下一次同槽位 ALOAD，并复用读取点消费方推断逻辑。
+     * 若在下一次读取前遇到同槽位再次写入，则认为原写入值已经被覆盖，停止推断。
+     *
+     * @param target 目标方法
+     * @param storeInsn 引用写入指令
+     * @return 下一次读取用途推断出的引用类型；找不到可靠读取点时返回 `null`
+     */
     private fun inferReferenceTypeFromNextLoadConsumer(
         target: MethodNode,
         storeInsn: VarInsnNode,
@@ -423,6 +444,14 @@ class ModifyVariableInjector(
         return null
     }
 
+    /**
+     * 查找当前指令之前最近的真实字节码指令。
+     *
+     * ASM Tree 中 label、line number 与 frame 节点的 opcode 为负数，不能作为类型推断证据。
+     *
+     * @param insn 当前指令
+     * @return 前一个 opcode 非负的指令；不存在时返回 `null`
+     */
     private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var current = insn.previous
         while (current != null && current.opcode < 0) {
@@ -431,6 +460,14 @@ class ModifyVariableInjector(
         return current
     }
 
+    /**
+     * 查找当前指令之后最近的真实字节码指令。
+     *
+     * 该方法用于让 STORE anchor 与类型推断跳过 label、line number 和 frame 节点。
+     *
+     * @param insn 当前指令
+     * @return 后一个 opcode 非负的指令；不存在时返回 `null`
+     */
     private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var current = insn.next
         while (current != null && current.opcode < 0) {
@@ -439,11 +476,36 @@ class ModifyVariableInjector(
         return current
     }
 
+    /**
+     * 选择 STORE 模式用于 LocalVariableTable 范围判断的锚点。
+     *
+     * STORE 指令本身可能位于变量作用域起点之前，因此优先使用写入后的下一条真实指令判断变量名范围。
+     *
+     * @param insn STORE 指令
+     * @return 用于名称匹配的锚点指令
+     */
     private fun storeAnchor(insn: AbstractInsnNode): AbstractInsnNode = nextRealInstruction(insn) ?: insn
 
+    /**
+     * 判断入口参数名是否满足用户声明的变量名过滤。
+     *
+     * @param name LocalVariableTable 中记录的参数名
+     * @return 未声明变量名过滤时返回 `true`；否则仅匹配声明名称
+     */
     private fun matchesRequestedVariableName(name: String?): Boolean =
         requestedVariableNames.isEmpty() || (name != null && name in requestedVariableNames)
 
+    /**
+     * 判断指定槽位在锚点处的局部变量名是否满足用户声明的变量名过滤。
+     *
+     * LOAD/STORE 模式需要结合 LocalVariableTable 的作用域范围判断变量名；缺少调试变量表、
+     * 锚点不在变量作用域内或名称不一致时，名称过滤不会命中。
+     *
+     * @param target 目标方法
+     * @param anchor 用于判断变量作用域的指令
+     * @param index JVM 局部变量槽位
+     * @return 未声明变量名过滤时返回 `true`；否则仅匹配作用域内的声明名称
+     */
     private fun matchesRequestedVariableName(
         target: MethodNode,
         anchor: AbstractInsnNode,
@@ -455,6 +517,15 @@ class ModifyVariableInjector(
         return localVariableAt(target, anchor, index)?.name in requestedVariableNames
     }
 
+    /**
+     * 读取入口槽位对应的调试变量名。
+     *
+     * 该方法只按槽位取第一个 LocalVariableTable 记录，供 HEAD 参数收集时记录可选名称。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @return 变量名；目标方法没有 LocalVariableTable 或槽位不存在时返回 `null`
+     */
     private fun localVariableNameAtSlot(
         target: MethodNode,
         index: Int,
@@ -463,6 +534,16 @@ class ModifyVariableInjector(
             .firstOrNull { it.index == index }
             ?.name
 
+    /**
+     * 查找锚点处覆盖指定槽位的局部变量表记录。
+     *
+     * LocalVariableTable 的同一槽位可能在不同生命周期内复用，因此必须同时匹配槽位和指令范围。
+     *
+     * @param target 目标方法
+     * @param anchor 待匹配的锚点指令
+     * @param index JVM 局部变量槽位
+     * @return 覆盖锚点的局部变量记录；不存在时返回 `null`
+     */
     private fun localVariableAt(
         target: MethodNode,
         anchor: AbstractInsnNode,
@@ -479,6 +560,15 @@ class ModifyVariableInjector(
         }
     }
 
+    /**
+     * 判断局部变量表记录是否覆盖给定指令下标。
+     *
+     * JVM 局部变量作用域使用半开区间 `[start, end)`，因此结束标签所在下标不属于变量有效范围。
+     *
+     * @param insns 目标方法指令数组
+     * @param instructionIndex 待判断的指令下标
+     * @return 指令下标处于该局部变量生命周期内时返回 `true`
+     */
     private fun LocalVariableNode.containsInstruction(
         insns: Array<AbstractInsnNode>,
         instructionIndex: Int,
