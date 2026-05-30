@@ -903,6 +903,10 @@ Shadow 字段/方法会先匹配目标类自身成员；若不存在，会沿可
 - `method: String = ""` - 目标成员名提示；为空时使用声明名，非空时可直接指定目标名或使用 `shadow_` 前缀
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
+**常量：**
+
+- `Shadow.prefix = "shadow_"` - 兼容 Mixin 风格的 Shadow 名称前缀；解析目标成员名时会去掉该前缀
+
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
 ### @Accessor
