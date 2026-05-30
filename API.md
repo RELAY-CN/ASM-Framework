@@ -100,14 +100,19 @@ ASM 处理器，负责应用所有注册的 ASM 到目标类。
 
 **方法：**
 
-- `transform(className: String, classBytes: ByteArray, classLoader: ClassLoader?): ByteArray` - 转换类字节码
-- `applyAsms(className: String, classNode: ClassNode): Boolean` - 应用 ASM 到类节点
+- `transform(className: String, classfileBuffer: ByteArray, loader: ClassLoader?): ByteArray` - 转换类字节码；没有匹配 ASM 或匹配 ASM 未产生实际改写时返回原始字节码
+- `applyAsms(className: String, classNode: ClassNode): Boolean` - 直接修改传入的 `ClassNode`，至少一个 ASM 生效时返回 `true`
+- `shouldTransform(className: String): Boolean` - 仅查询 `AsmRegistry`，判断目标类是否存在匹配 ASM，不读取或解析 classfile 字节码
+
+多个 ASM 的执行顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中在前，精确目标命中在后。任一 ASM 应用失败时会抛出 `AsmTransformException`，本次转换不会继续写出部分改写后的字节码。
 
 **示例：**
 
 ```kotlin
 val processor = AsmProcessor()
-val transformed = processor.transform("com/example/TargetClass", originalBytes, null)
+if (processor.shouldTransform("com/example/TargetClass")) {
+    val transformed = processor.transform("com/example/TargetClass", originalBytes, loader)
+}
 ```
 
 ## 注解 API
