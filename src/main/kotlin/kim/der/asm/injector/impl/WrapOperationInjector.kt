@@ -765,6 +765,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹常量加载操作。
+     *
+     * 未声明 `at.target` 时按 handler 常量参数与返回类型筛选兼容常量；声明后按常量文本、`null`、类内部名或方法描述符匹配。
+     * 匹配后会把原常量指令替换为 handler 调用，handler 可通过 [Operation.call] 取得原常量值。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的常量加载数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectConstant(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         var injectionCount = 0
@@ -804,6 +814,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹 `tableswitch` 或 `lookupswitch` 消费前的 selector 值。
+     *
+     * switch selector 固定为 `Int` 操作；当前不支持通过 `at.target` 进一步筛选。
+     * 注入逻辑插入在 switch 指令之前，handler 可通过 [Operation.call] 取得原 selector。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的 switch selector 数量
+     * @throws IllegalArgumentException 声明了 `at.target` 或 handler 签名不兼容时抛出
+     */
     private fun injectSwitch(target: MethodNode): Int {
         if (at.target.isNotEmpty()) {
             throw IllegalArgumentException("@WrapOperation SWITCH does not support at.target")
@@ -835,11 +855,30 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选常量加载。
+     *
+     * 该方法用于目标推断模式，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param constantType handler 接收的常量值类型
+     * @return handler 签名可包裹该常量时返回 `true`
+     */
     private fun isConstantHandlerCompatible(
         target: MethodNode,
         constantType: Type,
     ): Boolean = runCatching { validateConstantHandlerSignature(target, constantType) }.isSuccess
 
+    /**
+     * 包裹 `ATHROW` 指令即将抛出的异常对象。
+     *
+     * 未声明 `at.target` 时匹配所有兼容 `ATHROW`；声明类型目标时，仅匹配前一条真实指令为同 owner `<init>` 的直接构造异常。
+     * handler 可通过 [Operation.call] 执行原抛出流程，或返回新的异常对象交给原 `ATHROW`。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的异常抛出数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectThrow(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         val inferTarget = normalizedTarget.isEmpty()
@@ -875,6 +914,14 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选异常抛出操作。
+     *
+     * 该方法用于目标推断模式，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @return handler 签名可包裹异常抛出时返回 `true`
+     */
     private fun isThrowHandlerCompatible(target: MethodNode): Boolean =
         runCatching { validateThrowHandlerSignature(target) }.isSuccess
 
