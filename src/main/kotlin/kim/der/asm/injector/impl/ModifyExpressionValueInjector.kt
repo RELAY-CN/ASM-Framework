@@ -1255,6 +1255,17 @@ class ModifyExpressionValueInjector(
         return value.toString() == expected
     }
 
+    /**
+     * 构造通用表达式值改写指令序列。
+     *
+     * 序列会先把栈顶原表达式值暂存到新局部变量槽位，再准备 handler owner、原表达式值与目标方法参数，
+     * 调用 handler 后按需要把引用返回值转换回原表达式类型。
+     *
+     * @param target 目标方法
+     * @param expressionType 原表达式值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可插入到目标方法中的表达式值改写指令列表
+     */
     private fun buildExpressionValueModification(
         target: MethodNode,
         expressionType: Type,
@@ -1281,6 +1292,18 @@ class ModifyExpressionValueInjector(
         return il
     }
 
+    /**
+     * 校验 handler 签名并返回其请求的目标方法参数数量。
+     *
+     * handler 首参必须接收原表达式值，返回类型必须能作为替换值回到原表达式位置。
+     * 首参之后的参数会按目标方法参数顺序追加传入，因此数量不能超过目标方法参数数量且类型必须兼容。
+     *
+     * @param target 目标方法
+     * @param expressionType 原表达式值类型
+     * @param allowThrowableSubtypeReturn 是否允许异常改写 handler 返回 `Throwable` 子类型
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、返回类型或追加参数声明不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         expressionType: Type,
@@ -1327,6 +1350,15 @@ class ModifyExpressionValueInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 判断 handler 参数类型是否能接收期望值类型。
+     *
+     * 基础类型必须精确一致；引用类型允许 handler 参数是期望类型的父类、接口、`Object` 或 `Any`。
+     *
+     * @param expected 调用点实际提供的值类型
+     * @param actual handler 声明的参数类型
+     * @return handler 参数能接收该值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -1348,6 +1380,17 @@ class ModifyExpressionValueInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 handler 返回类型是否能作为表达式替换值。
+     *
+     * 基础类型必须精确一致；引用类型允许返回原表达式类型的子类型，也允许用 `Object` 或 `Any` 作为泛型返回。
+     * 异常抛出场景可额外允许返回 `Throwable` 子类型。
+     *
+     * @param expressionType 原表达式值类型
+     * @param handlerReturnType handler 声明的返回类型
+     * @param allowThrowableSubtypeReturn 是否允许返回 `Throwable` 子类型
+     * @return handler 返回值可放回原表达式位置时返回 `true`
+     */
     private fun isHandlerReturnCompatible(
         expressionType: Type,
         handlerReturnType: Type,
@@ -1376,8 +1419,21 @@ class ModifyExpressionValueInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否为 JVM 引用类型。
+     *
+     * @return 对象或数组类型返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 在 handler 返回引用泛型时补充回原表达式类型的 `CHECKCAST`。
+     *
+     * 基础类型不需要也不能插入引用转换；引用类型只有在 handler 返回类型不同于表达式类型时才补 cast。
+     *
+     * @param il 待追加的指令列表
+     * @param expressionType 原表达式值类型
+     */
     private fun addExpressionCastIfNeeded(
         il: InsnList,
         expressionType: Type,
@@ -1388,6 +1444,15 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 使用 ASM 类所在 ClassLoader 加载引用类型对应的运行时类。
+     *
+     * 数组类型使用描述符转换出的二进制名称，普通对象类型使用 ASM 的 class name。
+     *
+     * @param type 待加载的引用类型
+     * @return 对应的运行时 [Class]
+     * @throws ClassNotFoundException 运行时类无法加载时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -1399,6 +1464,15 @@ class ModifyExpressionValueInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 查找与 `NEW` 指令配对的构造器调用。
+     *
+     * 当同一 owner 出现嵌套 `NEW` 时，会用计数跳过内层构造器，确保返回当前 `NEW` 对应的 `<init>`。
+     *
+     * @param newInsn 待匹配的 `NEW` 指令
+     * @return 与该 `NEW` 配对的构造器调用指令
+     * @throws IllegalArgumentException 找不到配对构造器调用时抛出
+     */
     private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
         var nestedSameOwnerNewCount = 0
         var current = newInsn.next
@@ -1422,6 +1496,14 @@ class ModifyExpressionValueInjector(
         throw IllegalArgumentException("@ModifyExpressionValue cannot find constructor call for NEW ${newInsn.desc}")
     }
 
+    /**
+     * 查找上一条具有真实 opcode 的指令。
+     *
+     * Label、Frame、LineNumber 等伪指令会被跳过。
+     *
+     * @param insn 当前指令
+     * @return 上一条真实指令；不存在时返回 `null`
+     */
     private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var current = insn.previous
         while (current != null && current.opcode < 0) {
@@ -1430,6 +1512,14 @@ class ModifyExpressionValueInjector(
         return current
     }
 
+    /**
+     * 查找下一条具有真实 opcode 的指令。
+     *
+     * Label、Frame、LineNumber 等伪指令会被跳过。
+     *
+     * @param insn 当前指令
+     * @return 下一条真实指令；不存在时返回 `null`
+     */
     private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var current = insn.next
         while (current != null && current.opcode < 0) {
@@ -1438,6 +1528,15 @@ class ModifyExpressionValueInjector(
         return current
     }
 
+    /**
+     * 按 handler 请求数量加载目标方法的前若干参数。
+     *
+     * 实例方法从槽位 1 开始跳过 `this`，静态方法从槽位 0 开始；宽类型参数会推进两个槽位。
+     *
+     * @param il 待追加的指令列表
+     * @param target 目标方法
+     * @param requestedTargetParamCount handler 请求追加的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -1456,6 +1555,13 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 从局部变量槽位加载指定类型的值到操作数栈。
+     *
+     * @param il 待追加的指令列表
+     * @param paramType 待读取的值类型
+     * @param varIndex 局部变量槽位
+     */
     private fun loadFromVariable(
         il: InsnList,
         paramType: Type,
@@ -1464,6 +1570,15 @@ class ModifyExpressionValueInjector(
         InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
     }
 
+    /**
+     * 将栈顶表达式值按类型存入局部变量槽位。
+     *
+     * 基础类型使用对应 `xSTORE`，引用和数组类型使用 `ASTORE`。
+     *
+     * @param il 待追加的指令列表
+     * @param paramType 栈顶值类型
+     * @param varIndex 局部变量槽位
+     */
     private fun storeStackValue(
         il: InsnList,
         paramType: Type,
@@ -1478,6 +1593,13 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 为非静态 handler 准备调用接收者。
+     *
+     * 静态 handler 不需要 owner；Kotlin object 使用 `INSTANCE` 单例字段，普通类会调用无参构造器创建实例。
+     *
+     * @param il 待追加的指令列表
+     */
     private fun addHandlerOwner(il: InsnList) {
         if (isHandlerStatic()) {
             return
@@ -1501,6 +1623,11 @@ class ModifyExpressionValueInjector(
         il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, ownerType.internalName, "<init>", "()V", false))
     }
 
+    /**
+     * 选择调用 handler 时使用的 JVM invoke opcode。
+     *
+     * @return 静态 handler 返回 [Opcodes.INVOKESTATIC]，实例 handler 返回 [Opcodes.INVOKEVIRTUAL]
+     */
     private fun handlerOpcode(): Int =
         if (isHandlerStatic()) {
             Opcodes.INVOKESTATIC
@@ -1508,6 +1635,11 @@ class ModifyExpressionValueInjector(
             Opcodes.INVOKEVIRTUAL
         }
 
+    /**
+     * 判断 handler 方法是否为静态方法。
+     *
+     * @return handler 带有 [Modifier.STATIC] 标志时返回 `true`
+     */
     private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
