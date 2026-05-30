@@ -241,6 +241,19 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 
 `desc` 使用 `Lowner;name(desc)return` 格式描述调用点；`args` 为原调用参数或调用结果上下文，具体顺序由注入点决定。监听器抛出的异常会沿注入调用链向外传播。
 
+### AsmListener
+
+`AsmListener` 是把 `RedirectionListener` 统一调用契约桥接到 ASM 类反射方法的适配器。
+
+#### 方法
+
+**方法：**
+
+- `invoke(obj: Any, desc: String, vararg args: Any?)` - 调用 ASM 监听方法；当前实现不使用 `obj` 与 `desc` 做分派，只按目标方法参数数量截取 `args`
+- `AsmListener.create(asmInstance: Any, method: Method): AsmListener` - 为 ASM 实例和方法创建监听器
+
+构造时会将目标方法设为可访问。若 ASM 方法第一个参数是 `CallbackInfo`，调用时会自动创建并传入新的回调对象。反射调用失败时会包装为 `RuntimeException` 抛出。
+
 ### RedirectionReplace
 
 `RedirectionReplace` 是 `@Redirect` 与全方法替换链路的运行期调用契约。
@@ -253,6 +266,19 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 - `RedirectionReplace.of(value: Any?): RedirectionReplace` - 创建固定返回值替换器
 
 转换器会把原调用点的对象、描述符、返回类型与参数数组传给替换器，并使用返回值替代原调用返回值。实现方需要保证返回值能赋给 `type` 对应的目标类型；`void` 调用可返回 `null`。
+
+### AsmReplace
+
+`AsmReplace` 是把 `RedirectionReplace` 统一调用契约桥接到 ASM 类反射方法的适配器。
+
+#### 方法
+
+**方法：**
+
+- `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 调用 ASM 替换方法；当前实现不使用 `obj`、`desc` 与 `type` 做分派，只按目标方法参数数量截取 `args`
+- `AsmReplace.create(asmInstance: Any, method: Method): AsmReplace` - 为 ASM 实例和方法创建替换器
+
+构造时会将目标方法设为可访问，并使用反射方法的返回值作为替换结果。反射调用失败时会包装为 `RuntimeException` 抛出。
 
 ### RedirectionReplaceManager
 
