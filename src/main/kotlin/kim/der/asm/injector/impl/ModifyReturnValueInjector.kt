@@ -458,7 +458,14 @@ class ModifyReturnValueInjector(
     }
 
     /**
-     * 加载返回值用于修改
+     * 加载保存的返回值。
+     *
+     * @param il 指令列表
+     * @param returnType 目标方法返回类型
+     * @param varIndex 保存原返回值的局部变量槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun loadReturnValueForModification(
         il: InsnList,
@@ -470,8 +477,16 @@ class ModifyReturnValueInjector(
     }
 
     /**
-     * 分配局部变量索引
-     * 确保返回的索引不会与现有局部变量冲突
+     * 分配新的局部变量槽位。
+     *
+     * 该方法会避开目标方法参数、局部变量表以及已有变量访问指令，确保返回值临时变量不会覆盖现有槽位。
+     *
+     * @param target 目标方法
+     * @param type 待保存返回值的类型
+     * @return 新局部变量的起始槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun allocateLocalVariable(
         target: MethodNode,
@@ -519,7 +534,10 @@ class ModifyReturnValueInjector(
     }
 
     /**
-     * 检查是否需要双槽
+     * 判断类型描述符是否需要占用两个局部变量槽位。
+     *
+     * @param desc JVM 类型描述符
+     * @return `long` 或 `double` 类型描述符返回 `true`
      */
     private fun needsDoubleSlot(desc: String): Boolean = desc == "J" || desc == "D" || desc.startsWith("J") || desc.startsWith("D")
 
