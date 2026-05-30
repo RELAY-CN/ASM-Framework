@@ -139,6 +139,15 @@ class WrapOperationInjector(
             )
         }
 
+    /**
+     * 解析数组操作包裹模式。
+     *
+     * 未声明 `array=` 参数时返回 `null`，表示按普通字段读写处理。
+     * 已声明时只接受 `get`、`set` 或 `length`，分别对应数组元素读取、写入与长度读取。
+     *
+     * @return 解析出的数组访问模式；未声明时返回 `null`
+     * @throws IllegalArgumentException 声明了不支持的数组访问模式时抛出
+     */
     private fun arrayAccessMode(): ArrayAccessMode? {
         val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return null
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
@@ -149,6 +158,16 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 包裹普通方法调用、构造器调用或 `invokedynamic` 调用。
+     *
+     * 显式声明目标时按 owner、名称与描述符匹配；未声明目标时按 handler 签名筛选兼容调用。
+     * 普通调用与 `invokedynamic` 会被替换为 handler 调用，构造器调用会额外移除配对的 `NEW` 与 `DUP`。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的调用数量
+     * @throws IllegalArgumentException 目标签名不完整、构造器模式不合法或 handler 签名不兼容时抛出
+     */
     private fun injectMethodCall(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
@@ -215,6 +234,15 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选普通方法或构造器调用。
+     *
+     * 该方法用于目标推断模式，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选方法调用指令
+     * @return handler 签名可包裹该调用时返回 `true`
+     */
     private fun isMethodCallHandlerCompatible(
         target: MethodNode,
         insn: MethodInsnNode,
@@ -227,11 +255,30 @@ class WrapOperationInjector(
             }
         }.isSuccess
 
+    /**
+     * 判断 handler 是否兼容候选 `invokedynamic` 调用。
+     *
+     * 该方法用于目标推断模式，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选 `invokedynamic` 指令
+     * @return handler 签名可包裹该动态调用时返回 `true`
+     */
     private fun isInvokeDynamicHandlerCompatible(
         target: MethodNode,
         insn: InvokeDynamicInsnNode,
     ): Boolean = runCatching { validateInvokeDynamicHandlerSignature(target, insn) }.isSuccess
 
+    /**
+     * 通过 [InjectionPoint.NEW] 包裹对象构造表达式。
+     *
+     * 该入口从 `NEW` 指令出发查找配对构造器调用，要求 `NEW` 后的下一条真实指令为 `DUP`。
+     * 匹配后会用 handler 调用替换整段 `NEW/DUP/args/INVOKESPECIAL` 构造流程。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的构造表达式数量
+     * @throws IllegalArgumentException 找不到配对构造器、`NEW` 后缺少 `DUP` 或 handler 签名不兼容时抛出
+     */
     private fun injectNewConstructor(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
