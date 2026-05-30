@@ -836,7 +836,7 @@ annotation class ModifyConstant(
  *
  * @param method 目标方法签名；为空时按 handler 名称、重定向点和签名兼容规则推断唯一同名目标方法
  * @param target 目标调用、动态调用、构造器、字段、构造类型、类型签名、跳转操作码、常量文本或直接构造异常类型组件；会与 [At.target] 组合构建最终的匹配签名，[InjectionPoint.LOAD] / [InjectionPoint.STORE] / [InjectionPoint.SWITCH] 不使用该参数
- * @param at 调用点信息；[At.value] 决定重定向方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载还是抛异常点，[At.target] 用于指定匹配签名；[InjectionPoint.INVOKE] 省略时按 handler 签名筛选兼容调用点，[InjectionPoint.CONSTANT] 省略时按 handler 首参与返回类型筛选兼容常量，[InjectionPoint.LOAD] / [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N` 或 `var=N` 过滤 JVM 局部变量槽位
+ * @param at 调用点信息；[At.value] 决定重定向方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载还是抛异常点，[At.target] 用于指定匹配签名；[InjectionPoint.INVOKE] 省略时按 handler 签名筛选兼容调用点，[InjectionPoint.CONSTANT] 省略时按 handler 首参与返回类型筛选兼容常量，[InjectionPoint.THROW] 省略时按 handler 签名筛选兼容抛异常候选，[InjectionPoint.LOAD] / [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N` 或 `var=N` 过滤 JVM 局部变量槽位；[InjectionPoint.SWITCH] 不使用 [At.target]
  * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点中生效
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
