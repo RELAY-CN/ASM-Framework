@@ -80,6 +80,17 @@ class ModifyReceiverInjector(
             )
         }
 
+    /**
+     * 在匹配的实例方法调用前改写 receiver。
+     *
+     * 显式声明目标时按 [At.target] 匹配调用点；未声明目标时会跳过静态调用、构造器调用和
+     * handler 签名不兼容的实例调用。通过筛选的调用点再应用 [ordinal]，并在原调用前插入
+     * receiver 改写逻辑。
+     *
+     * @param target 目标方法
+     * @return 实际插入 receiver 改写逻辑的实例调用数量
+     * @throws IllegalArgumentException 显式目标签名无效或匹配到不支持的静态/构造器调用时抛出
+     */
     private fun injectMethodCall(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
@@ -126,6 +137,16 @@ class ModifyReceiverInjector(
         return injectionCount
     }
 
+    /**
+     * 判断自动推断模式下的方法调用 receiver 是否可由 handler 改写。
+     *
+     * 静态调用和构造器调用没有可替换的普通 receiver，会直接排除；其余实例调用按 owner
+     * 类型校验 handler 首参、返回值和目标方法参数前缀。
+     *
+     * @param target 目标方法
+     * @param insn 待检查的方法调用指令
+     * @return handler 可处理该调用 receiver 时返回 `true`
+     */
     private fun isMethodReceiverCompatible(
         target: MethodNode,
         insn: MethodInsnNode,
@@ -137,6 +158,16 @@ class ModifyReceiverInjector(
         return isReceiverHandlerCompatible(target, receiverType)
     }
 
+    /**
+     * 在匹配的实例字段读取前改写 receiver。
+     *
+     * 显式声明目标时按字段 owner、名称和描述符匹配；未声明目标时跳过静态字段读取和
+     * handler 签名不兼容的字段 owner。通过筛选的读取点再应用 [ordinal]。
+     *
+     * @param target 目标方法
+     * @return 实际插入 receiver 改写逻辑的字段读取数量
+     * @throws IllegalArgumentException 显式字段目标无效或匹配到静态字段读取时抛出
+     */
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -188,6 +219,16 @@ class ModifyReceiverInjector(
         return injectionCount
     }
 
+    /**
+     * 在匹配的实例字段写入前改写 receiver。
+     *
+     * 字段写入指令前的栈形态为 receiver 后跟待写入值；生成的改写逻辑会同时保护待写入值，
+     * 确保替换 receiver 后仍能按原顺序执行字段写入。
+     *
+     * @param target 目标方法
+     * @return 实际插入 receiver 改写逻辑的字段写入数量
+     * @throws IllegalArgumentException 显式字段目标无效或匹配到静态字段写入时抛出
+     */
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -240,6 +281,16 @@ class ModifyReceiverInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 签名是否可处理指定 receiver 类型。
+     *
+     * 该方法用于自动推断模式下的候选预筛选；签名不兼容时吞掉校验异常并返回 `false`，
+     * 避免不兼容候选计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param receiverType 候选 receiver 类型
+     * @return handler 可处理该 receiver 类型时返回 `true`
+     */
     private fun isReceiverHandlerCompatible(
         target: MethodNode,
         receiverType: Type,
