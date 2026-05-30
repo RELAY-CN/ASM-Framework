@@ -111,6 +111,19 @@ class ModifyArgsInjector(
         return injectionCount
     }
 
+    /**
+     * 构建一次调用参数组改写的指令序列。
+     *
+     * 原调用点参数位于操作数栈上，方法会先按逆序保存参数和可选 receiver 到临时局部变量，
+     * 再用原参数创建 [Args] 容器并传给 handler。handler 返回后，从容器按原顺序取回参数，
+     * 恢复 receiver 与调用参数栈形态，让原调用指令继续执行。
+     *
+     * @param target 目标方法
+     * @param callSite 已匹配的调用点信息
+     * @param callParamTypes 调用点描述符中的参数类型
+     * @param targetParamCount handler 额外声明的目标方法参数数量
+     * @return 可插入到调用点前的参数组改写指令列表
+     */
     private fun buildArgsModification(
         target: MethodNode,
         callSite: CallSite,
@@ -165,6 +178,16 @@ class ModifyArgsInjector(
         return il
     }
 
+    /**
+     * 创建保存调用参数快照的 [Args] 容器。
+     *
+     * 方法会创建 `Object[]`，按调用点参数顺序从临时槽位加载参数，并对基础类型执行装箱。
+     * handler 可通过 [Args] 就地修改该数组中的值。
+     *
+     * @param il 正在构建的指令列表
+     * @param callParamTypes 调用点参数类型
+     * @param argSlots 每个调用点参数保存到的临时槽位
+     */
     private fun createArgsContainer(
         il: InsnList,
         callParamTypes: Array<Type>,
@@ -193,6 +216,16 @@ class ModifyArgsInjector(
         )
     }
 
+    /**
+     * 从 [Args] 容器回读指定参数并恢复为调用点所需类型。
+     *
+     * `Args.get` 返回 `Object`，因此基础类型参数需要拆箱，引用类型参数保持引用栈值。
+     *
+     * @param il 正在构建的指令列表
+     * @param argsIndex [Args] 容器所在局部变量槽位
+     * @param argumentIndex 参数在调用点描述符中的序号
+     * @param argumentType 参数原始 JVM 类型
+     */
     private fun loadArgsValue(
         il: InsnList,
         argsIndex: Int,
@@ -214,6 +247,16 @@ class ModifyArgsInjector(
         InstructionUtil.unbox(argumentType).forEach { il.add(it) }
     }
 
+    /**
+     * 校验 `@ModifyArgs` handler 签名并返回需要加载的目标方法参数数量。
+     *
+     * handler 第一个参数必须是 [Args]，返回值必须为 `void`。后续参数按顺序匹配目标方法参数前缀，
+     * 用于让 handler 在修改调用点参数时读取目标方法上下文。
+     *
+     * @param target 目标方法
+     * @return handler 需要追加加载的目标方法参数数量
+     * @throws IllegalArgumentException handler 首参、返回值或目标方法参数前缀不兼容时抛出
+     */
     private fun validateHandlerSignature(target: MethodNode): Int {
         val asmParamTypes = Type.getArgumentTypes(asmMethod)
         val argsType = Type.getType(Args::class.java)
