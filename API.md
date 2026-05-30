@@ -149,6 +149,16 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 }
 ```
 
+### AsmTransformException
+
+ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即抛出该异常，并停止当前目标类的后续转换，避免写出部分改写后的字节码。
+
+#### 属性
+
+- `className: String` - 正在转换的目标类 internal name
+- `asmClassName: String` - 失败的 ASM 类名
+- `cause: Throwable` - 原始失败原因
+
 ### AsmTransformer
 
 `AsmTransformer` 是基于 ASM Tree API 的字节码转换器基类，用于实现自定义 classfile 读写与转换流程。
