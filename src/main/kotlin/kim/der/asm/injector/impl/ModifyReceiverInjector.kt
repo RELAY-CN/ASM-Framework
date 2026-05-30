@@ -296,6 +296,18 @@ class ModifyReceiverInjector(
         receiverType: Type,
     ): Boolean = runCatching { validateHandlerSignature(target, receiverType) }.isSuccess
 
+    /**
+     * 构建实例方法调用 receiver 改写的指令序列。
+     *
+     * 原实例调用的参数和 receiver 已经位于操作数栈上。方法会先保存调用参数与 receiver，
+     * 调用 handler 生成新 receiver，再恢复原调用参数，使后续原方法调用继续消费同一组参数。
+     *
+     * @param target 目标方法
+     * @param callInsn 被改写 receiver 的方法调用指令
+     * @param receiverType 原 receiver 类型
+     * @param targetParamCount handler 额外声明的目标方法参数数量
+     * @return 可插入到实例调用前的 receiver 改写指令列表
+     */
     private fun buildCallReceiverModification(
         target: MethodNode,
         callInsn: MethodInsnNode,
@@ -337,6 +349,17 @@ class ModifyReceiverInjector(
         return il
     }
 
+    /**
+     * 构建实例字段读取 receiver 改写的指令序列。
+     *
+     * 字段读取前栈顶是 receiver。方法会保存原 receiver，调用 handler 获取新 receiver，
+     * 并把新 receiver 留在栈顶供原 GETFIELD 指令继续执行。
+     *
+     * @param target 目标方法
+     * @param receiverType 字段 owner 对应的 receiver 类型
+     * @param targetParamCount handler 额外声明的目标方法参数数量
+     * @return 可插入到字段读取前的 receiver 改写指令列表
+     */
     private fun buildFieldReadReceiverModification(
         target: MethodNode,
         receiverType: Type,
@@ -363,6 +386,18 @@ class ModifyReceiverInjector(
         return il
     }
 
+    /**
+     * 构建实例字段写入 receiver 改写的指令序列。
+     *
+     * 字段写入前栈上同时存在 receiver 与待写入值。方法会先保存待写入值和 receiver，
+     * 调用 handler 替换 receiver，再把字段值重新加载回栈顶供原 PUTFIELD 指令继续执行。
+     *
+     * @param target 目标方法
+     * @param receiverType 字段 owner 对应的 receiver 类型
+     * @param fieldType 待写入字段值类型
+     * @param targetParamCount handler 额外声明的目标方法参数数量
+     * @return 可插入到字段写入前的 receiver 改写指令列表
+     */
     private fun buildFieldAssignReceiverModification(
         target: MethodNode,
         receiverType: Type,
@@ -393,6 +428,15 @@ class ModifyReceiverInjector(
         return il
     }
 
+    /**
+     * 在 handler 返回泛化引用类型时补充 receiver 类型转换。
+     *
+     * handler 可返回 `Any` / `Object` 或更泛化的引用类型；原调用或字段访问仍需要 owner 类型，
+     * 因此返回类型与 receiver 类型不一致时插入 `CHECKCAST`。
+     *
+     * @param il 正在构建的指令列表
+     * @param receiverType 原调用点或字段 owner 的 receiver 类型
+     */
     private fun addReceiverCast(
         il: InsnList,
         receiverType: Type,
@@ -403,6 +447,17 @@ class ModifyReceiverInjector(
         }
     }
 
+    /**
+     * 校验 `@ModifyReceiver` handler 签名并返回需要加载的目标方法参数数量。
+     *
+     * handler 第一个参数必须能接收原 receiver，返回值必须能作为新 receiver 写回调用点。
+     * 后续参数按顺序匹配目标方法参数前缀，用于让 handler 读取目标方法上下文。
+     *
+     * @param target 目标方法
+     * @param receiverType 当前候选 receiver 类型
+     * @return handler 需要追加加载的目标方法参数数量
+     * @throws IllegalArgumentException handler 首参、返回值或目标方法参数前缀不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         receiverType: Type,
@@ -445,6 +500,16 @@ class ModifyReceiverInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 判断 handler 参数声明是否能接收期望类型的运行时值。
+     *
+     * 基础类型必须精确匹配；引用类型允许 handler 参数声明为期望类型的父类、接口、
+     * `java.lang.Object` 或 `kotlin.Any`。
+     *
+     * @param expected 注入点需要提供的值类型
+     * @param actual handler 参数声明类型
+     * @return handler 参数可以安全接收该值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -466,8 +531,22 @@ class ModifyReceiverInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否属于对象或数组引用类型。
+     *
+     * @return 当前类型为对象或数组时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 使用 Mixin 类加载器解析引用类型对应的 Java Class。
+     *
+     * 引用兼容性校验需要真实类层级；数组类型使用描述符形式解析，对象类型使用类名解析。
+     *
+     * @param type 待解析的 ASM 引用类型
+     * @return 对应的 Java Class
+     * @throws ClassNotFoundException 类加载器无法解析该类型时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -479,6 +558,16 @@ class ModifyReceiverInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 判断 handler 返回类型是否可作为替换后的 receiver。
+     *
+     * 返回类型不能为 `void`。引用类型允许 handler 返回 receiver 类型的子类型，
+     * 也允许返回 `Any` / `Object`，后续会通过 `CHECKCAST` 恢复调用点所需的 owner 类型。
+     *
+     * @param receiverType 原调用点或字段 owner 的 receiver 类型
+     * @param handlerReturnType handler 返回类型
+     * @return handler 返回值可作为新 receiver 时返回 `true`
+     */
     private fun isReceiverReturnCompatible(
         receiverType: Type,
         handlerReturnType: Type,
