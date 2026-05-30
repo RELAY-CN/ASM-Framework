@@ -23,7 +23,23 @@ ASM 注册器，负责管理所有注册的 ASM 类。
 
 **参数：**
 
-- `asmClass`: 带 `@AsmMixin` 注解的类
+- `asmClass`: 带 `@AsmMixin` 注解的类；未标注或未声明目标类时会被跳过
+
+##### `registerWithPathMatcher(asmClass: Class<*>, pathMatcher: Find<String, Boolean>)`
+
+注册一个按目标类路径动态匹配的 ASM 类。`pathMatcher` 接收目标类 internal name，返回 `true` 表示该 ASM 应用于该目标类。
+
+该入口适合批量处理某个包、前缀或运行时才能确定的目标类。路径匹配注册不会强制校验 `asmClass` 是否带 `@AsmMixin`，调用方需要保证类中的 handler 声明符合框架约定。
+
+##### `getForTarget(targetClass: String): List<AsmInfo>`
+
+返回目标类匹配到的 ASM 列表。
+
+`targetClass` 使用 JVM internal name，例如 `com/example/TargetClass`。返回顺序固定为路径匹配命中的 ASM 在前、精确目标注册命中的 ASM 在后；同一分组内保持注册顺序。注册关系变化后会清空缓存，下一次查询重新计算匹配结果。
+
+##### `clear()`
+
+清空所有注册的 ASM、路径匹配器与目标缓存。该入口主要用于测试隔离、重新扫描或 agent 生命周期重置。
 
 **示例：**
 
@@ -44,10 +60,14 @@ ASM 扫描器，用于自动扫描和注册 ASM 类。
 
 **方法：**
 
-- `scanPackage(packageName: String)` - 扫描包
-- `scanDirectory(directory: File, packageName: String)` - 扫描目录
-- `scanJar(jarFile: File, packageName: String)` - 扫描 JAR
-- `scanClassLoader(classLoader: ClassLoader, packageName: String)` - 扫描类加载器
+- `scanPackage(packageName: String)` - 使用当前线程上下文类加载器扫描包，并忽略诊断结果
+- `scanPackageWithResult(packageName: String): AsmScanResult` - 扫描包并返回注册、跳过与失败统计
+- `scanDirectory(directory: File, packageName: String)` - 使用当前线程上下文类加载器扫描目录，并忽略诊断结果
+- `scanDirectoryWithResult(directory: File, packageName: String): AsmScanResult` - 扫描目录并返回诊断结果
+- `scanJar(jarFile: File, packageName: String)` - 扫描 JAR，并忽略诊断结果
+- `scanJarWithResult(jarFile: File, packageName: String): AsmScanResult` - 扫描 JAR 并返回诊断结果；`packageName` 为空字符串时扫描整个 JAR
+- `scanClassLoader(classLoader: ClassLoader, packageName: String)` - 扫描类加载器中的包资源，并忽略诊断结果
+- `scanClassLoaderWithResult(classLoader: ClassLoader, packageName: String): AsmScanResult` - 扫描类加载器中的包资源并返回诊断结果
 
 **示例：**
 
@@ -55,7 +75,22 @@ ASM 扫描器，用于自动扫描和注册 ASM 类。
 AsmScanner.scanPackage("com.example.asms")
 AsmScanner.scanDirectory(File("build/classes"), "com.example.asms")
 AsmScanner.scanJar(File("asms.jar"), "com.example.asms")
+
+val result = AsmScanner.scanPackageWithResult("com.example.asms")
+if (result.failures.isNotEmpty()) {
+    result.failures.forEach { failure ->
+        println("${failure.className}: ${failure.reason}")
+    }
+}
 ```
+
+`AsmScanResult` 是不可变扫描快照，包含：
+
+- `registeredClasses: List<String>` - 成功注册到 `AsmRegistry` 的类名，使用 Java binary name
+- `skippedClasses: List<String>` - 成功加载但未标注 `@AsmMixin` 的类名
+- `failures: List<AsmScanFailure>` - 扫描或类加载失败的条目
+
+多个扫描来源的结果可通过 `merge(other)` 合并。合并只拼接列表，不去重，也不改变扫描顺序。
 
 ### AsmProcessor
 
