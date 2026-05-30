@@ -497,7 +497,16 @@ class ModifyConstantInjector(
     }
 
     /**
-     * 加载常量值
+     * 重新加载匹配到的常量值。
+     *
+     * `LDC` 与 `BIPUSH` / `SIPUSH` 会重新创建等价指令，其他短常量指令直接克隆原指令。
+     *
+     * @param il 指令列表
+     * @param insn 原始常量加载指令
+     * @param type 常量入栈类型；当前实现保留该参数用于调用方语义说明
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun loadConstant(
         il: InsnList,
