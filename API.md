@@ -115,6 +115,56 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 }
 ```
 
+### Transformer
+
+`Transformer` 是基于 ASM Tree API 的类节点转换接口，适合在框架外部扩展自定义 `ClassNode` 改写逻辑。
+
+#### 方法
+
+**方法：**
+
+- `transform(classNode: ClassNode)` - 只接收待改写的类节点，不提供外部目标描述上下文
+- `transform(classNode: ClassNode, methodTypeInfoValueList: ArrayList<MethodTypeInfoValue>?)` - 接收类节点和可选的目标方法描述列表，通常用于重定向或监听器场景
+
+实现方应直接修改传入的 `ClassNode`，调用方负责后续写回字节码。该接口不约束线程安全；如果实现类持有可变状态，需要由实现方或调用方避免并发复用同一实例。
+
+### RedirectionListener
+
+`RedirectionListener` 是运行期监听接口，用于观察转换器插入的目标调用点，而不直接替换返回值。
+
+#### 方法
+
+**方法：**
+
+- `invoke(obj: Any, desc: String, vararg args: Any?)` - 执行监听回调
+
+`desc` 使用 `Lowner;name(desc)return` 格式描述调用点；`args` 为原调用参数或调用结果上下文，具体顺序由注入点决定。监听器抛出的异常会沿注入调用链向外传播。
+
+### RedirectionReplace
+
+`RedirectionReplace` 是 `@Redirect` 与全方法替换链路的运行期调用契约。
+
+#### 方法
+
+**方法：**
+
+- `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行替换调用
+- `RedirectionReplace.of(value: Any?): RedirectionReplace` - 创建固定返回值替换器
+
+转换器会把原调用点的对象、描述符、返回类型与参数数组传给替换器，并使用返回值替代原调用返回值。实现方需要保证返回值能赋给 `type` 对应的目标类型；`void` 调用可返回 `null`。
+
+### RedirectionReplaceManager
+
+`RedirectionReplaceManager` 在 `RedirectionReplace` 的基础上增加按调用描述符查找替换实现的能力。
+
+#### 方法
+
+**方法：**
+
+- `invoke(desc: String, type: Class<*>, obj: Any, fallback: Supplier<RedirectionReplace>, vararg args: Any?): Any?` - 按调用点描述符执行替换
+
+`fallback` 是未命中显式替换器时使用的延迟默认实现。替换逻辑或默认实现抛出的异常会透出给调用方。
+
 ## 注解 API
 
 ### @AsmMixin
