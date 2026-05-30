@@ -92,6 +92,14 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 解析数组写入条件包裹模式。
+     *
+     * 未声明 `array=` 参数时按普通字段写入处理；当前只支持 `array=set`。
+     *
+     * @return 声明 `array=set` 时返回 `true`，未声明时返回 `false`
+     * @throws IllegalArgumentException 声明了不支持的数组访问模式时抛出
+     */
     private fun isArrayWriteMode(): Boolean {
         val arrayArg = at.args.firstOrNull { it.trim().startsWith("array=") } ?: return false
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
@@ -101,6 +109,16 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 在匹配的 `void` 普通方法调用或 `invokedynamic` 调用前插入条件 handler。
+     *
+     * 显式声明目标时按 owner、名称与描述符匹配；未声明目标时按 handler 签名筛选兼容的 `void` 调用。
+     * handler 返回 `false` 时跳过原调用，返回 `true` 时恢复原 receiver 与调用参数并继续执行原调用。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的调用数量
+     * @throws IllegalArgumentException 目标签名不完整、构造器或非 `void` 调用被显式匹配、handler 签名不兼容时抛出
+     */
     private fun injectMethodCall(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
@@ -176,6 +194,15 @@ class WrapWithConditionInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选普通方法调用。
+     *
+     * 该方法用于目标推断模式，构造器、非 `void` 调用或签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选方法调用指令
+     * @return handler 可条件包裹该调用时返回 `true`
+     */
     private fun isMethodCallConditionCompatible(
         target: MethodNode,
         insn: MethodInsnNode,
@@ -186,6 +213,15 @@ class WrapWithConditionInjector(
         return runCatching { validateHandlerSignature(target, insn) }.isSuccess
     }
 
+    /**
+     * 判断 handler 是否兼容候选 `invokedynamic` 调用。
+     *
+     * 该方法用于目标推断模式，非 `void` 动态调用或签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选 `invokedynamic` 指令
+     * @return handler 可条件包裹该动态调用时返回 `true`
+     */
     private fun isInvokeDynamicConditionCompatible(
         target: MethodNode,
         insn: InvokeDynamicInsnNode,
@@ -196,6 +232,16 @@ class WrapWithConditionInjector(
         return runCatching { validateInvokeDynamicHandlerSignature(target, insn) }.isSuccess
     }
 
+    /**
+     * 在匹配的字段写入前插入条件 handler。
+     *
+     * 显式声明字段目标时按 owner、名称与描述符匹配；未声明目标时按 handler 签名筛选兼容字段写入。
+     * handler 返回 `false` 时跳过原字段写入，返回 `true` 时恢复 receiver 与待写入值并继续执行原写入。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的字段写入数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -238,11 +284,30 @@ class WrapWithConditionInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选字段写入。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选字段写入指令
+     * @return handler 可条件包裹该字段写入时返回 `true`
+     */
     private fun isFieldAssignHandlerCompatible(
         target: MethodNode,
         insn: FieldInsnNode,
     ): Boolean = runCatching { validateFieldAssignHandlerSignature(target, insn) }.isSuccess
 
+    /**
+     * 在匹配的数组元素写入前插入条件 handler。
+     *
+     * 该入口通过 `array=set` 启用，并要求 `at.target` 指向数组字段。
+     * 方法会从数组写入指令向前追踪数组字段来源，只包裹来源字段匹配的数组元素写入。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的数组元素写入数量
+     * @throws IllegalArgumentException 数组字段目标缺失、目标不是数组字段或 handler 签名不兼容时抛出
+     */
     private fun injectArrayAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
         if (fieldTarget.name == null) {
@@ -281,6 +346,16 @@ class WrapWithConditionInjector(
         return injectionCount
     }
 
+    /**
+     * 条件包裹条件跳转的原始分支结果。
+     *
+     * `at.target` 可声明具体条件跳转 opcode 名称或数字；未声明时匹配所有条件跳转。
+     * handler 返回 `false` 时跳过原跳转逻辑，返回 `true` 时按原始分支结果继续分派。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的条件跳转数量
+     * @throws IllegalArgumentException 目标 opcode 不是条件跳转或 handler 签名不兼容时抛出
+     */
     private fun injectJump(target: MethodNode): Int {
         val targetOpcode = parseJumpOpcodeTarget(at.target)
         if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
@@ -325,9 +400,27 @@ class WrapWithConditionInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选条件跳转。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @return handler 可条件包裹条件跳转时返回 `true`
+     */
     private fun isJumpHandlerCompatible(target: MethodNode): Boolean =
         runCatching { validateJumpHandlerSignature(target) }.isSuccess
 
+    /**
+     * 在匹配的 `ATHROW` 前插入条件 handler。
+     *
+     * 未声明 `at.target` 时匹配所有兼容 `ATHROW`；声明类型目标时，仅匹配前一条真实指令为同 owner `<init>` 的直接构造异常。
+     * handler 返回 `false` 时跳过原抛出，返回 `true` 时恢复原异常对象并继续执行 `ATHROW`。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的异常抛出数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectThrow(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         val inferTarget = normalizedTarget.isEmpty()
@@ -366,6 +459,14 @@ class WrapWithConditionInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选异常抛出操作。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @return handler 可条件包裹异常抛出时返回 `true`
+     */
     private fun isThrowHandlerCompatible(target: MethodNode): Boolean =
         runCatching { validateThrowHandlerSignature(target) }.isSuccess
 
