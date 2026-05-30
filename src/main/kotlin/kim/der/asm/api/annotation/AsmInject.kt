@@ -182,7 +182,8 @@ enum class InjectionPoint {
  * - [WrapOperation] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素读取、写入或数组长度读取。
  *   也可通过 [InjectionPoint.LOAD] 与 `index=N` 或 `var=N` 包裹指定 JVM 局部变量槽位的本次读取值，
- *   handler 返回值只替换这一次读取结果，不写回槽位。
+ *   handler 返回值只替换这一次读取结果，不写回槽位；通过 [InjectionPoint.STORE] 与同样的槽位过滤包裹本次待写入值，
+ *   handler 返回值会交给原 `xSTORE` 继续写入槽位。
  * - [WrapWithCondition] 可通过 [args] 中的 `array=set`，把 [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素写入。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [InjectionPoint.FIELD_ASSIGN] 改写字段待写入值；
  *   也可通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式，
@@ -241,12 +242,12 @@ enum class Shift {
  * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写指令点注入、普通
  * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] /
  * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转、switch、常量与抛异常指令点注入、
- * [Redirect] 的方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向，
+ * [Redirect] 的方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向，
  * [ModifyArg] / [ModifyArgs] 的
- * [InjectionPoint.INVOKE] 方法或构造器调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
+ * [InjectionPoint.INVOKE] 方法、构造器或 `invokedynamic` 调用点参数修改，[ModifyReceiver] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN] receiver 改写，
  * [WrapOperation] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.JUMP]、
+ * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、
  * [InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 操作包裹、
  * [WrapWithCondition] 的 [InjectionPoint.INVOKE] /
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 条件包裹，
