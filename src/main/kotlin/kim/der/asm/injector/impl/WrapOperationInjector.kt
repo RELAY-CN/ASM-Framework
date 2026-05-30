@@ -2850,6 +2850,14 @@ class WrapOperationInjector(
         return targetParamCount
     }
 
+    /**
+     * 构造普通方法调用在 handler 前置参数中的期望栈参数类型。
+     *
+     * 实例调用会在原方法参数前补充 receiver 类型，静态调用只包含原方法参数。
+     *
+     * @param callInsn 被包裹的方法调用指令
+     * @return handler 在 [Operation] 前应声明的参数类型列表
+     */
     private fun buildExpectedStackParams(callInsn: MethodInsnNode): Array<Type> {
         val callParams = Type.getArgumentTypes(callInsn.desc).toList()
         return if (callInsn.opcode == Opcodes.INVOKESTATIC) {
@@ -2859,6 +2867,14 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 构造字段读取在 handler 前置参数中的期望栈参数类型。
+     *
+     * 静态字段读取不需要 receiver；实例字段读取需要先接收字段 owner。
+     *
+     * @param fieldInsn 被包裹的字段读取指令
+     * @return handler 在 [Operation] 前应声明的参数类型列表
+     */
     private fun buildExpectedFieldStackParams(fieldInsn: FieldInsnNode): Array<Type> =
         if (fieldInsn.opcode == Opcodes.GETSTATIC) {
             emptyArray()
@@ -2866,6 +2882,14 @@ class WrapOperationInjector(
             arrayOf(Type.getObjectType(fieldInsn.owner))
         }
 
+    /**
+     * 构造字段写入在 handler 前置参数中的期望栈参数类型。
+     *
+     * 静态字段写入只接收待写入值；实例字段写入先接收 receiver，再接收待写入值。
+     *
+     * @param fieldInsn 被包裹的字段写入指令
+     * @return handler 在 [Operation] 前应声明的参数类型列表
+     */
     private fun buildExpectedFieldAssignStackParams(fieldInsn: FieldInsnNode): Array<Type> {
         val fieldType = Type.getType(fieldInsn.desc)
         return if (fieldInsn.opcode == Opcodes.PUTSTATIC) {
@@ -2875,6 +2899,15 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 构造数组访问在 handler 前置参数中的期望栈参数类型。
+     *
+     * 数组读取接收数组与索引；数组写入额外接收元素值；数组长度只接收数组引用。
+     *
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param mode 数组访问模式
+     * @return handler 在 [Operation] 前应声明的参数类型列表
+     */
     private fun buildExpectedArrayAccessStackParams(
         fieldInsn: FieldInsnNode,
         mode: ArrayAccessMode,
@@ -2887,6 +2920,15 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 从 `At.args` 解析局部变量槽位过滤条件。
+     *
+     * 支持 `index=N` 与 `var=N` 两种写法；未声明时返回 `null`，表示不按槽位过滤。
+     *
+     * @param pointName 当前定位点名称，用于错误提示
+     * @return 指定的 JVM 局部变量槽位；未指定时返回 `null`
+     * @throws IllegalArgumentException 声明多个过滤条件、非整数或负数槽位时抛出
+     */
     private fun parseLocalVariableIndex(pointName: String): Int? {
         val values =
             at.args.mapNotNull { arg ->
@@ -2916,6 +2958,15 @@ class WrapOperationInjector(
         return index
     }
 
+    /**
+     * 读取 handler 首个参数作为局部变量表达式类型。
+     *
+     * `LOAD` 与 `STORE` 包裹都至少需要一个参数，用于承载原始局部变量表达式值。
+     *
+     * @param pointName 当前定位点名称，用于错误提示
+     * @return handler 首参的 ASM 类型
+     * @throws IllegalArgumentException handler 没有参数时抛出
+     */
     private fun requireHandlerLocalArgumentType(pointName: String): Type {
         val handlerParams = Type.getArgumentTypes(asmMethod)
         if (handlerParams.isEmpty()) {
@@ -2926,11 +2977,31 @@ class WrapOperationInjector(
         return handlerParams[0]
     }
 
+    /**
+     * 判断 handler 是否兼容候选局部变量读写类型。
+     *
+     * 该方法用于未显式指定槽位时的候选过滤，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param loadType 候选局部变量表达式类型
+     * @return handler 签名可包裹该局部变量表达式时返回 `true`
+     */
     private fun isLoadHandlerCompatible(
         target: MethodNode,
         loadType: Type,
     ): Boolean = runCatching { validateLoadHandlerSignature(target, loadType) }.isSuccess
 
+    /**
+     * 解析指定局部变量槽位中引用值的更具体表达式类型。
+     *
+     * 基础类型不需要额外推断，引用类型会依次尝试目标方法参数、LocalVariableTable 与相邻指令上下文。
+     * 只有推断类型能被 handler 首参接收时才会返回，避免把不相关槽位误计为候选操作。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 推断出的引用表达式类型；无法可靠推断时返回 `null`
+     */
     private fun resolveIndexedLoadType(
         target: MethodNode,
         index: Int,
@@ -2957,6 +3028,14 @@ class WrapOperationInjector(
         return referencedTypeFromSlotInstructions(target, index, fallbackType)
     }
 
+    /**
+     * 收集目标方法参数在方法入口处占用的局部变量槽位。
+     *
+     * 实例方法会跳过 `this` 槽位，宽类型参数按两个槽位推进。
+     *
+     * @param target 目标方法
+     * @return 参数起始槽位与参数类型列表
+     */
     private fun collectHeadParameters(target: MethodNode): List<LocalSlotType> {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         var slot = if (isStatic) 0 else 1
@@ -2968,6 +3047,16 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 通过同一槽位附近的引用读写指令推断表达式类型。
+     *
+     * 该推断作为 LocalVariableTable 缺失或不完整时的兜底，只考察 `ALOAD` 与 `ASTORE` 相关上下文。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 能与 handler 首参兼容的引用类型；无法推断时返回 `null`
+     */
     private fun referencedTypeFromSlotInstructions(
         target: MethodNode,
         index: Int,
@@ -2980,6 +3069,16 @@ class WrapOperationInjector(
             .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
             .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
 
+    /**
+     * 根据单条引用槽位读写指令的相邻上下文推断引用类型。
+     *
+     * `ASTORE` 优先使用前一条真实指令中的 `CHECKCAST` 或字符串常量特征；
+     * `ALOAD` 则观察后续方法调用、字段访问、类型转换或返回指令对该引用的消费方式。
+     *
+     * @param target 目标方法
+     * @param insn 待分析的 `ALOAD` 或 `ASTORE` 指令
+     * @return 推断出的引用类型；上下文不足时返回 `null`
+     */
     private fun inferReferenceTypeAroundSlotInstruction(
         target: MethodNode,
         insn: VarInsnNode,
@@ -3030,6 +3129,15 @@ class WrapOperationInjector(
         }
     }
 
+    /**
+     * 从 `ASTORE` 后续第一次读取该槽位的消费场景推断引用类型。
+     *
+     * 如果在读取前遇到同槽位再次写入，则当前写入值的类型无法继续追踪。
+     *
+     * @param target 目标方法
+     * @param storeInsn 当前引用写入指令
+     * @return 后续读取消费场景推断出的引用类型；无法推断时返回 `null`
+     */
     private fun inferReferenceTypeFromNextLoadConsumer(
         target: MethodNode,
         storeInsn: VarInsnNode,
@@ -3049,6 +3157,15 @@ class WrapOperationInjector(
         return null
     }
 
+    /**
+     * 判断局部变量读取指令的值类型是否可交给 handler 首参。
+     *
+     * JVM 的 `ILOAD` 覆盖 boolean、byte、short、int 与 char，引用读取只接受对象或数组 handler 参数。
+     *
+     * @param opcode 读取指令 opcode
+     * @param handlerType handler 首参类型
+     * @return 读取值类型与 handler 首参兼容时返回 `true`
+     */
     private fun isLoadCompatibleWithHandler(
         opcode: Int,
         handlerType: Type,
@@ -3062,6 +3179,15 @@ class WrapOperationInjector(
             else -> false
         }
 
+    /**
+     * 判断局部变量写入指令消费的值类型是否可交给 handler 首参。
+     *
+     * JVM 的 `ISTORE` 覆盖 boolean、byte、short、int 与 char，引用写入只接受对象或数组 handler 参数。
+     *
+     * @param opcode 写入指令 opcode
+     * @param handlerType handler 首参类型
+     * @return 写入值类型与 handler 首参兼容时返回 `true`
+     */
     private fun isStoreCompatibleWithHandler(
         opcode: Int,
         handlerType: Type,
