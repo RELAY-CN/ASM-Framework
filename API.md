@@ -55,6 +55,18 @@ val asms = AsmRegistry.getForTarget("com/example/TargetClass")
 AsmRegistry.clear()
 ```
 
+### Find
+
+`Find<T, R>` 是单参数查找/匹配函数接口，用于在不依赖 Kotlin 函数类型 ABI 的位置传递匹配逻辑。
+
+#### 方法
+
+**方法：**
+
+- `invoke(t: T): R` - 执行查找或匹配，并返回结果
+
+在路径匹配注册中，`Find<String, Boolean>` 的输入是目标类 internal name，返回 `true` 表示该 ASM 应用于该目标类。
+
 ### AsmScanner
 
 ASM 扫描器，用于自动扫描和注册 ASM 类。
