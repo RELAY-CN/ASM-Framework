@@ -100,8 +100,8 @@ import kim.der.asm.transformer.AsmProcessor
 val processor = AsmProcessor()
 val transformedBytes = processor.transform(
     className = "com/example/TargetClass",
-    classBytes = originalBytes,
-    classLoader = null
+    classfileBuffer = originalBytes,
+    loader = null
 )
 ```
 
