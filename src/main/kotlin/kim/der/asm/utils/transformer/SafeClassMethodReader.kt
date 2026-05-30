@@ -10,19 +10,24 @@ import org.objectweb.asm.tree.MethodNode
 import java.io.IOException
 
 /**
- * 安全的类方法读取器
- * 使用 ASM 字节码读取类的方法信息，而不是通过反射
- * 这样可以避免 NoClassDefFoundError，因为不需要加载方法签名中引用的类
+ * 安全的类方法读取器。
+ *
+ * 使用 ASM 直接读取 classfile 中的方法信息，而不是通过反射解析方法签名。
+ * 这样可以避免扫描阶段加载方法签名中的依赖类型，从而降低 [NoClassDefFoundError] 风险。
  *
  * @author Dr (dr@der.kim)
+ * @date 2025-11-24
  */
 object SafeClassMethodReader {
     /**
-     * 安全地读取类的所有方法
+     * 安全读取类的所有方法节点。
      *
      * @param clazz 要读取的类
-     * @param loader 类加载器
-     * @return 方法节点列表，如果读取失败返回空列表
+     * @param loader 读取 classfile 资源时优先使用的类加载器；可为 `null`
+     * @return 方法节点列表；读取失败时返回空列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun readMethods(
         clazz: Class<*>,
@@ -44,12 +49,17 @@ object SafeClassMethodReader {
     }
 
     /**
-     * 获取类的 ClassReader
+     * 获取类的 [ClassReader]。
+     *
+     * 资源查找顺序为传入类加载器、类自身类加载器、系统类加载器。
      *
      * @param clazz 要读取的类
-     * @param loader 类加载器
-     * @return ClassReader
+     * @param loader 读取 classfile 资源时优先使用的类加载器；可为 `null`
+     * @return [clazz] 对应的 [ClassReader]
      * @throws IOException 如果无法读取类文件
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     @Throws(IOException::class)
     private fun getClassReader(
@@ -72,11 +82,14 @@ object SafeClassMethodReader {
     }
 
     /**
-     * 检查方法节点是否有指定的注解
+     * 检查方法节点是否带有指定注解。
      *
      * @param method 方法节点
-     * @param annotationDesc 注解描述符，如 "Lkim/der/asm/api/annotation/AsmInject;"
-     * @return true 如果方法有该注解
+     * @param annotationDesc 注解描述符，例如 `Lkim/der/asm/api/annotation/AsmInject;`
+     * @return 方法存在可见或不可见的指定注解时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun hasAnnotation(
         method: MethodNode,
@@ -100,12 +113,15 @@ object SafeClassMethodReader {
     }
 
     /**
-     * 获取方法节点的注解值
+     * 读取方法节点中指定注解的属性值。
      *
      * @param method 方法节点
      * @param annotationDesc 注解描述符
      * @param key 注解属性名
-     * @return 注解值，如果不存在返回 null
+     * @return 注解属性值；注解或属性不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun getAnnotationValue(
         method: MethodNode,
