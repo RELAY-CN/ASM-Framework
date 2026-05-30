@@ -252,6 +252,19 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 
 `fallback` 是未命中显式替换器时使用的延迟默认实现。替换逻辑或默认实现抛出的异常会透出给调用方。
 
+### RedirectionReplaceApi
+
+`RedirectionReplaceApi` 是转换器注入字节码时直接引用的运行期替换入口。方法名和 JVM 描述符需要与 `RedirectionReplace` 中的桥接常量保持一致，调用方不应直接替换内部 manager。
+
+#### 方法
+
+**方法：**
+
+- `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行普通重定向替换，由 `@Redirect` 注入点调用
+- `invokeIgnore(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行忽略模式替换，由全方法替换链路调用
+
+`desc` 使用 `Lowner;name(desc)return` 格式描述调用点，`type` 是原调用返回类型，`args` 按原调用参数顺序传入。当前实现不使用 `ServiceLoader` 自动发现 manager，避免模块化环境或多 ClassLoader 场景下出现加载与隔离问题。
+
 ## 注解 API
 
 ### @AsmMixin
