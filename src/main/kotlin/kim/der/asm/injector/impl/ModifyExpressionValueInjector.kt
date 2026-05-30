@@ -960,6 +960,16 @@ class ModifyExpressionValueInjector(
             else -> false
         }
 
+    /**
+     * 改写常量加载表达式产生的常量值。
+     *
+     * 未声明 `at.target` 时按 handler 首参与返回类型筛选兼容常量；声明后按常量文本、`null`、类内部名或方法描述符匹配。
+     * 注入逻辑插入在常量指令之后，替换已压入栈顶的常量值。
+     *
+     * @param target 目标方法
+     * @return 实际改写的常量表达式数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectConstant(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         var injectionCount = 0
@@ -996,6 +1006,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写 `INSTANCEOF` 表达式产生的 boolean 结果。
+     *
+     * 显式声明类型目标时只匹配该 `INSTANCEOF` 类型；未声明目标时匹配所有 `INSTANCEOF` 结果。
+     * 注入逻辑插入在 `INSTANCEOF` 之后，替换压入栈顶的原始判断结果。
+     *
+     * @param target 目标方法
+     * @return 实际改写的类型判断表达式数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectInstanceof(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
@@ -1027,6 +1047,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写条件跳转指令的原始分支结果。
+     *
+     * `at.target` 可声明具体条件跳转 opcode 名称；未声明时匹配所有条件跳转。
+     * 原跳转会被替换为“计算原始 boolean 结果、交给 handler、按新 boolean 结果跳转”的等价指令序列。
+     *
+     * @param target 目标方法
+     * @return 实际改写的条件跳转数量
+     * @throws IllegalArgumentException 目标 opcode 不是条件跳转或 handler 签名不兼容时抛出
+     */
     private fun injectJump(target: MethodNode): Int {
         val targetOpcode = parseJumpOpcodeTarget(at.target)
         if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
@@ -1066,6 +1096,17 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 构造条件跳转改写使用的替代指令序列。
+     *
+     * 序列会先按原跳转条件生成 `0` 或 `1`，再调用 handler 改写该 boolean 表达式，
+     * 最后用 `IFNE` 复用原跳转目标标签。
+     *
+     * @param jumpInsn 原条件跳转指令
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原跳转指令的指令列表
+     */
     private fun buildJumpExpressionValueModification(
         jumpInsn: JumpInsnNode,
         target: MethodNode,
@@ -1085,6 +1126,16 @@ class ModifyExpressionValueInjector(
         return il
     }
 
+    /**
+     * 改写 `tableswitch` 或 `lookupswitch` 消费前的 selector 值。
+     *
+     * switch selector 固定为 `Int` 表达式；当前不支持通过 `at.target` 进一步筛选。
+     * 注入逻辑插入在 switch 指令之前，让原 switch 继续消费 handler 返回的新 selector。
+     *
+     * @param target 目标方法
+     * @return 实际改写的 switch selector 数量
+     * @throws IllegalArgumentException 声明了 `at.target` 或 handler 签名不兼容时抛出
+     */
     private fun injectSwitch(target: MethodNode): Int {
         if (at.target.isNotEmpty()) {
             throw IllegalArgumentException("@ModifyExpressionValue SWITCH does not support at.target")
@@ -1116,6 +1167,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写 `ATHROW` 指令即将抛出的异常对象。
+     *
+     * 未声明 `at.target` 时匹配所有 `ATHROW`；声明类型目标时，仅匹配前一条真实指令为同 owner `<init>` 的直接构造异常。
+     * handler 可返回 `Throwable` 或其子类，返回值会继续交给原 `ATHROW` 抛出。
+     *
+     * @param target 目标方法
+     * @return 实际改写的异常抛出表达式数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectThrow(target: MethodNode): Int {
         val normalizedTarget = at.target.replace('.', '/')
         var injectionCount = 0
@@ -1148,6 +1209,14 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 推断 `ATHROW` 前直接构造异常的内部名。
+     *
+     * 只有前一条真实指令是构造器 `<init>` 调用时才认为该异常类型可被精确识别。
+     *
+     * @param throwInsn `ATHROW` 指令
+     * @return 直接构造异常的 owner 内部名；无法识别时返回 `null`
+     */
     private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
         val previous = previousRealInstruction(throwInsn)
         if (previous is MethodInsnNode &&
@@ -1159,6 +1228,15 @@ class ModifyExpressionValueInjector(
         return null
     }
 
+    /**
+     * 判断常量指令是否匹配注解中声明的常量目标。
+     *
+     * `null` 常量使用文本 `null` 匹配；`Type` 常量按方法描述符或类内部名匹配；其他常量按 `toString()` 结果匹配。
+     *
+     * @param insn 待检查的常量指令
+     * @param expected 注解中声明的常量目标文本
+     * @return 常量值匹配目标文本时返回 `true`
+     */
     private fun matchesConstant(
         insn: AbstractInsnNode,
         expected: String,
