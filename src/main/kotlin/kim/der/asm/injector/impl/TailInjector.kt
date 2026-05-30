@@ -91,6 +91,17 @@ class TailInjector(
         return injectionCount
     }
 
+    /**
+     * 克隆待插入的指令列表。
+     *
+     * TAIL 注入会在多个返回点前插入同一段逻辑，因此每个返回点都需要独立的指令副本和标签映射。
+     *
+     * @param source 原始指令列表
+     * @return 可安全插入到目标方法的新指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     private fun cloneInsnList(source: InsnList): InsnList {
         val labelMap = mutableMapOf<LabelNode, LabelNode>()
         source.toArray().filterIsInstance<LabelNode>().forEach { label ->
@@ -105,7 +116,16 @@ class TailInjector(
     }
 
     /**
-     * 分配局部变量索引
+     * 分配新的局部变量槽位。
+     *
+     * 该方法根据目标方法参数和返回值占用的槽位推算可用位置，适合为 TAIL 注入创建 CallbackInfo 临时变量。
+     *
+     * @param target 目标方法
+     * @param type 待分配局部变量的类型
+     * @return 新局部变量的起始槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun allocateLocalVariable(
         target: MethodNode,
