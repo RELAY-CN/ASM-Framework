@@ -563,6 +563,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写局部变量读取指令产生的表达式值。
+     *
+     * `LOAD` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * 注入逻辑插入在读取指令之后，只替换本次读取压入栈顶的值，不回写局部变量槽位。
+     *
+     * @param target 目标方法
+     * @return 实际改写的局部变量读取值数量
+     * @throws IllegalArgumentException 声明了 `at.target`、槽位过滤参数非法或 handler 签名不兼容时抛出
+     */
     private fun injectLoad(target: MethodNode): Int {
         require(at.target.isEmpty()) {
             "@ModifyExpressionValue LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
@@ -609,6 +619,16 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 改写局部变量写入指令即将消费的表达式值。
+     *
+     * `STORE` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * 注入逻辑插入在写入指令之前，让原 `xSTORE` 继续把 handler 返回的新值写入局部变量槽位。
+     *
+     * @param target 目标方法
+     * @return 实际改写的局部变量写入值数量
+     * @throws IllegalArgumentException 声明了 `at.target`、槽位过滤参数非法或 handler 签名不兼容时抛出
+     */
     private fun injectStore(target: MethodNode): Int {
         require(at.target.isEmpty()) {
             "@ModifyExpressionValue STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
@@ -655,6 +675,15 @@ class ModifyExpressionValueInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否能接收并返回指定表达式类型。
+     *
+     * handler 首参必须能接收原表达式值，返回类型必须能作为替换后的表达式值继续留在栈顶。
+     *
+     * @param expressionType 原表达式值类型
+     * @param allowThrowableSubtypeReturn 是否允许 handler 返回 `Throwable` 子类型
+     * @return 参数与返回类型均兼容时返回 `true`
+     */
     private fun isHandlerCompatible(
         expressionType: Type,
         allowThrowableSubtypeReturn: Boolean,
@@ -666,6 +695,15 @@ class ModifyExpressionValueInjector(
         return isHandlerReturnCompatible(expressionType, Type.getReturnType(asmMethod), allowThrowableSubtypeReturn)
     }
 
+    /**
+     * 从 `At.args` 解析局部变量槽位过滤条件。
+     *
+     * 支持 `index=N` 与 `var=N` 两种写法；未声明时返回 `null`，表示不按槽位过滤。
+     *
+     * @param pointName 当前定位点名称，用于错误提示
+     * @return 指定的 JVM 局部变量槽位；未指定时返回 `null`
+     * @throws IllegalArgumentException 声明多个过滤条件、非整数或负数槽位时抛出
+     */
     private fun parseLocalVariableIndex(pointName: String): Int? {
         val values =
             at.args.mapNotNull { arg ->
@@ -695,6 +733,14 @@ class ModifyExpressionValueInjector(
         return index
     }
 
+    /**
+     * 读取 handler 首个参数作为表达式值类型。
+     *
+     * `@ModifyExpressionValue` 的 handler 至少需要接收一个参数，用于承载原始表达式值。
+     *
+     * @return handler 首参的 ASM 类型
+     * @throws IllegalArgumentException handler 没有参数时抛出
+     */
     private fun requireHandlerExpressionArgumentType(): Type {
         val handlerParams = Type.getArgumentTypes(asmMethod)
         if (handlerParams.isEmpty()) {
@@ -705,6 +751,17 @@ class ModifyExpressionValueInjector(
         return handlerParams[0]
     }
 
+    /**
+     * 解析指定局部变量槽位中引用值的更具体表达式类型。
+     *
+     * 基础类型不需要额外推断，引用类型会依次尝试目标方法参数、LocalVariableTable 与相邻指令上下文。
+     * 只有推断类型能被 handler 首参接收时才会返回，避免把不相关槽位误计为候选表达式。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 推断出的引用表达式类型；无法可靠推断时返回 `null`
+     */
     private fun resolveIndexedLocalExpressionType(
         target: MethodNode,
         index: Int,
@@ -730,6 +787,14 @@ class ModifyExpressionValueInjector(
         return referencedTypeFromSlotInstructions(target, index, fallbackType)
     }
 
+    /**
+     * 收集目标方法参数在方法入口处占用的局部变量槽位。
+     *
+     * 实例方法会跳过 `this` 槽位，宽类型参数按两个槽位推进。
+     *
+     * @param target 目标方法
+     * @return 参数起始槽位与参数类型列表
+     */
     private fun collectHeadParameters(target: MethodNode): List<LocalSlotType> {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         var slot = if (isStatic) 0 else 1
@@ -741,6 +806,16 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 通过同一槽位附近的引用读写指令推断表达式类型。
+     *
+     * 该推断作为 LocalVariableTable 缺失或不完整时的兜底，只考察 `ALOAD` 与 `ASTORE` 相关上下文。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 能与 handler 首参兼容的引用类型；无法推断时返回 `null`
+     */
     private fun referencedTypeFromSlotInstructions(
         target: MethodNode,
         index: Int,
@@ -753,6 +828,16 @@ class ModifyExpressionValueInjector(
             .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
             .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
 
+    /**
+     * 根据单条引用槽位读写指令的相邻上下文推断引用类型。
+     *
+     * `ASTORE` 优先使用前一条真实指令中的 `CHECKCAST` 或字符串常量特征；
+     * `ALOAD` 则观察后续方法调用、字段访问、类型转换或返回指令对该引用的消费方式。
+     *
+     * @param target 目标方法
+     * @param insn 待分析的 `ALOAD` 或 `ASTORE` 指令
+     * @return 推断出的引用类型；上下文不足时返回 `null`
+     */
     private fun inferReferenceTypeAroundSlotInstruction(
         target: MethodNode,
         insn: VarInsnNode,
@@ -803,6 +888,15 @@ class ModifyExpressionValueInjector(
         }
     }
 
+    /**
+     * 从 `ASTORE` 后续第一次读取该槽位的消费场景推断引用类型。
+     *
+     * 如果在读取前遇到同槽位再次写入，则当前写入值的类型无法继续追踪。
+     *
+     * @param target 目标方法
+     * @param storeInsn 当前引用写入指令
+     * @return 后续读取消费场景推断出的引用类型；无法推断时返回 `null`
+     */
     private fun inferReferenceTypeFromNextLoadConsumer(
         target: MethodNode,
         storeInsn: VarInsnNode,
@@ -822,6 +916,15 @@ class ModifyExpressionValueInjector(
         return null
     }
 
+    /**
+     * 判断局部变量读取指令的值类型是否可交给 handler 首参。
+     *
+     * JVM 的 `ILOAD` 覆盖 boolean、byte、short、int 与 char，引用读取只接受对象或数组 handler 参数。
+     *
+     * @param opcode 读取指令 opcode
+     * @param handlerType handler 首参类型
+     * @return 读取值类型与 handler 首参兼容时返回 `true`
+     */
     private fun isLoadCompatibleWithHandler(
         opcode: Int,
         handlerType: Type,
@@ -835,6 +938,15 @@ class ModifyExpressionValueInjector(
             else -> false
         }
 
+    /**
+     * 判断局部变量写入指令消费的值类型是否可交给 handler 首参。
+     *
+     * JVM 的 `ISTORE` 覆盖 boolean、byte、short、int 与 char，引用写入只接受对象或数组 handler 参数。
+     *
+     * @param opcode 写入指令 opcode
+     * @param handlerType handler 首参类型
+     * @return 写入值类型与 handler 首参兼容时返回 `true`
+     */
     private fun isStoreCompatibleWithHandler(
         opcode: Int,
         handlerType: Type,
