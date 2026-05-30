@@ -3726,7 +3726,8 @@ class TargetClassContext(
         annotation: ModifyReturnValue,
     ): Boolean {
         val (targetMethod, methodSignature) = resolveModifyReturnValueTargetMethod(method, annotation)
-        val injector = AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo, annotation.ordinal)
+        val injector =
+            AsmInjectorFactory.createModifyReturnValueInjector(method, asmInfo, annotation.ordinal, annotation.slice)
         val injectionCount = injector.injectCount(targetMethod)
         if (annotation.require > 0 || annotation.allow >= 0 || annotation.expect != 1) {
             return requireModifyReturnValueCount(
@@ -3785,6 +3786,7 @@ class TargetClassContext(
                 handlerMethod,
                 asmInfo,
                 annotation.ordinal,
+                annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
         }.getOrDefault(false)

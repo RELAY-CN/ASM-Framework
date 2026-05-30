@@ -16,6 +16,7 @@ import org.objectweb.asm.tree.AbstractInsnNode
 import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InsnNode
+import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -38,7 +39,7 @@ import java.lang.reflect.Modifier
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
- * receiver 改写使用 INVOKE 边界缩小匹配范围
+ * receiver 改写使用 INVOKE 边界缩小匹配范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -569,6 +570,12 @@ class ModifyReceiverInjector(
             if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
                 return index
             }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
         }
 
         return null
@@ -641,6 +648,21 @@ class ModifyReceiverInjector(
             return false
         }
         if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
             return false
         }
         return targetDesc == null || insn.desc == targetDesc

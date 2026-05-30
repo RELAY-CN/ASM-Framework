@@ -4,6 +4,9 @@
 
 package kim.der.asm.injector.impl
 
+import kim.der.asm.api.annotation.At
+import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -24,8 +27,12 @@ import java.lang.reflect.Modifier
  * 原返回值或目标方法参数为对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`；
  * handler 返回类型对基础类型必须精确匹配，对象/数组可返回目标类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回目标返回类型。
+ * [slice] 可把候选返回点限制在 INVOKE 边界之间，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，
+ * 边界指令本身不参与匹配；[ordinal] 会在切片内重新计数。
  *
  * @param ordinal 返回点序号；负数表示修改全部非 void 返回点
+ * @param slice 切片范围；当前使用 INVOKE 边界缩小返回点匹配范围，边界可匹配普通方法调用、构造器调用或
+ * `invokedynamic` 调用
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -34,6 +41,7 @@ class ModifyReturnValueInjector(
     method: Method,
     asmInfo: AsmInfo,
     private val ordinal: Int = -1,
+    private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 在目标方法返回前修改返回值。
@@ -70,8 +78,12 @@ class ModifyReturnValueInjector(
 
         // 查找所有 RETURN 指令（不包括 void return）
         val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
         var matchedOrdinal = 0
-        for (insn in insns) {
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
             if (insn is InsnNode && insn.opcode in RETURN_OPS && insn.opcode != Opcodes.RETURN) {
                 val currentOrdinal = matchedOrdinal++
                 if (!matchesOrdinal(currentOrdinal)) {
@@ -200,6 +212,118 @@ class ModifyReturnValueInjector(
     }
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
+
+    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
+        val startIndex =
+            if (hasSliceBoundary(slice.from)) {
+                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
+                fromIndex + 1
+            } else {
+                0
+            }
+        val endIndex =
+            if (hasSliceBoundary(slice.to)) {
+                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
+            } else {
+                insns.size
+            }
+
+        return startIndex to endIndex.coerceAtLeast(startIndex)
+    }
+
+    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+
+    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
+
+    private fun findSliceBoundaryIndex(
+        insns: Array<AbstractInsnNode>,
+        at: At,
+        startIndex: Int,
+    ): Int? {
+        require(at.value == InjectionPoint.INVOKE) {
+            "Only INVOKE slice boundaries are supported for @ModifyReturnValue: ${at.value}"
+        }
+
+        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
+        if (boundaryName == null || boundaryDesc == null) {
+            throw IllegalArgumentException(
+                "Invalid ModifyReturnValue slice boundary method signature: ${at.target} " +
+                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
+            )
+        }
+
+        for (index in startIndex until insns.size) {
+            val insn = insns[index]
+            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
+                return index
+            }
+            if (
+                insn is InvokeDynamicInsnNode &&
+                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
+            ) {
+                return index
+            }
+        }
+
+        return null
+    }
+
+    private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
+        if (signature.isEmpty()) {
+            return Triple(null, null, null)
+        }
+
+        val parenIndex = signature.indexOf('(')
+        if (parenIndex < 0) {
+            return Triple(null, signature, null)
+        }
+
+        val ownerAndName = signature.substring(0, parenIndex)
+        val desc = signature.substring(parenIndex)
+        val slashIndex = ownerAndName.lastIndexOf('/')
+        val dotIndex = ownerAndName.lastIndexOf('.')
+        val separatorIndex = maxOf(slashIndex, dotIndex)
+
+        return if (separatorIndex >= 0) {
+            Triple(
+                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
+                ownerAndName.substring(separatorIndex + 1),
+                desc,
+            )
+        } else {
+            Triple(null, ownerAndName, desc)
+        }
+    }
+
+    private fun matchesTargetMethod(
+        insn: MethodInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
+
+    private fun matchesTargetInvokeDynamic(
+        insn: InvokeDynamicInsnNode,
+        targetOwner: String?,
+        targetName: String,
+        targetDesc: String?,
+    ): Boolean {
+        if (targetOwner != null && insn.bsm.owner != targetOwner) {
+            return false
+        }
+        if (insn.name != targetName && insn.bsm.name != targetName) {
+            return false
+        }
+        return targetDesc == null || insn.desc == targetDesc
+    }
 
     private fun validateHandlerSignature(
         target: MethodNode,

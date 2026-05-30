@@ -494,6 +494,39 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyReturnValueSliceLimitsReturnsBetweenFromAndTo() {
+        AsmRegistry.register(ModifyReturnValueSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceReturnValueTarget", sliceReturnValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceReturnValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("value", Int::class.javaPrimitiveType)
+
+        assertEquals("before", method.invoke(instance, 0))
+        assertEquals("modified-inside", method.invoke(instance, 1))
+        assertEquals("after", method.invoke(instance, 2))
+    }
+
+    @Test
+    fun modifyReturnValueSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(ModifyReturnValueInvokeDynamicSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceReturnValueTarget",
+                invokeDynamicSliceReturnValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceReturnValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("value", Int::class.javaPrimitiveType, String::class.java)
+
+        assertEquals("before", method.invoke(instance, 0, "marker"))
+        assertEquals("modified-inside", method.invoke(instance, 1, "marker"))
+        assertEquals("after", method.invoke(instance, 2, "marker"))
+    }
+
+    @Test
     fun modifyReturnValueExposesCountContractParameters() {
         val methods = ModifyReturnValue::class.java.declaredMethods.associateBy { it.name }
 
@@ -611,6 +644,18 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun invokeReplaceAtMethodCallReplacesCall() {
+        AsmRegistry.register(InvokeReplaceTrimMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("replaced-trim", result)
     }
 
     @Test
@@ -1131,6 +1176,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(InvokeDynamicSliceModifyArgMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceModifyArgTarget",
+                invokeDynamicSliceModifyArgTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
+
+        assertEquals("pre-original:inside-modified:outside-original", result)
+    }
+
+    @Test
     fun modifyArgAtConstructorInvokeRewritesSelectedArgument() {
         AsmRegistry.register(ConstructorModifyArgMixin::class.java)
 
@@ -1319,6 +1381,23 @@ class FrameworkReliabilityTest {
         val clazz = loadClass("SliceModifyArgsTarget", transformed)
         val instance = clazz.getDeclaredConstructor().newInstance()
         val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre raw:inside changed:outside raw", result)
+    }
+
+    @Test
+    fun modifyArgsSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(ModifyArgsInvokeDynamicSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceModifyArgsTarget",
+                invokeDynamicSliceModifyArgsTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
 
         assertEquals("pre raw:inside changed:outside raw", result)
     }
@@ -1786,6 +1865,62 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAtJumpSkipsOriginalBranchWhenFalse() {
+        AsmRegistry.register(WrapConditionJumpMixin::class.java)
+
+        val transformed = AsmProcessor().transform("JumpOperationTarget", jumpOperationTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("JumpOperationTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("positive", method.invoke(instance, -1, false))
+        assertEquals("negative", method.invoke(instance, -1, true))
+        assertEquals("positive", method.invoke(instance, 1, true))
+    }
+
+    @Test
+    fun wrapWithConditionRejectsUnconditionalJumpTarget() {
+        AsmRegistry.register(WrapConditionGotoMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("JumpOperationTarget", jumpOperationTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("conditional JVM jump opcode") == true,
+        )
+    }
+
+    @Test
+    fun wrapWithConditionAtThrowSkipsOriginalThrowWhenFalse() {
+        AsmRegistry.register(WrapConditionThrowMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConditionalThrowTarget", conditionalThrowTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConditionalThrowTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method =
+            clazz.getMethod(
+                "choose",
+                Boolean::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+            )
+
+        assertEquals("after", method.invoke(instance, false, false))
+        assertEquals("after", method.invoke(instance, true, true))
+
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                method.invoke(instance, false, true)
+            }
+
+        assertEquals(true, exception.cause is IllegalStateException)
+        assertEquals("state", exception.cause?.message)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeRewritesCallReturnValue() {
         AsmRegistry.register(ModifyExpressionValueTrimMixin::class.java)
 
@@ -1892,6 +2027,58 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtLoadRewritesSingleReadWithoutWritingBackSlot() {
+        AsmRegistry.register(ModifyExpressionValueLoadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("LoadExpressionValueTarget", loadExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("expr-raw:raw", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtStoreRewritesStoredExpressionValue() {
+        AsmRegistry.register(ModifyExpressionValueStoreMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StoreExpressionValueTarget", storeExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("store-raw", result)
+    }
+
+    @Test
+    fun redirectAtLoadRewritesSingleReadWithoutWritingBackSlot() {
+        AsmRegistry.register(RedirectLoadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("LoadExpressionValueTarget", loadExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("redirect-raw:raw", result)
+    }
+
+    @Test
+    fun redirectAtStoreRewritesStoredExpressionValue() {
+        AsmRegistry.register(RedirectStoreMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StoreExpressionValueTarget", storeExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("redirect-store-raw", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeRewritesInvokeDynamicReturnValue() {
         AsmRegistry.register(ModifyExpressionValueInvokeDynamicMixin::class.java)
 
@@ -1991,6 +2178,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(ModifyExpressionValueInvokeDynamicSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceExpressionValueTarget",
+                invokeDynamicSliceExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
+
+        assertEquals("pre:inside-changed:outside", result)
+    }
+
+    @Test
     fun modifyExpressionValueFieldSliceLimitsFieldReadsBetweenFromAndTo() {
         AsmRegistry.register(ModifyExpressionValueFieldSliceMixin::class.java)
 
@@ -2002,6 +2206,20 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("readSelected").invoke(instance)
 
         assertEquals("raw-field-slice", result)
+    }
+
+    @Test
+    fun modifyExpressionValueFieldAssignSliceLimitsFieldWritesBetweenFromAndTo() {
+        AsmRegistry.register(ModifyExpressionValueFieldAssignSliceMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SliceFieldAssignTarget", sliceFieldAssignTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldAssignTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeSelected", String::class.java, String::class.java).invoke(instance, "outside", "inside")
+        val result = clazz.getField("name").get(instance)
+
+        assertEquals("inside-field-assign-slice", result)
     }
 
     @Test
@@ -2124,6 +2342,47 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtFieldAssignRewritesPutFieldValue() {
+        AsmRegistry.register(ModifyExpressionValueFieldAssignMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("raw-assigned", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtStaticFieldAssignRewritesPutStaticValue() {
+        AsmRegistry.register(ModifyExpressionValueStaticFieldAssignMixin::class.java)
+
+        val transformed = AsmProcessor().transform("StaticFieldPointTarget", staticFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StaticFieldPointTarget", transformed)
+
+        clazz.getMethod("writeName", String::class.java).invoke(null, "raw")
+        val result = clazz.getMethod("readName").invoke(null)
+
+        assertEquals("raw-static-assigned", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtPrimitiveFieldAssignRewritesPutFieldValue() {
+        AsmRegistry.register(ModifyExpressionValuePrimitiveFieldAssignMixin::class.java)
+
+        val transformed = AsmProcessor().transform("PrimitiveFieldPointTarget", primitiveFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("PrimitiveFieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType).invoke(instance, 7)
+        val result = clazz.getMethod("readScore").invoke(instance)
+
+        assertEquals(10, result)
+    }
+
+    @Test
     fun modifyExpressionValueAtFieldCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueFieldWithTargetParamsMixin::class.java)
 
@@ -2226,6 +2485,51 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("nameCount", Int::class.javaPrimitiveType).invoke(instance, 3)
 
         assertEquals(4, result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayWriteRewritesObjectArrayElementValue() {
+        AsmRegistry.register(ModifyExpressionValueArrayWriteMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java).invoke(instance, 0, "raw")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("raw-array-write", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayWriteRewritesPrimitiveArrayElementValue() {
+        AsmRegistry.register(ModifyExpressionValuePrimitiveArrayWriteMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("PrimitiveArrayAccessTarget", primitiveArrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(instance, 0, 7)
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(10, result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtArrayWriteCanUseTargetMethodParameters() {
+        AsmRegistry.register(ModifyExpressionValueArrayWriteWithTargetParamsMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayParamTarget", arrayParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", Int::class.javaPrimitiveType, String::class.java, String::class.java)
+            .invoke(instance, 0, "field", "suffix")
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType, String::class.java)
+            .invoke(instance, 0, "unused")
+
+        assertEquals("field-suffix", result)
     }
 
     @Test
@@ -2469,6 +2773,30 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtConstantReplacesConstantExpression() {
+        AsmRegistry.register(RedirectConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("redirect-original", result)
+    }
+
+    @Test
+    fun redirectAtConstantInfersTargetByCompatibleConstantType() {
+        AsmRegistry.register(RedirectInferredConstantMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MixedConstantTarget", mixedConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MixedConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("redirect-inferred-original", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtJumpRewritesBranchDecisionInTestClass() {
         AsmRegistry.register(ModifyExpressionValueJumpMixin::class.java)
 
@@ -2492,6 +2820,123 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("recursiveMethod", Int::class.javaPrimitiveType).invoke(instance, 5)
 
         assertEquals(1, result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtSwitchRewritesTableSwitchSelector() {
+        AsmRegistry.register(ModifyExpressionValueSwitchMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("one", method.invoke(instance, 0, false))
+        assertEquals("two", method.invoke(instance, 1, false))
+        assertEquals("fallback", method.invoke(instance, 9, false))
+        assertEquals("two", method.invoke(instance, 0, true))
+    }
+
+    @Test
+    fun modifyExpressionValueAtSwitchRewritesLookupSwitchSelector() {
+        AsmRegistry.register(ModifyExpressionValueLookupSwitchMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "LookupSwitchSelectorTarget",
+                lookupSwitchSelectorTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("LookupSwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("ten", method.invoke(instance, 0, false))
+        assertEquals("thirty", method.invoke(instance, 20, false))
+        assertEquals("fallback", method.invoke(instance, 90, false))
+        assertEquals("thirty", method.invoke(instance, 0, true))
+    }
+
+    @Test
+    fun wrapOperationAtSwitchWrapsTableSwitchSelector() {
+        AsmRegistry.register(WrapOperationSwitchMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("one", method.invoke(instance, 0, false))
+        assertEquals("two", method.invoke(instance, 1, false))
+        assertEquals("two", method.invoke(instance, 0, true))
+    }
+
+    @Test
+    fun wrapOperationAtSwitchWrapsLookupSwitchSelector() {
+        AsmRegistry.register(WrapOperationLookupSwitchMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "LookupSwitchSelectorTarget",
+                lookupSwitchSelectorTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("LookupSwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("ten", method.invoke(instance, 0, false))
+        assertEquals("thirty", method.invoke(instance, 20, false))
+        assertEquals("thirty", method.invoke(instance, 0, true))
+    }
+
+    @Test
+    fun redirectAtSwitchReplacesTableSwitchSelector() {
+        AsmRegistry.register(RedirectSwitchMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("one", method.invoke(instance, 0, false))
+        assertEquals("two", method.invoke(instance, 1, false))
+        assertEquals("two", method.invoke(instance, 0, true))
+    }
+
+    @Test
+    fun redirectAtSwitchReplacesLookupSwitchSelector() {
+        AsmRegistry.register(RedirectLookupSwitchMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "LookupSwitchSelectorTarget",
+                lookupSwitchSelectorTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("LookupSwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals("ten", method.invoke(instance, 0, false))
+        assertEquals("thirty", method.invoke(instance, 20, false))
+        assertEquals("thirty", method.invoke(instance, 0, true))
+    }
+
+    @Test
+    fun redirectAtThrowCanReplaceThrowable() {
+        AsmRegistry.register(RedirectThrowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ThrowPointTarget", throwPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ThrowPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("fail").invoke(instance)
+            }
+
+        assertEquals(true, exception.cause is IllegalArgumentException)
+        assertEquals("redirected-failed", exception.cause?.message)
     }
 
     @Test
@@ -2756,6 +3201,23 @@ class FrameworkReliabilityTest {
         val clazz = loadClass("SliceModifyReceiverTarget", transformed)
         val instance = clazz.getDeclaredConstructor().newInstance()
         val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre-a:changed-b:outside-c", result)
+    }
+
+    @Test
+    fun modifyReceiverSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(ModifyReceiverInvokeDynamicSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceModifyReceiverTarget",
+                invokeDynamicSliceModifyReceiverTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
 
         assertEquals("pre-a:changed-b:outside-c", result)
     }
@@ -3115,6 +3577,32 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
 
         assertEquals("RAW-8-wrapped", result)
+    }
+
+    @Test
+    fun wrapOperationAtLoadCanCallOriginalReadWithoutWritingBackSlot() {
+        AsmRegistry.register(WrapOperationLoadMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("LoadExpressionValueTarget", loadExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("wrap-raw:raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtStoreCanCallOriginalWriteValue() {
+        AsmRegistry.register(WrapOperationStoreMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StoreExpressionValueTarget", storeExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StoreExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("wrap-store-raw", result)
     }
 
     @Test
@@ -4147,6 +4635,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyConstantSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(ModifyConstantInvokeDynamicSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceConstantTarget",
+                invokeDynamicSliceConstantTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
+
+        assertEquals("target:changed:target", result)
+    }
+
+    @Test
     fun modifyConstantCanUseTargetMethodParameters() {
         AsmRegistry.register(ConstantWithTargetParamsMixin::class.java)
 
@@ -4777,6 +5282,36 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun invokeInjectAtInvokeDynamicCanUseCallAndTargetMethodParameters() {
+        AsmRegistry.register(InvokeDynamicInjectMixin::class.java)
+        InvokeDynamicInjectMixin.injectCount = 0
+        InvokeDynamicInjectMixin.observed = ""
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("raw-7", result)
+        assertEquals(1, InvokeDynamicInjectMixin.injectCount)
+        assertEquals("raw:7:raw:7", InvokeDynamicInjectMixin.observed)
+    }
+
+    @Test
+    fun invokeReplaceAtInvokeDynamicReplacesCall() {
+        AsmRegistry.register(InvokeDynamicReplaceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("RAW-8-injected", result)
+    }
+
+    @Test
     fun invokeInjectInfersTargetWhenMethodIsOmitted() {
         AsmRegistry.register(InferredInvokeInjectTargetMixin::class.java)
 
@@ -4867,6 +5402,75 @@ class FrameworkReliabilityTest {
         assertEquals(true, handlerCallIndexes.single() > boundaryIndexes[0])
         assertEquals(true, handlerCallIndexes.single() < boundaryIndexes[1])
         assertEquals(true, handlerCallIndexes.single() < trimIndexes[1])
+    }
+
+    @Test
+    fun invokeAssignInjectSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(InvokeAssignDynamicSliceMixin::class.java)
+        InvokeAssignDynamicSliceMixin.injectCount = 0
+        InvokeAssignDynamicSliceMixin.observed = ""
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceModifyArgTarget",
+                invokeDynamicSliceModifyArgTargetBytes(),
+                javaClass.classLoader,
+            )
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "value" && it.desc == "(Ljava/lang/String;)Ljava/lang/String;" }
+        val instructions = method.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, InvokeAssignDynamicSliceMixin::class.java, "inject")
+        val concatIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.MethodInsnNode &&
+                insn.owner == "java/lang/String" &&
+                insn.name == "concat"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+        val boundaryIndexes = instructions.mapIndexedNotNull { index, insn ->
+            if (insn is org.objectweb.asm.tree.InvokeDynamicInsnNode &&
+                insn.bsm.owner == "java/lang/invoke/StringConcatFactory"
+            ) {
+                index
+            } else {
+                null
+            }
+        }
+        val clazz = loadClass("InvokeDynamicSliceModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
+
+        assertEquals("pre-original:inside-original:outside-original", result)
+        assertEquals(1, InvokeAssignDynamicSliceMixin.injectCount)
+        assertEquals("original:marker", InvokeAssignDynamicSliceMixin.observed)
+        assertEquals(true, concatIndexes.size >= 3)
+        assertEquals(2, boundaryIndexes.size)
+        assertEquals(true, concatIndexes[0] < boundaryIndexes[0])
+        assertEquals(true, concatIndexes[1] > boundaryIndexes[0])
+        assertEquals(true, concatIndexes[1] < boundaryIndexes[1])
+        assertEquals(true, concatIndexes[2] > boundaryIndexes[1])
+        assertEquals(true, handlerCallIndex > concatIndexes[1])
+        assertEquals(true, handlerCallIndex > boundaryIndexes[0])
+        assertEquals(true, handlerCallIndex < boundaryIndexes[1])
+    }
+
+    @Test
+    fun invokeAssignSliceBoundaryErrorMentionsInvokeAssign() {
+        AsmRegistry.register(InvokeAssignInvalidSliceBoundaryMixin::class.java)
+
+        val exception =
+            assertThrows(AsmTransformException::class.java) {
+                AsmProcessor().transform("SliceInvokeTarget", sliceInvokeTargetBytes(), javaClass.classLoader)
+            }
+
+        assertEquals(
+            true,
+            exception.cause?.message?.contains("@AsmInject(INVOKE/INVOKE_ASSIGN)") == true,
+        )
+        assertEquals(true, exception.cause?.message?.contains("FIELD") == true)
     }
 
     @Test
@@ -5078,6 +5682,7 @@ class FrameworkReliabilityTest {
         assertEquals(Int::class.javaPrimitiveType, methods["require"]?.returnType)
         assertEquals(Int::class.javaPrimitiveType, methods["expect"]?.returnType)
         assertEquals(Int::class.javaPrimitiveType, methods["allow"]?.returnType)
+        assertEquals(Slice::class.java, methods["slice"]?.returnType)
     }
 
     @Test
@@ -5370,6 +5975,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableLoadSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(ModifyVariableLoadInvokeDynamicSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceLoadVariableTarget",
+                invokeDynamicSliceLoadVariableTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
+
+        assertEquals("pre:loaded-inside:outside", result)
+    }
+
+    @Test
     fun asmInjectLoadSliceLimitsLocalLoadsBetweenFromAndTo() {
         AsmRegistry.register(LoadInjectSliceMixin::class.java)
         LoadInjectSliceMixin.injectCount = 0
@@ -5382,6 +6004,25 @@ class FrameworkReliabilityTest {
 
         assertEquals("pre:inside:outside", result)
         assertEquals(1, LoadInjectSliceMixin.injectCount)
+    }
+
+    @Test
+    fun asmInjectLoadSliceSupportsInvokeDynamicBoundaries() {
+        AsmRegistry.register(LoadInjectInvokeDynamicSliceMixin::class.java)
+        LoadInjectInvokeDynamicSliceMixin.injectCount = 0
+
+        val transformed =
+            AsmProcessor().transform(
+                "InvokeDynamicSliceLoadVariableTarget",
+                invokeDynamicSliceLoadVariableTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("InvokeDynamicSliceLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
+
+        assertEquals("pre:inside:outside", result)
+        assertEquals(1, LoadInjectInvokeDynamicSliceMixin.injectCount)
     }
 
     @Test
@@ -6815,6 +7456,26 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun switchInjectInsertsHandlerBeforeTableSwitchWithoutConsumingSelector() {
+        AsmRegistry.register(SwitchInstructionInjectMixin::class.java)
+
+        val transformed = AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val methodNode = classNode.methods.single { it.name == "choose" }
+        val instructions = methodNode.instructions.toArray()
+        val handlerCallIndex = handlerCallIndex(instructions, SwitchInstructionInjectMixin::class.java, "inject")
+        val switchIndex = instructions.indexOfFirst { it is org.objectweb.asm.tree.TableSwitchInsnNode }
+        val clazz = loadClass("SwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        assertEquals(true, handlerCallIndex >= 0)
+        assertEquals(true, switchIndex >= 0)
+        assertEquals(switchIndex - 1, handlerCallIndex)
+        assertEquals("one", method.invoke(instance, 1, false))
+    }
+
+    @Test
     fun constantInjectInsertsHandlerBeforeMatchedConstantInTestClass() {
         AsmRegistry.register(ConstantInstructionInjectMixin::class.java)
 
@@ -6877,6 +7538,34 @@ class FrameworkReliabilityTest {
         assertEquals(true, handlerCallIndex >= 0)
         assertEquals(true, printlnIndex >= 0)
         assertEquals(printlnIndex + 1, handlerCallIndex)
+    }
+
+    @Test
+    fun invokeAssignInjectAtInvokeDynamicDefaultsToAfterMatchedCall() {
+        AsmRegistry.register(InvokeAssignDynamicInjectMixin::class.java)
+        InvokeAssignDynamicInjectMixin.injectCount = 0
+        InvokeAssignDynamicInjectMixin.observed = ""
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val method = classNode.methods.single { it.name == "value" && it.desc == "(Ljava/lang/String;I)Ljava/lang/String;" }
+        val instructions = method.instructions.toArray()
+        val invokeDynamicIndex = instructions.indexOfFirst {
+            it is org.objectweb.asm.tree.InvokeDynamicInsnNode &&
+                it.bsm.owner == "java/lang/invoke/StringConcatFactory" &&
+                it.name == "makeConcatWithConstants"
+        }
+        val handlerCallIndex = handlerCallIndex(instructions, InvokeAssignDynamicInjectMixin::class.java, "inject")
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals(true, invokeDynamicIndex >= 0)
+        assertEquals(true, handlerCallIndex > invokeDynamicIndex)
+        assertEquals("raw-7", result)
+        assertEquals(1, InvokeAssignDynamicInjectMixin.injectCount)
+        assertEquals("raw:7", InvokeAssignDynamicInjectMixin.observed)
     }
 
     @Test
@@ -7509,6 +8198,42 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "modified-$original"
     }
 
+    @AsmMixin("SliceReturnValueTarget")
+    object ModifyReturnValueSliceMixin {
+        @ModifyReturnValue(
+            method = "value(I)Ljava/lang/String;",
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified-$original"
+    }
+
+    @AsmMixin("InvokeDynamicSliceReturnValueTarget")
+    object ModifyReturnValueInvokeDynamicSliceMixin {
+        @ModifyReturnValue(
+            method = "value(ILjava/lang/String;)Ljava/lang/String;",
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified-$original"
+    }
+
     @AsmMixin("MultiReturnTarget")
     object RequireThreeModifyReturnValueMixin {
         @ModifyReturnValue(method = "value(Z)Ljava/lang/String;", require = 3)
@@ -7542,6 +8267,23 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun replace(): Int = 1
+    }
+
+    @AsmMixin("RedirectTarget")
+    object InvokeReplaceTrimMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.REPLACE,
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun replace(): String = "replaced-trim"
     }
 
     @AsmMixin("RedirectTarget")
@@ -7589,6 +8331,54 @@ class FrameworkReliabilityTest {
         fun inject(callback: CallbackInfo) {
             callback.isCancelled()
         }
+    }
+
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object InvokeDynamicInjectMixin {
+        var injectCount: Int = 0
+        var observed: String = ""
+
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            dynamicPrefix: String,
+            dynamicCount: Int,
+            targetPrefix: String,
+            targetCount: Int,
+        ) {
+            injectCount++
+            observed = "$dynamicPrefix:$dynamicCount:$targetPrefix:$targetCount"
+        }
+    }
+
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object InvokeDynamicReplaceMixin {
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+                shift = Shift.REPLACE,
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun replace(
+            dynamicPrefix: String,
+            dynamicCount: Int,
+        ): String = "${dynamicPrefix.uppercase()}-${dynamicCount + 1}-injected"
     }
 
     @AsmMixin("StrictTarget")
@@ -8076,6 +8866,32 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "modified"
     }
 
+    @AsmMixin("InvokeDynamicSliceModifyArgTarget")
+    object InvokeDynamicSliceModifyArgMixin {
+        @ModifyArg(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified"
+    }
+
     @AsmMixin("ConstructorModifyArgTarget")
     object ConstructorModifyArgMixin {
         @ModifyArg(
@@ -8301,6 +9117,34 @@ class FrameworkReliabilityTest {
                 from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
                 to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
             ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("InvokeDynamicSliceModifyArgsTarget")
+    object ModifyArgsInvokeDynamicSliceMixin {
+        @ModifyArgs(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun modify(args: Args) {
@@ -8886,6 +9730,56 @@ class FrameworkReliabilityTest {
         ): Boolean = array[index.length] == value
     }
 
+    @AsmMixin("JumpOperationTarget")
+    object WrapConditionJumpMixin {
+        @WrapWithCondition(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP, target = "IFLE"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldJump(
+            original: Boolean,
+            value: Int,
+            allowNegative: Boolean,
+        ): Boolean {
+            original.toString()
+            value.hashCode()
+            return allowNegative
+        }
+    }
+
+    @AsmMixin("JumpOperationTarget")
+    object WrapConditionGotoMixin {
+        @WrapWithCondition(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP, target = "GOTO"),
+        )
+        @JvmStatic
+        fun shouldJump(original: Boolean): Boolean = original
+    }
+
+    @AsmMixin("ConditionalThrowTarget")
+    object WrapConditionThrowMixin {
+        @WrapWithCondition(
+            method = "choose(ZZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldThrow(
+            original: Throwable,
+            skipOriginalThrow: Boolean,
+            allowThrow: Boolean,
+        ): Boolean {
+            original.message.hashCode()
+            skipOriginalThrow.toString()
+            return allowThrow
+        }
+    }
+
     @AsmMixin("ExpressionValueTarget")
     object ModifyExpressionValueTrimMixin {
         @ModifyExpressionValue(
@@ -8990,6 +9884,54 @@ class FrameworkReliabilityTest {
         ): String = "$prefix-$original-$count"
     }
 
+    @AsmMixin("LoadExpressionValueTarget")
+    object ModifyExpressionValueLoadMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=1"]),
+            ordinal = 0,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expr-$original"
+    }
+
+    @AsmMixin("StoreExpressionValueTarget")
+    object ModifyExpressionValueStoreMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=1"]),
+            ordinal = 0,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "store-$original"
+    }
+
+    @AsmMixin("LoadExpressionValueTarget")
+    object RedirectLoadMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=1"]),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-$original"
+    }
+
+    @AsmMixin("StoreExpressionValueTarget")
+    object RedirectStoreMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=1"]),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-store-$original"
+    }
+
     @AsmMixin("InvokeDynamicExpressionValueTarget")
     object ModifyExpressionValueInvokeDynamicMixin {
         @ModifyExpressionValue(
@@ -9080,6 +10022,31 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "$original-changed"
     }
 
+    @AsmMixin("InvokeDynamicSliceExpressionValueTarget")
+    object ModifyExpressionValueInvokeDynamicSliceMixin {
+        @ModifyExpressionValue(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-changed"
+    }
+
     @AsmMixin("SliceFieldReadTarget")
     object ModifyExpressionValueFieldSliceMixin {
         @ModifyExpressionValue(
@@ -9094,6 +10061,22 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-field-slice"
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object ModifyExpressionValueFieldAssignSliceMixin {
+        @ModifyExpressionValue(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-field-assign-slice"
     }
 
     @AsmMixin("SliceNewExpressionValueTarget")
@@ -9200,6 +10183,42 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-static-field"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyExpressionValueFieldAssignMixin {
+        @ModifyExpressionValue(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-assigned"
+    }
+
+    @AsmMixin("StaticFieldPointTarget")
+    object ModifyExpressionValueStaticFieldAssignMixin {
+        @ModifyExpressionValue(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "StaticFieldPointTarget.name:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-static-assigned"
+    }
+
+    @AsmMixin("PrimitiveFieldPointTarget")
+    object ModifyExpressionValuePrimitiveFieldAssignMixin {
+        @ModifyExpressionValue(
+            method = "writeScore(I)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "PrimitiveFieldPointTarget.score:I"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 3
     }
 
     @AsmMixin("FieldParamTarget")
@@ -9317,6 +10336,63 @@ class FrameworkReliabilityTest {
             original: Int,
             bonus: Int,
         ): Int = original + bonus
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayWriteMixin {
+        @ModifyExpressionValue(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-array-write"
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object ModifyExpressionValuePrimitiveArrayWriteMixin {
+        @ModifyExpressionValue(
+            method = "writeScore(II)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=set"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 3
+    }
+
+    @AsmMixin("ArrayParamTarget")
+    object ModifyExpressionValueArrayWriteWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "writeName(ILjava/lang/String;Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "ArrayParamTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: String,
+            index: Int,
+            value: String,
+            suffix: String,
+        ): String {
+            assertEquals(0, index)
+            assertEquals(original, value)
+            return "$original-$suffix"
+        }
     }
 
     @AsmMixin("SliceArrayExpressionValueTarget")
@@ -9593,6 +10669,30 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "inferred-$original"
     }
 
+    @AsmMixin("MixedConstantTarget")
+    object RedirectConstantMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "original"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-$original"
+    }
+
+    @AsmMixin("MixedConstantTarget")
+    object RedirectInferredConstantMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-inferred-$original"
+    }
+
     @AsmMixin("Test")
     object ModifyExpressionValueJumpMixin {
         @ModifyExpressionValue(
@@ -9606,6 +10706,124 @@ class FrameworkReliabilityTest {
         ): Boolean {
             n.hashCode()
             return false && original
+        }
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
+    object ModifyExpressionValueSwitchMixin {
+        @ModifyExpressionValue(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: Int,
+            value: Int,
+            forceTwo: Boolean,
+        ): Int {
+            value.hashCode()
+            return if (forceTwo) 2 else original + 1
+        }
+    }
+
+    @AsmMixin("LookupSwitchSelectorTarget")
+    object ModifyExpressionValueLookupSwitchMixin {
+        @ModifyExpressionValue(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: Int,
+            value: Int,
+            forceThirty: Boolean,
+        ): Int {
+            value.hashCode()
+            return if (forceThirty) 30 else original + 10
+        }
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
+    object WrapOperationSwitchMixin {
+        @WrapOperation(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            selector: Int,
+            operation: Operation<Int>,
+            value: Int,
+            forceTwo: Boolean,
+        ): Int {
+            value.hashCode()
+            val original = operation.call(selector)
+            return if (forceTwo) 2 else original + 1
+        }
+    }
+
+    @AsmMixin("LookupSwitchSelectorTarget")
+    object WrapOperationLookupSwitchMixin {
+        @WrapOperation(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            selector: Int,
+            operation: Operation<Int>,
+            value: Int,
+            forceThirty: Boolean,
+        ): Int {
+            value.hashCode()
+            val original = operation.call(selector)
+            return if (forceThirty) 30 else original + 10
+        }
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
+    object RedirectSwitchMixin {
+        @Redirect(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            selector: Int,
+            value: Int,
+            forceTwo: Boolean,
+        ): Int {
+            value.hashCode()
+            return if (forceTwo) 2 else selector + 1
+        }
+    }
+
+    @AsmMixin("LookupSwitchSelectorTarget")
+    object RedirectLookupSwitchMixin {
+        @Redirect(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            selector: Int,
+            value: Int,
+            forceThirty: Boolean,
+        ): Int {
+            value.hashCode()
+            return if (forceThirty) 30 else selector + 10
         }
     }
 
@@ -9909,6 +11127,34 @@ class FrameworkReliabilityTest {
                 from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
                 to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
             ),
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("InvokeDynamicSliceModifyReceiverTarget")
+    object ModifyReceiverInvokeDynamicSliceMixin {
+        @ModifyReceiver(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun modify(original: String): String {
@@ -10226,6 +11472,34 @@ class FrameworkReliabilityTest {
             count: Int,
             operation: Operation<String>,
         ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
+    }
+
+    @AsmMixin("LoadExpressionValueTarget")
+    object WrapOperationLoadMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=1"]),
+            ordinal = 0,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = "wrap-${operation.call(original)}"
+    }
+
+    @AsmMixin("StoreExpressionValueTarget")
+    object WrapOperationStoreMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=1"]),
+            ordinal = 0,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = operation.call("wrap-store-$original")
     }
 
     @AsmMixin("WrapMethodStaticTarget")
@@ -11150,6 +12424,28 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "changed"
     }
 
+    @AsmMixin("InvokeDynamicSliceConstantTarget")
+    object ModifyConstantInvokeDynamicSliceMixin {
+        @ModifyConstant(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
     @AsmMixin("ConstantParamTarget")
     object ConstantWithTargetParamsMixin {
         @ModifyConstant(method = "value(Ljava/lang/String;I)Ljava/lang/String;", constant = "base-")
@@ -11699,6 +12995,59 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("InvokeDynamicSliceModifyArgTarget")
+    object InvokeAssignDynamicSliceMixin {
+        var injectCount: Int = 0
+        var observed: String = ""
+
+        @AsmInject(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE_ASSIGN,
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            suffix: String,
+            marker: String,
+        ) {
+            injectCount++
+            observed = "$suffix:$marker"
+        }
+    }
+
+    @AsmMixin("SliceInvokeTarget")
+    object InvokeAssignInvalidSliceBoundaryMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE_ASSIGN,
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = "java/lang/String.value:Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("RedirectAllTarget")
     @RedirectAllMethods
     object RedirectAllTrimMixin {
@@ -12123,6 +13472,29 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "loaded-$original"
     }
 
+    @AsmMixin("InvokeDynamicSliceLoadVariableTarget")
+    object ModifyVariableLoadInvokeDynamicSliceMixin {
+        @ModifyVariable(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            index = 2,
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "loaded-$original"
+    }
+
     @AsmMixin("LoadVariableTarget")
     object LoadInjectMixin {
         var injectCount: Int = 0
@@ -12167,6 +13539,33 @@ class FrameworkReliabilityTest {
             slice = Slice(
                 from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
                 to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
+    @AsmMixin("InvokeDynamicSliceLoadVariableTarget")
+    object LoadInjectInvokeDynamicSliceMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.LOAD,
+            at = At(value = InjectionPoint.LOAD, shift = Shift.BEFORE, args = ["index=2"]),
+            slice = Slice(
+                from = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
+                to = At(
+                    value = InjectionPoint.INVOKE,
+                    target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;",
+                ),
             ),
             require = 1,
             allow = 1,
@@ -13158,6 +14557,20 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SwitchSelectorTarget")
+    object SwitchInstructionInjectMixin {
+        @AsmInject(
+            method = "choose(IZ)Ljava/lang/String;",
+            target = InjectionPoint.SWITCH,
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("Test")
     object ConstantInstructionInjectMixin {
         @AsmInject(
@@ -13211,6 +14624,31 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun inject() {
+        }
+    }
+
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object InvokeAssignDynamicInjectMixin {
+        var injectCount: Int = 0
+        var observed: String = ""
+
+        @AsmInject(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            target = InjectionPoint.INVOKE_ASSIGN,
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            dynamicPrefix: String,
+            dynamicCount: Int,
+        ) {
+            injectCount++
+            observed = "$dynamicPrefix:$dynamicCount"
         }
     }
 
@@ -13345,6 +14783,18 @@ class FrameworkReliabilityTest {
             original: Throwable,
             operation: Operation<Throwable>,
         ): Throwable = IllegalArgumentException("wrapped-${operation.call(original).message}")
+    }
+
+    @AsmMixin("ThrowPointTarget")
+    object RedirectThrowMixin {
+        @Redirect(
+            method = "fail()V",
+            at = At(value = InjectionPoint.THROW),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: Throwable): Throwable = IllegalArgumentException("redirected-${original.message}")
     }
 
     @AsmMixin("SliceThrowInstructionTarget")
@@ -14057,6 +15507,46 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun loadExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("raw")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun storeExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StoreExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("raw")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun loadVariableParamTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadVariableParamTarget", null, "java/lang/Object", null)
@@ -14138,6 +15628,66 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun invokeDynamicSliceLoadVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceLoadVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitVarInsn(Opcodes.ASTORE, 5)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 5)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 6)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun staticReturnTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StaticReturnTarget", null, "java/lang/Object", null)
@@ -14211,6 +15761,93 @@ class FrameworkReliabilityTest {
             visitInsn(Opcodes.ARETURN)
             visitLabel(secondReturn)
             visitLdcInsn("second")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceReturnValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceReturnValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(I)Ljava/lang/String;", null, null).apply {
+            val afterBeforeReturn = org.objectweb.asm.Label()
+            val afterInsideReturn = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFNE, afterBeforeReturn)
+            visitLdcInsn("before")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(afterBeforeReturn)
+            visitLdcInsn("from")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.ICONST_1)
+            visitJumpInsn(Opcodes.IF_ICMPNE, afterInsideReturn)
+            visitLdcInsn("inside")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(afterInsideReturn)
+            visitLdcInsn("to")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("after")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeDynamicSliceReturnValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceReturnValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(ILjava/lang/String;)Ljava/lang/String;", null, null).apply {
+            val afterBeforeReturn = org.objectweb.asm.Label()
+            val afterInsideReturn = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFNE, afterBeforeReturn)
+            visitLdcInsn("before")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(afterBeforeReturn)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitInsn(Opcodes.ICONST_1)
+            visitJumpInsn(Opcodes.IF_ICMPNE, afterInsideReturn)
+            visitLdcInsn("inside")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(afterInsideReturn)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("after")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(0, 0)
             visitEnd()
@@ -14634,6 +16271,66 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun invokeDynamicSliceModifyArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceModifyArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside-")
+            visitLdcInsn("original")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 5)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun constructorModifyArgTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstructorModifyArgTarget", null, "java/lang/Object", null)
@@ -14884,6 +16581,87 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(3, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeDynamicSliceModifyArgsTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceModifyArgsTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 5)
             visitEnd()
         }
         cw.visitEnd()
@@ -15487,6 +17265,63 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun invokeDynamicSliceExpressionValueTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceExpressionValueTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn(" pre ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" inside ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn(" outside ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 5)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun modifyReceiverTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyReceiverTarget", null, "java/lang/Object", null)
@@ -15770,6 +17605,66 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeDynamicSliceModifyReceiverTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceModifyReceiverTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("pre")
+            visitLdcInsn("-a")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("inside")
+            visitLdcInsn("-b")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("outside")
+            visitLdcInsn("-c")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 5)
             visitEnd()
         }
         cw.visitEnd()
@@ -16544,6 +18439,30 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun conditionalThrowTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConditionalThrowTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "choose", "(ZZ)Ljava/lang/String;", null, null).apply {
+            val afterThrow = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFNE, afterThrow)
+            visitTypeInsn(Opcodes.NEW, "java/lang/IllegalStateException")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("state")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/IllegalStateException", "<init>", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.ATHROW)
+            visitLabel(afterThrow)
+            visitLdcInsn("after")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun jumpOperationTargetBytes(): ByteArray {
         val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "JumpOperationTarget", null, "java/lang/Object", null)
@@ -16557,6 +18476,68 @@ class FrameworkReliabilityTest {
             visitInsn(Opcodes.ARETURN)
             visitLabel(negative)
             visitLdcInsn("negative")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun switchSelectorTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SwitchSelectorTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "choose", "(IZ)Ljava/lang/String;", null, null).apply {
+            val zero = org.objectweb.asm.Label()
+            val one = org.objectweb.asm.Label()
+            val two = org.objectweb.asm.Label()
+            val fallback = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitTableSwitchInsn(0, 2, fallback, zero, one, two)
+            visitLabel(zero)
+            visitLdcInsn("zero")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(one)
+            visitLdcInsn("one")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(two)
+            visitLdcInsn("two")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(fallback)
+            visitLdcInsn("fallback")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun lookupSwitchSelectorTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LookupSwitchSelectorTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "choose", "(IZ)Ljava/lang/String;", null, null).apply {
+            val ten = org.objectweb.asm.Label()
+            val twenty = org.objectweb.asm.Label()
+            val thirty = org.objectweb.asm.Label()
+            val fallback = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitLookupSwitchInsn(fallback, intArrayOf(10, 20, 30), arrayOf(ten, twenty, thirty))
+            visitLabel(ten)
+            visitLdcInsn("ten")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(twenty)
+            visitLdcInsn("twenty")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(thirty)
+            visitLdcInsn("thirty")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(fallback)
+            visitLdcInsn("fallback")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(0, 0)
             visitEnd()
@@ -17088,6 +19069,60 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeDynamicSliceConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeDynamicSliceConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        val concatBootstrap =
+            org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "java/lang/invoke/StringConcatFactory",
+                "makeConcatWithConstants",
+                "(Ljava/lang/invoke/MethodHandles\$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;" +
+                    "Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+                false,
+            )
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "start-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInvokeDynamicInsn(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                concatBootstrap,
+                "end-\u0001",
+            )
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 5)
             visitEnd()
         }
         cw.visitEnd()

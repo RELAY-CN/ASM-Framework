@@ -29,19 +29,21 @@ import java.lang.reflect.Modifier
 /**
  * WrapWithCondition 注入器。
  *
- * 该注入器会匹配目标方法内的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或简单数组元素写入，
+ * 该注入器会匹配目标方法内的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、简单数组元素写入、条件跳转或抛异常点，
  * 并在原指令前插入 boolean handler。
- * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段写入值或数组写入栈参数并继续执行原指令，
- * 返回 `false` 时跳过原指令。
+ * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段写入值、数组写入栈参数、原条件跳转分支结果或原异常对象并继续执行原指令，
+ * 返回 `false` 时跳过原指令、原条件跳转或原抛出。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的 `void`
  * 普通调用或 `invokedynamic` 调用；构造器、非 `void` 调用和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选
  * 兼容的字段写入，且不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
+ * [InjectionPoint.JUMP] 未指定跳转目标时会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持条件包裹。
+ * [InjectionPoint.THROW] 未指定异常类型目标时会匹配切片内全部 `ATHROW`；指定目标时只匹配前一条真实指令为同类型 `<init>` 的直接构造异常。
  * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
  *
- * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN]
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE] 与 [InjectionPoint.FIELD_ASSIGN] 条件包裹使用
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 条件包裹使用
  * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -54,10 +56,10 @@ class WrapWithConditionInjector(
     private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入前插入条件包裹逻辑。
+     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、数组元素写入、条件跳转或抛异常点前插入条件包裹逻辑。
      *
      * @param target 目标方法
-     * @return 至少包裹一个调用点、动态调用点、字段写入点或数组元素写入点时返回 `true`
+     * @return 至少包裹一个调用点、动态调用点、字段写入点、数组元素写入点、条件跳转点或抛异常点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -65,10 +67,10 @@ class WrapWithConditionInjector(
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
     /**
-     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入或数组元素写入前插入条件包裹逻辑，并返回实际包裹数量。
+     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、数组元素写入、条件跳转或抛异常点前插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
-     * @return 实际包裹的调用点、动态调用点、字段写入点或数组元素写入点数量
+     * @return 实际包裹的调用点、动态调用点、字段写入点、数组元素写入点、条件跳转点或抛异常点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -82,8 +84,10 @@ class WrapWithConditionInjector(
                 } else {
                     injectFieldAssign(target)
                 }
+            InjectionPoint.JUMP -> injectJump(target)
+            InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE and FIELD_ASSIGN injection points",
+                "@WrapWithCondition supports only INVOKE, FIELD_ASSIGN, JUMP and THROW injection points",
             )
         }
     }
@@ -277,6 +281,94 @@ class WrapWithConditionInjector(
         return injectionCount
     }
 
+    private fun injectJump(target: MethodNode): Int {
+        val targetOpcode = parseJumpOpcodeTarget(at.target)
+        if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition JUMP target must be a conditional JVM jump opcode: ${at.target}",
+            )
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val instructions = target.instructions
+        val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (
+                insn !is JumpInsnNode ||
+                insn.opcode !in CONDITIONAL_JUMP_OPS ||
+                (targetOpcode != null && insn.opcode != targetOpcode)
+            ) {
+                continue
+            }
+            if (targetOpcode == null && !isJumpHandlerCompatible(target)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateJumpHandlerSignature(target)
+            val il = buildJumpConditionWrapper(insn, target, targetParamCount)
+            instructions.insertBefore(insn, il)
+            instructions.remove(insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun isJumpHandlerCompatible(target: MethodNode): Boolean =
+        runCatching { validateJumpHandlerSignature(target) }.isSuccess
+
+    private fun injectThrow(target: MethodNode): Int {
+        val normalizedTarget = at.target.replace('.', '/')
+        val inferTarget = normalizedTarget.isEmpty()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ATHROW) {
+                continue
+            }
+            if (!inferTarget && directThrownTypeInternalName(insn) != normalizedTarget) {
+                continue
+            }
+            if (inferTarget && !isThrowHandlerCompatible(target)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateThrowHandlerSignature(target)
+            val skipOriginalLabel = LabelNode()
+            val il = buildThrowConditionWrapper(target, targetParamCount, skipOriginalLabel)
+            target.instructions.insertBefore(insn, il)
+            target.instructions.insert(insn, skipOriginalLabel)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    private fun isThrowHandlerCompatible(target: MethodNode): Boolean =
+        runCatching { validateThrowHandlerSignature(target) }.isSuccess
+
     private fun buildConditionWrapper(
         target: MethodNode,
         callInsn: MethodInsnNode,
@@ -458,6 +550,72 @@ class WrapWithConditionInjector(
         loadFromVariable(il, arrayType, arrayIndex)
         loadFromVariable(il, Type.INT_TYPE, indexIndex)
         loadFromVariable(il, elementType, valueIndex)
+
+        return il
+    }
+
+    private fun buildJumpConditionWrapper(
+        jumpInsn: JumpInsnNode,
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val originalTrue = LabelNode()
+        val afterOriginal = LabelNode()
+        val skipOriginal = LabelNode()
+        val originalIndex = nextLocalIndex(target)
+        val il = InsnList()
+
+        il.add(JumpInsnNode(jumpInsn.opcode, originalTrue))
+        il.add(InsnNode(Opcodes.ICONST_0))
+        il.add(JumpInsnNode(Opcodes.GOTO, afterOriginal))
+        il.add(originalTrue)
+        il.add(InsnNode(Opcodes.ICONST_1))
+        il.add(afterOriginal)
+        il.add(VarInsnNode(Opcodes.ISTORE, originalIndex))
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ILOAD, originalIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        il.add(JumpInsnNode(Opcodes.IFEQ, skipOriginal))
+        il.add(VarInsnNode(Opcodes.ILOAD, originalIndex))
+        il.add(JumpInsnNode(Opcodes.IFNE, jumpInsn.label))
+        il.add(skipOriginal)
+
+        return il
+    }
+
+    private fun buildThrowConditionWrapper(
+        target: MethodNode,
+        targetParamCount: Int,
+        skipOriginalLabel: LabelNode,
+    ): InsnList {
+        val il = InsnList()
+        val throwableType = Type.getType(Throwable::class.java)
+        val throwableIndex = nextLocalIndex(target)
+
+        il.add(VarInsnNode(Opcodes.ASTORE, throwableIndex))
+        addHandlerOwner(il)
+        il.add(VarInsnNode(Opcodes.ALOAD, throwableIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        il.add(JumpInsnNode(Opcodes.IFEQ, skipOriginalLabel))
+        il.add(VarInsnNode(Opcodes.ALOAD, throwableIndex))
 
         return il
     }
@@ -678,6 +836,97 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    private fun validateJumpHandlerSignature(target: MethodNode): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition JUMP handler ${asmMethod.name} must receive original branch result",
+            )
+        }
+        if (!isHandlerParameterCompatible(Type.BOOLEAN_TYPE, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected ${Type.BOOLEAN_TYPE}, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    private fun validateThrowHandlerSignature(target: MethodNode): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val throwableType = Type.getType(Throwable::class.java)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition THROW handler ${asmMethod.name} must receive original throwable",
+            )
+        }
+        if (!isHandlerParameterCompatible(throwableType, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected $throwableType, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
     private fun buildExpectedHandlerParams(callInsn: MethodInsnNode): Array<Type> {
         val callParams = Type.getArgumentTypes(callInsn.desc).toList()
         return if (callInsn.opcode == Opcodes.INVOKESTATIC) {
@@ -726,6 +975,44 @@ class WrapWithConditionInjector(
             cursor = cursor.previous
         }
         return null
+    }
+
+    private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
+        val previous = previousRealInstruction(throwInsn)
+        if (previous is MethodInsnNode &&
+            previous.opcode == Opcodes.INVOKESPECIAL &&
+            previous.name == "<init>"
+        ) {
+            return previous.owner
+        }
+        return null
+    }
+
+    private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.previous
+        while (current != null && current.opcode < 0) {
+            current = current.previous
+        }
+        return current
+    }
+
+    private fun parseJumpOpcodeTarget(target: String): Int? {
+        if (target.isEmpty()) {
+            return null
+        }
+
+        val normalized = target.trim().uppercase()
+        normalized.toIntOrNull()?.let { opcode ->
+            require(opcode in JUMP_OPS) {
+                "@WrapWithCondition JUMP target opcode must be a JVM jump opcode: $target"
+            }
+            return opcode
+        }
+
+        return JUMP_OPCODE_NAMES[normalized]
+            ?: throw IllegalArgumentException(
+                "@WrapWithCondition JUMP target must be a jump opcode name or number: $target",
+            )
     }
 
     private fun isHandlerParameterCompatible(
@@ -1027,5 +1314,47 @@ class WrapWithConditionInjector(
             Opcodes.CASTORE,
             Opcodes.SASTORE,
         )
+        private val JUMP_OPS = setOf(
+            Opcodes.IFEQ,
+            Opcodes.IFNE,
+            Opcodes.IFLT,
+            Opcodes.IFGE,
+            Opcodes.IFGT,
+            Opcodes.IFLE,
+            Opcodes.IF_ICMPEQ,
+            Opcodes.IF_ICMPNE,
+            Opcodes.IF_ICMPLT,
+            Opcodes.IF_ICMPGE,
+            Opcodes.IF_ICMPGT,
+            Opcodes.IF_ICMPLE,
+            Opcodes.IF_ACMPEQ,
+            Opcodes.IF_ACMPNE,
+            Opcodes.GOTO,
+            Opcodes.JSR,
+            Opcodes.IFNULL,
+            Opcodes.IFNONNULL,
+        )
+        private val CONDITIONAL_JUMP_OPS = JUMP_OPS - setOf(Opcodes.GOTO, Opcodes.JSR)
+        private val JUMP_OPCODE_NAMES =
+            mapOf(
+                "IFEQ" to Opcodes.IFEQ,
+                "IFNE" to Opcodes.IFNE,
+                "IFLT" to Opcodes.IFLT,
+                "IFGE" to Opcodes.IFGE,
+                "IFGT" to Opcodes.IFGT,
+                "IFLE" to Opcodes.IFLE,
+                "IF_ICMPEQ" to Opcodes.IF_ICMPEQ,
+                "IF_ICMPNE" to Opcodes.IF_ICMPNE,
+                "IF_ICMPLT" to Opcodes.IF_ICMPLT,
+                "IF_ICMPGE" to Opcodes.IF_ICMPGE,
+                "IF_ICMPGT" to Opcodes.IF_ICMPGT,
+                "IF_ICMPLE" to Opcodes.IF_ICMPLE,
+                "IF_ACMPEQ" to Opcodes.IF_ACMPEQ,
+                "IF_ACMPNE" to Opcodes.IF_ACMPNE,
+                "GOTO" to Opcodes.GOTO,
+                "JSR" to Opcodes.JSR,
+                "IFNULL" to Opcodes.IFNULL,
+                "IFNONNULL" to Opcodes.IFNONNULL,
+            )
     }
 }
