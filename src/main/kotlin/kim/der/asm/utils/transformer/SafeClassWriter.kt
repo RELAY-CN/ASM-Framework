@@ -11,8 +11,9 @@ import org.objectweb.asm.Opcodes
 import java.io.IOException
 
 /**
- * A ClassWriter that computes the common super class of two classes without
- * actually loading them with a ClassLoader.
+ * 安全的 ClassWriter。
+ *
+ * 通过读取 classfile 字节码计算两个类型的公共父类，避免在 frame 计算阶段直接加载目标类型及其依赖。
  *
  * @author Eric Bruneton
  */
@@ -73,20 +74,15 @@ internal class SafeClassWriter(
     }
 
     /**
-     * Returns the internal names of the ancestor classes of the given type.
+     * 读取指定类型的继承链。
      *
-     * @param typeIn
-     * the internal name of a class or interface.
-     * @param infoIn
-     * the ClassReader corresponding to 'type'.
-     * @return a StringBuilder containing the ancestor classes of 'type',
-     * separated by ';'. The returned string has the following format:
-     * ";type1;type2 ... ;typeN", where type1 is 'type', and typeN is a
-     * direct subclass of Object. If 'type' is Object, the returned
-     * string is empty.
-     * @throws IOException
-     * if the bytecode of 'type' or of some of its ancestor class
-     * cannot be loaded.
+     * 返回值使用 `;` 分隔 internal name，格式为 `;type1;type2...;typeN`。`type1` 是传入类型，
+     * `typeN` 是 `java/lang/Object` 的直接子类；若传入类型本身就是 `java/lang/Object`，返回空串。
+     *
+     * @param typeIn 类或接口的 internal name
+     * @param infoIn [typeIn] 对应的 [ClassReader]
+     * @return 包含继承链 internal name 的字符串构建器
+     * @throws IOException 当指定类型或其父类字节码无法读取时抛出
      */
     @Throws(IOException::class)
     private fun typeAncestors(
@@ -105,18 +101,15 @@ internal class SafeClassWriter(
     }
 
     /**
-     * Returns true if the given type implements the given interface.
+     * 判断指定类型是否实现目标接口。
      *
-     * @param typeIn
-     * the internal name of a class or interface.
-     * @param infoIn
-     * the ClassReader corresponding to 'type'.
-     * @param itf
-     * the internal name of a interface.
-     * @return true if 'type' implements directly or indirectly 'itf'
-     * @throws IOException
-     * if the bytecode of 'type' or of some of its ancestor class
-     * cannot be loaded.
+     * 会递归检查当前类型声明的接口、接口继承链以及父类继承链。
+     *
+     * @param typeIn 类或接口的 internal name
+     * @param infoIn [typeIn] 对应的 [ClassReader]
+     * @param itf 目标接口的 internal name
+     * @return 直接或间接实现 [itf] 时返回 `true`
+     * @throws IOException 当指定类型、接口或父类字节码无法读取时抛出
      */
     @Throws(IOException::class)
     private fun typeImplements(
@@ -145,13 +138,13 @@ internal class SafeClassWriter(
     }
 
     /**
-     * Returns a ClassReader corresponding to the given class or interface.
+     * 读取指定类型的 [ClassReader]。
      *
-     * @param type
-     * the internal name of a class or interface.
-     * @return the ClassReader corresponding to 'type'.
-     * @throws IOException
-     * if the bytecode of 'type' cannot be loaded.
+     * 该方法先使用当前 writer 的类加载器读取资源，再回退到系统类加载器。
+     *
+     * @param type 类或接口的 internal name
+     * @return [type] 对应的 [ClassReader]
+     * @throws IOException 当字节码资源无法读取时抛出
      */
     @Throws(IOException::class)
     private fun typeInfo(type: String): ClassReader {
