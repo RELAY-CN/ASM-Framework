@@ -1250,7 +1250,7 @@ AsmRegistry.register(ModifyArgMixin::class.java)
 AsmRegistry.register(ModifyReturnValueMixin::class.java)
 ```
 
-它们会按注册顺序应用。
+多个 ASM 的实际应用顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中的 ASM 在前，精确目标注册命中的 ASM 在后；同一分组内保持注册顺序。
 
 ### 内联代码注入
 
