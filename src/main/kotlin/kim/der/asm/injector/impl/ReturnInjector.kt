@@ -223,9 +223,17 @@ class ReturnInjector(
     ): Boolean = requestedOrdinal < 0 || currentOrdinal == requestedOrdinal
 
     /**
-     * 分配局部变量索引
-     * @param existingVarIndex 已分配的局部变量索引（如果存在），新变量会分配在这个之后
-     * @return 返回分配的局部变量的起始索引
+     * 分配新的局部变量槽位。
+     *
+     * 该方法会避开目标方法参数、局部变量表、已有变量访问指令，以及调用方指定的已分配槽位。
+     *
+     * @param target 目标方法
+     * @param type 待分配局部变量的类型
+     * @param existingVarIndex 已分配的局部变量起始槽位；非空时新槽位会分配在它之后
+     * @return 新局部变量的起始槽位
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     private fun allocateLocalVariable(
         target: MethodNode,
