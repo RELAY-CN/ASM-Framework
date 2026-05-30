@@ -320,6 +320,16 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 包裹字段读取操作。
+     *
+     * 显式声明字段目标时按 owner、名称与描述符匹配；未声明目标时按 handler 签名筛选兼容字段读取。
+     * 匹配后会把原 `GETFIELD` 或 `GETSTATIC` 替换为 handler 调用，handler 可通过 [Operation.call] 执行原读取。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的字段读取数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -361,11 +371,30 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选字段读取。
+     *
+     * 该方法用于目标推断模式，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选字段读取指令
+     * @return handler 签名可包裹该字段读取时返回 `true`
+     */
     private fun isFieldReadHandlerCompatible(
         target: MethodNode,
         insn: FieldInsnNode,
     ): Boolean = runCatching { validateFieldHandlerSignature(target, insn) }.isSuccess
 
+    /**
+     * 包裹字段写入操作。
+     *
+     * 显式声明字段目标时按 owner、名称与描述符匹配；未声明目标时按 handler 签名筛选兼容字段写入。
+     * 匹配后会把原 `PUTFIELD` 或 `PUTSTATIC` 替换为 handler 调用，handler 可通过 [Operation.call] 执行原写入。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的字段写入数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
@@ -407,11 +436,31 @@ class WrapOperationInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容候选字段写入。
+     *
+     * 该方法用于目标推断模式，失败候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选字段写入指令
+     * @return handler 签名可包裹该字段写入时返回 `true`
+     */
     private fun isFieldAssignHandlerCompatible(
         target: MethodNode,
         insn: FieldInsnNode,
     ): Boolean = runCatching { validateFieldAssignHandlerSignature(target, insn) }.isSuccess
 
+    /**
+     * 包裹数组元素读取、数组元素写入或数组长度读取操作。
+     *
+     * 该入口通过 `array=get`、`array=set` 或 `array=length` 启用，并要求 `at.target` 指向数组字段。
+     * 方法会从数组操作指令向前追踪数组字段来源，只包裹来源字段匹配的数组操作。
+     *
+     * @param target 目标方法
+     * @param mode 数组访问模式
+     * @return 实际包裹的数组操作数量
+     * @throws IllegalArgumentException 数组字段目标缺失、目标不是数组字段或 handler 签名不兼容时抛出
+     */
     private fun injectArrayAccess(
         target: MethodNode,
         mode: ArrayAccessMode,
