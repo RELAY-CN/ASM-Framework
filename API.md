@@ -55,6 +55,20 @@ val asms = AsmRegistry.getForTarget("com/example/TargetClass")
 AsmRegistry.clear()
 ```
 
+### AsmInfo
+
+`AsmInfo` 是 `AsmRegistry` 写入注册表后的不可变注册条目，用于描述一个 ASM 类如何匹配目标类。
+
+#### 属性
+
+**属性：**
+
+- `asmClass: Class<*>` - ASM 类，通常带有 `@AsmMixin`，也可由路径匹配入口显式注册
+- `targets: List<String>` - 精确匹配的目标类 internal name 列表
+- `pathMatcher: Find<String, Boolean>?` - 可选路径匹配器；返回 `true` 表示该 ASM 应用于给定目标类
+
+精确目标注册会填充 `targets`，并保持 `pathMatcher` 为空；路径匹配注册会填充 `pathMatcher`，并保持 `targets` 为空。
+
 ### Find
 
 `Find<T, R>` 是单参数查找/匹配函数接口，用于在不依赖 Kotlin 函数类型 ABI 的位置传递匹配逻辑。
