@@ -1169,7 +1169,7 @@ AsmRegistry.register(ModifyReturnValueMixin::class.java)
 
 ### Transformer API
 
-实现 `Transformer` 接口可以自定义转换逻辑。
+需要自定义基于 `ClassNode` 的转换逻辑时，可实现 `Transformer` 接口。接口方法、上下文参数与线程安全边界见上文 [Transformer](#transformer)。
 
 ## 类型映射参考
 
