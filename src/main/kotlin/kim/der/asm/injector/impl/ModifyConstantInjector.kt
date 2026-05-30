@@ -300,7 +300,17 @@ class ModifyConstantInjector(
     }
 
     /**
-     * 注入常量修改器
+     * 用 handler 调用替换原始常量加载指令。
+     *
+     * 方法会在原常量指令前插入等价的 handler 调用序列，再移除原始常量指令。
+     * 替换后的栈顶值类型由 [replacementType] 决定，用于保持后续消费方看到的常量类型稳定。
+     *
+     * @param instructions 目标方法指令列表
+     * @param constNode 原始常量加载指令
+     * @param target 目标方法
+     * @param constantType 原始常量类型
+     * @param replacementType handler 返回值最终暴露给后续字节码的替换类型
+     * @return 成功插入替换调用时返回 `true`
      */
     private fun injectConstantModifier(
         instructions: InsnList,
@@ -321,6 +331,19 @@ class ModifyConstantInjector(
         return true
     }
 
+    /**
+     * 生成调用 `@ModifyConstant` handler 的指令序列。
+     *
+     * 生成顺序为：加载非静态 handler 接收者、重新加载原常量、按需加载目标方法参数前缀、
+     * 调用 handler，并在引用替换类型更窄时补充 `CHECKCAST`。
+     *
+     * @param il 正在构建的指令列表
+     * @param constNode 原始常量加载指令
+     * @param target 目标方法
+     * @param constantType 原始常量类型
+     * @param replacementType 替换后需要保留在栈上的类型
+     * @throws IllegalArgumentException handler 参数签名不兼容时抛出
+     */
     private fun generateConstantModifierCall(
         il: InsnList,
         constNode: AbstractInsnNode,
@@ -354,6 +377,18 @@ class ModifyConstantInjector(
         addConstantCastIfNeeded(il, replacementType)
     }
 
+    /**
+     * 校验 handler 参数是否能接收原常量与目标方法参数前缀。
+     *
+     * handler 第一个参数接收原常量值；`ACONST_NULL` 没有精确运行时类型，因此允许任意引用类型首参。
+     * 后续参数按顺序匹配目标方法参数前缀，数量不能超过目标方法声明参数数。
+     *
+     * @param target 目标方法
+     * @param constantType 原始常量类型
+     * @param asmParamTypes handler 参数类型列表
+     * @param nullConstant 当前常量是否为 `ACONST_NULL`
+     * @throws IllegalArgumentException handler 首参、目标参数前缀数量或类型不兼容时抛出
+     */
     private fun validateHandlerParameters(
         target: MethodNode,
         constantType: Type,
@@ -399,6 +434,16 @@ class ModifyConstantInjector(
         }
     }
 
+    /**
+     * 解析常量加载指令对应的 handler 匹配类型。
+     *
+     * JVM 使用 `ICONST_0` 与 `ICONST_1` 同时承载布尔与整数常量。用户按 `true` / `false`
+     * 文本匹配时，这里把对应指令视为 boolean 常量；其他情况交给 [BytecodeUtil.getConstantType]。
+     *
+     * @param insn 常量加载指令
+     * @param requestedValue 用户声明的常量文本；为 `null` 时仅按字节码类型解析
+     * @return handler 匹配时使用的常量类型；无法识别时返回 `null`
+     */
     private fun resolveConstantType(
         insn: AbstractInsnNode,
         requestedValue: String?,
