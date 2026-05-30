@@ -581,6 +581,18 @@ class ModifyVariableInjector(
             instructionIndex < endIndex
     }
 
+    /**
+     * 构建一次变量改写的 handler 调用指令序列。
+     *
+     * 生成的字节码会按顺序加载 handler owner、当前槽位值与目标方法参数前缀，
+     * 调用 handler 后按需插入引用类型转换，并把 handler 返回的新值写回原槽位。
+     *
+     * @param target 目标方法
+     * @param variableType 实际写回槽位时使用的变量类型
+     * @param variableIndex JVM 局部变量槽位
+     * @param targetParamCount handler 额外声明的目标方法参数数量
+     * @return 可直接插入目标方法的指令列表
+     */
     private fun buildModificationCall(
         target: MethodNode,
         variableType: Type,
@@ -605,6 +617,17 @@ class ModifyVariableInjector(
         return il
     }
 
+    /**
+     * 校验 handler 签名并返回需要加载的目标方法参数数量。
+     *
+     * handler 第一个参数必须能接收原变量值，返回值必须能写回变量槽位。
+     * 其余参数按顺序匹配目标方法参数前缀，允许引用类型使用父类型、接口或 `Any` / `Object` 接收。
+     *
+     * @param target 目标方法
+     * @param variableType 当前改写点解析出的变量类型
+     * @return handler 需要追加加载的目标方法参数数量
+     * @throws IllegalArgumentException handler 首参、返回值或目标方法参数前缀不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         variableType: Type,
@@ -646,6 +669,16 @@ class ModifyVariableInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 判断 handler 参数声明是否能接收期望类型的运行时值。
+     *
+     * 基础类型必须精确匹配；引用类型允许 handler 参数声明为期望类型的父类、接口、
+     * `java.lang.Object` 或 `kotlin.Any`。
+     *
+     * @param expected 注入点需要提供的值类型
+     * @param actual handler 参数声明类型
+     * @return handler 参数可以安全接收该值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -667,8 +700,22 @@ class ModifyVariableInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否属于对象或数组引用类型。
+     *
+     * @return 当前类型为对象或数组时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 使用 Mixin 类加载器解析引用类型对应的 Java Class。
+     *
+     * 引用兼容性校验需要真实类层级；数组类型使用描述符形式解析，对象类型使用类名解析。
+     *
+     * @param type 待解析的 ASM 引用类型
+     * @return 对应的 Java Class
+     * @throws ClassNotFoundException 类加载器无法解析该类型时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -680,6 +727,16 @@ class ModifyVariableInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 判断 handler 返回类型是否能写回目标变量槽位。
+     *
+     * 基础类型必须精确匹配且不能为 `void`；引用类型允许 handler 返回变量类型的子类型，
+     * 也允许声明为 `Any` / `Object`，后续会通过 `CHECKCAST` 恢复写回槽位所需类型。
+     *
+     * @param variableType 变量槽位真实类型
+     * @param handlerReturnType handler 返回类型
+     * @return handler 返回值可写回该槽位时返回 `true`
+     */
     private fun isHandlerReturnCompatible(
         variableType: Type,
         handlerReturnType: Type,
@@ -704,6 +761,15 @@ class ModifyVariableInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 在 handler 返回引用泛型类型时补充写回前的类型转换。
+     *
+     * 当 handler 返回类型与变量槽位类型不同但二者均为引用类型时，插入 `CHECKCAST`，
+     * 避免后续写回或栈图计算把局部变量退化为过宽的引用类型。
+     *
+     * @param il 正在构建的指令列表
+     * @param variableType 变量槽位真实类型
+     */
     private fun addVariableCastIfNeeded(
         il: InsnList,
         variableType: Type,
@@ -714,6 +780,16 @@ class ModifyVariableInjector(
         }
     }
 
+    /**
+     * 按 handler 签名需要加载目标方法参数前缀。
+     *
+     * 参数从目标方法声明顺序的第一个参数开始加载，实例方法会跳过 `this` 槽位，
+     * 并按参数类型宽度推进局部变量槽位。
+     *
+     * @param il 正在构建的指令列表
+     * @param target 目标方法
+     * @param requestedTargetParamCount 需要追加加载的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -732,6 +808,14 @@ class ModifyVariableInjector(
         }
     }
 
+    /**
+     * 为非静态 handler 加载调用接收者。
+     *
+     * Kotlin `object` 使用 `INSTANCE` 字段；普通类按无参构造器创建临时实例。
+     * 静态 handler 不需要接收者，本方法直接返回。
+     *
+     * @param il 正在构建的指令列表
+     */
     private fun addHandlerOwner(il: InsnList) {
         if (isHandlerStatic()) {
             return
@@ -763,6 +847,11 @@ class ModifyVariableInjector(
         )
     }
 
+    /**
+     * 选择调用 handler 时使用的方法调用 opcode。
+     *
+     * @return 静态 handler 使用 [Opcodes.INVOKESTATIC]，否则使用 [Opcodes.INVOKEVIRTUAL]
+     */
     private fun handlerOpcode(): Int =
         if (isHandlerStatic()) {
             Opcodes.INVOKESTATIC
@@ -770,6 +859,13 @@ class ModifyVariableInjector(
             Opcodes.INVOKEVIRTUAL
         }
 
+    /**
+     * 判断 handler 方法是否为 Java 反射意义上的静态方法。
+     *
+     * Kotlin companion 或 object 中带 `@JvmStatic` 的方法会按静态 handler 调用。
+     *
+     * @return handler 具有 [Modifier.STATIC] 标记时返回 `true`
+     */
     private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
 
     private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
