@@ -996,7 +996,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `JUMP`: 跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`；省略时匹配所有跳转，`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)`、`@WrapOperation(JUMP)` 与 `@WrapWithCondition(JUMP)` 只支持条件跳转
 - `SWITCH`: 不使用 `target`；匹配 `tableswitch` 与 `lookupswitch`
 - `CONSTANT`: 常量文本；类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符；普通 `@AsmInject(CONSTANT)` 与 `@Redirect(CONSTANT)` 可省略目标以匹配或推断常量
-- `THROW`: 通常不需要 `target`，匹配 `ATHROW`；普通 `@AsmInject`、`@WrapOperation`、`@WrapWithCondition` 与 `@ModifyExpressionValue` 可用类型 internal name 或 binary name 只匹配直接构造后抛出的同类型异常
+- `THROW`: 通常不需要 `target`，匹配 `ATHROW`；普通 `@AsmInject`、`@Redirect`、`@WrapOperation`、`@WrapWithCondition` 与 `@ModifyExpressionValue` 可用类型 internal name 或 binary name 只匹配直接构造后抛出的同类型异常
 
 `@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]`、`args = ["array=set"]` 或 `args = ["array=length"]`，
 把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取、数组元素写入或 `ARRAYLENGTH`。`@Redirect(LOAD)` 可用 `args = ["index=N"]` 或 `["var=N"]` 重定向指定 JVM 局部变量槽位的本次读取值，只替换这一次读取结果，不写回槽位；`@Redirect(STORE)` 可用同样的槽位过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。`@WrapOperation`
