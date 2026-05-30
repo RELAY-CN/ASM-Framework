@@ -119,6 +119,11 @@ if (result.failures.isNotEmpty()) {
 - `skippedClasses: List<String>` - 成功加载但未标注 `@AsmMixin` 的类名
 - `failures: List<AsmScanFailure>` - 扫描或类加载失败的条目
 
+`AsmScanFailure` 描述单个失败项，包含：
+
+- `className: String` - 失败对象标识；单类失败时为 Java binary name，包、类加载器或 JAR 级失败时可能是包名或 JAR 路径
+- `reason: String` - 失败原因摘要，优先来自异常消息，缺失时为异常类名
+
 多个扫描来源的结果可通过 `merge(other)` 合并。合并只拼接列表，不去重，也不改变扫描顺序。
 
 ### AsmProcessor
