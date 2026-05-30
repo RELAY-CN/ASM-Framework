@@ -470,6 +470,18 @@ class WrapWithConditionInjector(
     private fun isThrowHandlerCompatible(target: MethodNode): Boolean =
         runCatching { validateThrowHandlerSignature(target) }.isSuccess
 
+    /**
+     * 构造普通方法调用条件包裹的前置指令序列。
+     *
+     * 序列会暂存原 receiver 与调用参数，调用 boolean handler；
+     * handler 返回 `false` 时跳转到原调用后的跳过标签，返回 `true` 时恢复 receiver 与参数供原调用继续消费。
+     *
+     * @param target 目标方法
+     * @param callInsn 被条件包裹的方法调用指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @return 插入到原方法调用前的条件包裹指令列表
+     */
     private fun buildConditionWrapper(
         target: MethodNode,
         callInsn: MethodInsnNode,
@@ -526,6 +538,18 @@ class WrapWithConditionInjector(
         return il
     }
 
+    /**
+     * 构造 `invokedynamic` 调用条件包裹的前置指令序列。
+     *
+     * 序列会暂存动态调用参数，调用 boolean handler；
+     * handler 返回 `false` 时跳转到原动态调用后的跳过标签，返回 `true` 时恢复参数供原 `invokedynamic` 继续消费。
+     *
+     * @param target 目标方法
+     * @param callInsn 被条件包裹的 `invokedynamic` 指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @return 插入到原动态调用前的条件包裹指令列表
+     */
     private fun buildInvokeDynamicConditionWrapper(
         target: MethodNode,
         callInsn: InvokeDynamicInsnNode,
@@ -567,6 +591,18 @@ class WrapWithConditionInjector(
         return il
     }
 
+    /**
+     * 构造字段写入条件包裹的前置指令序列。
+     *
+     * 序列会暂存实例 receiver 与待写入值，调用 boolean handler；
+     * handler 返回 `false` 时跳过原字段写入，返回 `true` 时恢复 receiver 与值供原 `PUTFIELD` 或 `PUTSTATIC` 消费。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 被条件包裹的字段写入指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @return 插入到原字段写入前的条件包裹指令列表
+     */
     private fun buildFieldAssignConditionWrapper(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -614,6 +650,18 @@ class WrapWithConditionInjector(
         return il
     }
 
+    /**
+     * 构造数组元素写入条件包裹的前置指令序列。
+     *
+     * 序列会暂存数组引用、索引与待写入元素值，调用 boolean handler；
+     * handler 返回 `false` 时跳过原数组写入，返回 `true` 时恢复数组写入所需的三段栈参数。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @return 插入到原数组写入前的条件包裹指令列表
+     */
     private fun buildArrayAssignConditionWrapper(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -655,6 +703,17 @@ class WrapWithConditionInjector(
         return il
     }
 
+    /**
+     * 构造条件跳转包裹的替代指令序列。
+     *
+     * 序列会先按原跳转条件生成 boolean 分支值并暂存，调用 handler 判断是否允许原跳转逻辑继续；
+     * handler 返回 `true` 时按原分支值跳转，返回 `false` 时直接落到原跳转后的指令。
+     *
+     * @param jumpInsn 被条件包裹的跳转指令
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原条件跳转的指令列表
+     */
     private fun buildJumpConditionWrapper(
         jumpInsn: JumpInsnNode,
         target: MethodNode,
@@ -693,6 +752,17 @@ class WrapWithConditionInjector(
         return il
     }
 
+    /**
+     * 构造异常抛出条件包裹的前置指令序列。
+     *
+     * 序列会暂存原异常对象，调用 boolean handler；
+     * handler 返回 `false` 时跳过原 `ATHROW`，返回 `true` 时恢复异常对象供原 `ATHROW` 消费。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @return 插入到原 `ATHROW` 前的条件包裹指令列表
+     */
     private fun buildThrowConditionWrapper(
         target: MethodNode,
         targetParamCount: Int,
