@@ -131,6 +131,32 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 
 实现方应直接修改传入的 `ClassNode`，调用方负责后续写回字节码。该接口不约束线程安全；如果实现类持有可变状态，需要由实现方或调用方避免并发复用同一实例。
 
+### MethodTypeInfoValue
+
+`MethodTypeInfoValue` 用于描述需要被重定向或监听的目标方法，包含目标类 internal name、方法名和 JVM 方法描述符。
+
+#### 构造方式
+
+**构造方式：**
+
+- `MethodTypeInfoValue(classPath: String, methodName: String, methodParamsInfo: String)` - 只描述目标方法，不绑定替换器或监听器
+- `MethodTypeInfoValue(classPath: String, methodName: String, methodParamsInfo: String, replaceClass: Class<out RedirectionReplace>?)` - 绑定用于替换调用的 `RedirectionReplace` 实现类
+- `MethodTypeInfoValue(classPath: String, methodName: String, methodParamsInfo: String, before: Boolean, listenerClass: Class<out RedirectionListener>?)` - 绑定用于监听调用的 `RedirectionListener` 实现类，`before` 表示监听发生在目标调用前还是调用后
+
+#### 属性
+
+**属性：**
+
+- `classPath: String` - 目标类 internal name，不含前导 `L`，例如 `java/lang/String`
+- `methodName: String` - 目标方法名
+- `methodParamsInfo: String` - 目标方法描述符，例如 `(Ljava/lang/String;)V`
+- `desc: String` - 统一调用点描述符，格式为 `L<classPath>;<methodName><methodParamsInfo>`
+- `replaceClass: Class<out RedirectionReplace>?` - 可选的替换实现类
+- `listenerClass: Class<out RedirectionListener>?` - 可选的监听实现类
+- `listenerBefore: Boolean` - 监听器是否在目标调用前执行
+
+相等性用于目标描述去重：替换条目按目标类、方法名与方法描述符比较；监听条目还会区分调用前/调用后。
+
 ### RedirectionListener
 
 `RedirectionListener` 是运行期监听接口，用于观察转换器插入的目标调用点，而不直接替换返回值。
