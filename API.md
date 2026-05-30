@@ -150,6 +150,32 @@ if (processor.shouldTransform("com/example/TargetClass")) {
 
 写回时会使用 `ClassWriter.COMPUTE_FRAMES` 与 `SafeClassWriter` 解析公共父类。读写上下文由单次转换持有，避免复用同一个转换器实例时出现跨线程缓存污染。
 
+### AsmCore
+
+`AsmCore` 是 ASM 改写入口门面，通过静态持有当前 JVM 进程内的 `AsmBootstrap` 实例，把 Java Agent 的 `ClassFileTransformer.transform` 复用为普通类加载流程可调用的工具方法。
+
+#### 方法
+
+**方法：**
+
+- `transform(loader: ClassLoader?, className: String, classfileBuffer: ByteArray): ByteArray` - 对指定类字节码执行已注册的 ASM 改写，不提供重定义与保护域信息
+- `transform(loader: ClassLoader?, className: String, classBeingRedefined: Class<*>?, protectionDomain: ProtectionDomain?, classfileBuffer: ByteArray): ByteArray` - 复用 agent transformer 执行改写，并保留 Java Agent 契约参数
+
+当 agent 尚未初始化，或目标类无需改写时，`transform` 会直接返回原始 `classfileBuffer`。`className` 使用 JVM internal name，例如 `java/util/List`。
+
+### AsmBootstrap
+
+`AsmBootstrap` 是 ASM Java Agent 启动入口，实现 `ClassFileTransformer`，用于挂载到 JVM 类加载链路中并按 `AsmRegistry` 的匹配结果应用 ASM 改写。
+
+#### 方法
+
+**方法：**
+
+- `transform(loader: ClassLoader?, className: String, classBeingRedefined: Class<*>?, protectionDomain: ProtectionDomain?, classfileBuffer: ByteArray): ByteArray` - 当 `AsmProcessor.shouldTransform(className)` 为 `true` 时读取并改写目标类字节码；没有改写生效时返回原始字节码
+- `agentmain(instrumentation: Instrumentation)` - 通过 `Instrumentation.addTransformer` 注册新的 `AsmBootstrap` 实例
+
+当前实现只使用 `loader`、`className` 与 `classfileBuffer` 执行转换；`classBeingRedefined` 与 `protectionDomain` 仅保留 Java Agent 调用契约。
+
 ### Transformer
 
 `Transformer` 是基于 ASM Tree API 的类节点转换接口，适合在框架外部扩展自定义 `ClassNode` 改写逻辑。
