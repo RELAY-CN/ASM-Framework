@@ -190,6 +190,20 @@ object MyMixin
 object MultiTargetMixin
 ```
 
+### @AsmDelete
+
+标记 ASM 类或 ASM 方法中的删除意图。
+
+该注解用于表达“目标声明需要被移除或屏蔽”的治理意图。当前模块仅提供注解定义与元数据，不保证存在对应的转换处理逻辑；是否以及如何执行删除由具体转换器实现决定。
+
+**示例：**
+
+```kotlin
+@AsmDelete
+@AsmMixin("com/example/TargetClass")
+object DeleteIntentMixin
+```
+
 ### @AddInterface
 
 为目标类追加接口声明。
