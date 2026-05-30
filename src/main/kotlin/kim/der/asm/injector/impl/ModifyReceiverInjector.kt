@@ -592,6 +592,16 @@ class ModifyReceiverInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 按 handler 签名需要加载目标方法参数前缀。
+     *
+     * 参数从目标方法声明顺序的第一个参数开始加载，实例方法会跳过 `this` 槽位，
+     * 并按参数类型宽度推进局部变量槽位。
+     *
+     * @param il 正在构建的指令列表
+     * @param target 目标方法
+     * @param requestedTargetParamCount 需要追加加载的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -610,6 +620,13 @@ class ModifyReceiverInjector(
         }
     }
 
+    /**
+     * 从局部变量槽位加载指定类型的值。
+     *
+     * @param il 正在构建的指令列表
+     * @param paramType 要加载的 JVM 类型
+     * @param varIndex 局部变量槽位
+     */
     private fun loadFromVariable(
         il: InsnList,
         paramType: Type,
@@ -618,6 +635,15 @@ class ModifyReceiverInjector(
         InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
     }
 
+    /**
+     * 把当前栈顶值保存到临时局部变量槽位。
+     *
+     * receiver 改写前需要暂存调用参数或字段写入值；基础类型会选择对应 STORE 指令，引用类型使用 ASTORE。
+     *
+     * @param il 正在构建的指令列表
+     * @param paramType 栈顶值类型
+     * @param varIndex 目标局部变量槽位
+     */
     private fun storeStackValue(
         il: InsnList,
         paramType: Type,
@@ -632,6 +658,14 @@ class ModifyReceiverInjector(
         }
     }
 
+    /**
+     * 为非静态 handler 加载调用接收者。
+     *
+     * Kotlin `object` 使用 `INSTANCE` 字段；普通类按无参构造器创建临时实例。
+     * 静态 handler 不需要接收者，本方法直接返回。
+     *
+     * @param il 正在构建的指令列表
+     */
     private fun addHandlerOwner(il: InsnList) {
         if (isHandlerStatic()) {
             return
@@ -655,6 +689,11 @@ class ModifyReceiverInjector(
         il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, ownerType.internalName, "<init>", "()V", false))
     }
 
+    /**
+     * 选择调用 handler 时使用的方法调用 opcode。
+     *
+     * @return 静态 handler 使用 [Opcodes.INVOKESTATIC]，否则使用 [Opcodes.INVOKEVIRTUAL]
+     */
     private fun handlerOpcode(): Int =
         if (isHandlerStatic()) {
             Opcodes.INVOKESTATIC
@@ -662,6 +701,13 @@ class ModifyReceiverInjector(
             Opcodes.INVOKEVIRTUAL
         }
 
+    /**
+     * 判断 handler 方法是否为 Java 反射意义上的静态方法。
+     *
+     * Kotlin companion 或 object 中带 `@JvmStatic` 的方法会按静态 handler 调用。
+     *
+     * @return handler 具有 [Modifier.STATIC] 标记时返回 `true`
+     */
     private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
 
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
