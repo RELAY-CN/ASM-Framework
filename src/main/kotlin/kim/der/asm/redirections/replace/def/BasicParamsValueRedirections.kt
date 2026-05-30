@@ -15,6 +15,11 @@ import kim.der.asm.api.replace.RedirectionReplace
  * @date 2025-11-24
  */
 object BasicParamsValueRedirections {
+    /**
+     * 返回原调用第一个参数的替换器。
+     *
+     * 调用点没有参数时会因访问 `args[0]` 失败而抛出异常。
+     */
     val ReturnFirstParams =
         RedirectionReplace {
             _: Any,
@@ -24,6 +29,12 @@ object BasicParamsValueRedirections {
             ->
             return@RedirectionReplace args[0]
         }
+
+    /**
+     * 返回原调用第二个参数的替换器。
+     *
+     * 调用点少于两个参数时会因访问 `args[1]` 失败而抛出异常。
+     */
     val ReturnSecondParams =
         RedirectionReplace {
             _: Any,
@@ -34,7 +45,15 @@ object BasicParamsValueRedirections {
             return@RedirectionReplace args[1]
         }
 
+    /**
+     * 对象形式的参数返回型替换器实现。
+     *
+     * 这些对象适合需要稳定类名或对象实例引用的调用场景。
+     */
     object ValueClass {
+        /**
+         * 返回原调用第一个参数。
+         */
         object ReturnFirstParamsValue : RedirectionReplace {
             override fun invoke(
                 obj: Any,
@@ -44,6 +63,9 @@ object BasicParamsValueRedirections {
             ): Any? = args[0]
         }
 
+        /**
+         * 返回原调用第二个参数。
+         */
         object ReturnSecondParamsValue : RedirectionReplace {
             override fun invoke(
                 obj: Any,
