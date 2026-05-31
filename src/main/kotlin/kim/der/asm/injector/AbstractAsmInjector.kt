@@ -13,14 +13,25 @@ import java.lang.reflect.Method
  * 持有当前 ASM 方法与注册信息，并在构造时放开反射访问权限。
  * 子类可复用实例获取逻辑处理 Kotlin `object` 与普通类两种 ASM 声明方式。
  *
- * @param asmMethod 当前 ASM 方法
- * @param asmInfo 当前 ASM 类的注册信息
+ * 构造阶段只修改 [asmMethod] 的反射可访问性，不会创建 ASM 实例；普通类实例会在 [getAsmInstance]
+ * 被调用时按需创建。子类应避免长期缓存由 [getAsmInstance] 创建的普通类实例，除非能明确目标 ASM 类没有状态污染风险。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
 abstract class AbstractAsmInjector(
+    /**
+     * 当前 ASM 方法。
+     *
+     * 子类用它读取 handler 签名并生成调用字节码；构造阶段会将其设为可反射访问。
+     */
     protected val asmMethod: Method,
+
+    /**
+     * 当前 ASM 类的注册信息。
+     *
+     * 包含 ASM 类、目标类与路径匹配上下文，子类据此解析目标类和 ASM 实例。
+     */
     protected val asmInfo: AsmInfo,
 ) : AsmInjector {
     init {
