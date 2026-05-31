@@ -9,6 +9,7 @@ package kim.der.asm.api.annotation
  *
  * [ModifyArgs] handler 会接收该容器，用于读取和改写匹配方法调用的整组参数。索引按目标调用
  * 的方法描述符声明顺序计算，不包含实例方法调用的 receiver。
+ * Kotlin handler 可用 [get] / [set]，也可用等价的下标语法 `args[index]` 与 `args[index] = value`。
  *
  * ## 类型约束
  *
@@ -42,10 +43,12 @@ class Args(
      * @date 2025-11-24
      */
     @Suppress("UNCHECKED_CAST")
-    fun <T> get(index: Int): T = values[index] as T
+    operator fun <T> get(index: Int): T = values[index] as T
 
     /**
      * 改写指定位置的参数。
+     *
+     * Kotlin handler 可用 `args[index] = value` 调用该方法；写入仍直接作用于底层参数数组。
      *
      * @param index 参数索引，从 0 开始
      * @param value 新参数值；必须与原调用参数类型兼容
@@ -53,7 +56,7 @@ class Args(
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
-    fun set(
+    operator fun set(
         index: Int,
         value: Any?,
     ) {

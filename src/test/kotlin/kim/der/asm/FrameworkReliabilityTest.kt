@@ -1277,6 +1277,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsSupportsKotlinIndexedAccess() {
+        AsmRegistry.register(ModifyArgsIndexedAccessMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello indexed", result)
+    }
+
+    @Test
     fun modifyArgsAtInvokeInfersCallTargetByHandlerSignature() {
         AsmRegistry.register(InferredInvokeModifyArgsMixin::class.java)
 
@@ -8919,6 +8931,23 @@ class FrameworkReliabilityTest {
         fun modify(args: Args) {
             args.set(0, "raw")
             args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsIndexedAccessMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            val needle: String = args[0]
+            args[0] = needle.replace("missing", "raw")
+            args[1] = "indexed"
         }
     }
 
