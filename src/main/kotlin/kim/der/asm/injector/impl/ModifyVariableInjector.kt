@@ -31,6 +31,7 @@ import java.lang.reflect.Modifier
  * 当前实现支持在方法入口修改已有参数槽位，也支持在局部变量读取前或写入指令后改写槽位值。
  * 优先按 JVM 局部变量槽位索引定位；指定变量名时，会继续按 LocalVariableTable 中的局部变量名过滤候选。
  * 未显式指定槽位时，可按 handler 参数类型与 [ordinal] 选择同类型参数、读取点或写入点。
+ * [argsOnly] 为 `true` 时，LOAD / STORE 模式只匹配目标方法声明参数对应的槽位，不匹配方法体内部普通局部变量。
  * HEAD 模式未指定槽位与序号时，仅在同类型入口参数唯一时自动推断该参数；多候选仍需显式指定 [ordinal]。
  * 变量名过滤依赖目标字节码保留调试变量表，缺少 LocalVariableTable 时不会匹配名称限定的候选。
  * handler 第一个参数接收原变量值；显式指定槽位时，对象或数组变量可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
@@ -45,6 +46,7 @@ import java.lang.reflect.Modifier
  * @param ordinal 未指定 [variableIndex] 时，同类型入口参数、读取点或写入点的序号
  * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 INVOKE 边界缩小匹配范围，
  * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * @param argsOnly 是否只匹配目标方法参数槽位
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -57,6 +59,7 @@ class ModifyVariableInjector(
     variableNames: Array<String> = emptyArray(),
     private val ordinal: Int,
     private val slice: Slice = Slice(),
+    private val argsOnly: Boolean = false,
 ) : AbstractAsmInjector(method, asmInfo) {
     private val requestedVariableNames = variableNames.filterTo(linkedSetOf()) { it.isNotBlank() }
 
@@ -154,6 +157,9 @@ class ModifyVariableInjector(
             if (!matchesRequestedVariableName(target, insn, insn.`var`)) {
                 continue
             }
+            if (argsOnly && !isTargetMethodParameterSlot(target, insn.`var`)) {
+                continue
+            }
             if (!isLoadCompatibleWithHandler(insn.opcode, handlerVariableType)) {
                 continue
             }
@@ -202,6 +208,9 @@ class ModifyVariableInjector(
                 continue
             }
             if (!matchesRequestedVariableName(target, storeAnchor(insn), insn.`var`)) {
+                continue
+            }
+            if (argsOnly && !isTargetMethodParameterSlot(target, insn.`var`)) {
                 continue
             }
             if (!isStoreCompatibleWithHandler(insn.opcode, handlerVariableType)) {
@@ -275,6 +284,20 @@ class ModifyVariableInjector(
             }
         }
     }
+
+    /**
+     * 判断槽位是否属于目标方法声明参数。
+     *
+     * 该判断用于 [argsOnly] 过滤 LOAD / STORE 候选。实例方法会排除 `this` 槽位，只把声明参数槽位视为可改写参数。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @return 槽位属于目标方法参数时返回 `true`
+     */
+    private fun isTargetMethodParameterSlot(
+        target: MethodNode,
+        index: Int,
+    ): Boolean = collectHeadParameters(target).any { it.index == index }
 
     /**
      * 读取 handler 第一个参数声明的变量类型。

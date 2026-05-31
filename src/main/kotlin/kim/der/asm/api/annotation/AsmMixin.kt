@@ -1035,12 +1035,15 @@ annotation class ModifyExpressionValue(
  * [index] 精确定位，也可以通过 [name] 依赖 LocalVariableTable 中的局部变量名筛选候选；
  * 未指定 [index] 时按 handler 参数类型与 [ordinal] 选择匹配项。
  * [InjectionPoint.HEAD] 未指定 [index] 与 [ordinal] 时，如果同类型入口参数唯一，会自动推断该参数。
+ * [argsOnly] 为 `true` 时只匹配目标方法声明参数对应的槽位，可避免 [InjectionPoint.LOAD] /
+ * [InjectionPoint.STORE] 模式误改方法体内部生命周期不稳定的普通局部变量。
  *
  * ASM 方法要求：
  *
  * - 第一个参数接收原始变量值并返回同类型的新值
  * - 后续参数可按目标方法声明顺序接收目标方法参数前缀
  * - [index] 使用 JVM 局部变量槽位索引；实例方法中 `this` 占用槽位 0，第一个参数从槽位 1 开始
+ * - [argsOnly] 可与 [index]、[name] 和 [ordinal] 组合使用；显式 [index] 指向非参数槽位时不会命中
  * - [name] 为空时不按名称过滤；非空时只匹配 LocalVariableTable 名称在列表中的变量，目标字节码缺少调试变量表时不会命中
  * - 显式指定 [index] 时，对象/数组变量或目标方法参数对应的 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`；框架会尽量保留真实槽位类型再写回，返回类型对基础类型仍需精确匹配，对象/数组类型可返回可赋值给原变量类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - [InjectionPoint.HEAD] 会在目标方法体执行前写回选中的参数槽位
@@ -1049,10 +1052,11 @@ annotation class ModifyExpressionValue(
  * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
  *   边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配
  * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项；HEAD 模式同类型入口参数唯一时可省略 [ordinal]
- * - [method] 为空时会按 handler 名称、变量类型、返回类型、[index] / [name] / [ordinal]、
+ * - [method] 为空时会按 handler 名称、变量类型、返回类型、[index] / [name] / [argsOnly] / [ordinal]、
  *   [slice] 限定后的实际读取或写入候选和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际变量修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望变量修改数量，不一致时只输出警告，不阻断转换
+ * - [argsOnly] 位于参数列表末尾，新增时尽量降低对既有位置参数调用的兼容影响；Kotlin 调用建议使用命名参数
  *
  * @param method 目标方法签名；为空时按 handler 名称、变量筛选条件、实际读写候选和签名兼容规则推断唯一同名目标方法
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
@@ -1065,6 +1069,7 @@ annotation class ModifyExpressionValue(
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际变量修改数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
+ * @param argsOnly 是否只匹配目标方法参数槽位；为 `true` 时 LOAD / STORE 不会匹配方法体内部局部变量
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -1140,6 +1145,13 @@ annotation class ModifyVariable(
      * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
      */
     val remap: Boolean = false,
+
+    /**
+     * 是否只匹配目标方法参数槽位。
+     *
+     * 为 `true` 时，HEAD 仍按入口参数解析；LOAD / STORE 会额外过滤掉非目标方法参数的局部变量槽位。
+     */
+    val argsOnly: Boolean = false,
 )
 
 /**

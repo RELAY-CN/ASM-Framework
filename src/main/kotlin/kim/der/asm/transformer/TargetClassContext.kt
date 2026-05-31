@@ -2793,6 +2793,7 @@ class TargetClassContext(
                 annotation.name,
                 annotation.ordinal,
                 annotation.slice,
+                argsOnly = annotation.argsOnly,
             )
         val injectionCount = injector.injectCount(targetMethod)
         if (annotation.require > 0 || annotation.allow >= 0 || annotation.expect != 1) {
@@ -2870,6 +2871,7 @@ class TargetClassContext(
                     annotation.name,
                     annotation.ordinal,
                     annotation.slice,
+                    argsOnly = annotation.argsOnly,
                 )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
         }.getOrDefault(false)

@@ -34,6 +34,23 @@ class CallbackInfoReturnable<T>
         cancellable: Boolean = false,
     ) : CallbackInfo(returnValue, cancellable) {
         /**
+         * 当前返回值。
+         *
+         * 该属性等价于 [getTypedReturnValue] 与 [setTypedReturnValue] 的组合，方便 Kotlin handler 使用
+         * `callback.value = ...` 写法改写 RETURN 注入的返回值，或在可取消 HEAD 注入中设置提前返回值。
+         *
+         * 当当前回调可取消时，写入该属性会与 [setReturnValue] 一样自动标记为已取消。
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        var value: T?
+            get() = getTypedReturnValue()
+            set(value) {
+                setTypedReturnValue(value)
+            }
+
+        /**
          * 获取带类级泛型标注的返回值。
          *
          * Kotlin 调用 [getReturnValue] 时通常可以通过接收变量类型推断返回值类型；当没有足够上下文时，

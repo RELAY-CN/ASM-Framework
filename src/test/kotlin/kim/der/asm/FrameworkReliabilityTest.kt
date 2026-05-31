@@ -334,6 +334,16 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun callbackInfoReturnableSupportsValueProperty() {
+        val callback = CallbackInfoReturnable("raw", cancellable = true)
+
+        callback.value = "${callback.value}-property"
+
+        assertEquals("raw-property", callback.getTypedReturnValue())
+        assertEquals(true, callback.isCancelled())
+    }
+
+    @Test
     fun callbackInfoExposesCancellableState() {
         val cancellable = CallbackInfo(cancellable = true)
         val nonCancellable = CallbackInfo()
@@ -5812,6 +5822,13 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyVariableExposesArgsOnlyParameter() {
+        val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
+
+        assertEquals(Boolean::class.javaPrimitiveType, methods["argsOnly"]?.returnType)
+    }
+
+    @Test
     fun modifyVariableAtHeadRewritesStaticMethodParameterByLocalIndex() {
         AsmRegistry.register(ModifyVariableStaticParamMixin::class.java)
 
@@ -6078,6 +6095,19 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("first:loaded-second", result)
+    }
+
+    @Test
+    fun modifyVariableAtLoadArgsOnlySkipsNonParameterLocals() {
+        AsmRegistry.register(ModifyVariableLoadArgsOnlyMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("LoadArgsOnlyVariableTarget", loadArgsOnlyVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LoadArgsOnlyVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "input")
+
+        assertEquals("arg-input:local", result)
     }
 
     @Test
@@ -13686,6 +13716,17 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "loaded-$original"
     }
 
+    @AsmMixin("LoadArgsOnlyVariableTarget")
+    object ModifyVariableLoadArgsOnlyMixin {
+        @ModifyVariable(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD),
+            argsOnly = true,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "arg-$original"
+    }
+
     @AsmMixin("SliceLoadVariableTarget")
     object ModifyVariableLoadSliceMixin {
         @ModifyVariable(
@@ -15787,6 +15828,27 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 3)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun loadArgsOnlyVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadArgsOnlyVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("local")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()

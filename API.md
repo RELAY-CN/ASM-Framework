@@ -744,10 +744,11 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 - `expect: Int = 1` - 期望命中数；非默认值不一致时输出警告
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
+- `argsOnly: Boolean = false` - 是否只匹配目标方法参数槽位；为 `true` 时 `LOAD` / `STORE` 不会匹配方法体内部局部变量。该参数位于注解签名末尾，用于降低新增参数对既有位置参数调用的兼容影响；建议使用命名参数。
 
 `@ModifyVariable` 的 `LOAD` / `STORE` 模式可用 `slice.from` / `slice.to` 把候选 `xLOAD` 读取点或 `xSTORE` 写入点限制在一段 `INVOKE` 边界之间；边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。`HEAD` 当前不使用 `slice`。
 
-`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象/数组变量或追加的目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，框架会尽量通过目标方法参数、局部变量表与相邻字节码用途保留真实槽位类型再写回，避免把局部变量栈图退化为 `Object`。返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。未指定 `index` 时，框架仍按 handler 第一个参数类型筛选入口参数、读取点或写入点，因此需要用实际变量类型参与匹配。`name` 是额外筛选条件，可与 `index`、类型和 `ordinal` 组合使用；它依赖目标 class 的 LocalVariableTable，若目标被去除调试信息，应改用 `index` 或 `ordinal`。`HEAD` 模式下若同类型入口参数唯一，可省略 `ordinal`；存在多个同类型入口参数时仍需用 `ordinal` 明确选择。省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个签名、变量筛选条件、实际读写候选与追加目标参数均兼容的同名目标方法；`LOAD` / `STORE` 会用 `index`、`name`、`ordinal` 与 `slice` 过滤后的真实 `xLOAD` / `xSTORE` 候选参与重载推断，`name` 可用于区分保留 LocalVariableTable 的重载方法，存在多个兼容重载时需要显式写出目标方法签名。
+`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象/数组变量或追加的目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，框架会尽量通过目标方法参数、局部变量表与相邻字节码用途保留真实槽位类型再写回，避免把局部变量栈图退化为 `Object`。返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。未指定 `index` 时，框架仍按 handler 第一个参数类型筛选入口参数、读取点或写入点，因此需要用实际变量类型参与匹配。`argsOnly = true` 会把候选限制为目标方法声明参数槽位，适合只想改参数但目标方法内部有同类型临时变量的场景；若显式 `index` 指向非参数槽位，候选会被过滤掉并按命中数契约失败。`name` 是额外筛选条件，可与 `index`、`argsOnly`、类型和 `ordinal` 组合使用；它依赖目标 class 的 LocalVariableTable，若目标被去除调试信息，应改用槽位、`argsOnly` 或 `ordinal`。`HEAD` 模式下若同类型入口参数唯一，可省略 `ordinal`；存在多个同类型入口参数时仍需用 `ordinal` 明确选择。省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个签名、变量筛选条件、实际读写候选与追加目标参数均兼容的同名目标方法；`LOAD` / `STORE` 会用 `index`、`name`、`argsOnly`、`ordinal` 与 `slice` 过滤后的真实 `xLOAD` / `xSTORE` 候选参与重载推断，`name` 可用于区分保留 LocalVariableTable 的重载方法，存在多个兼容重载时需要显式写出目标方法签名。
 
 `@ModifyVariable` 会统计实际写入变量修改逻辑的数量。`HEAD` 模式最多命中 1 次；`LOAD` / `STORE`
 模式按匹配读取点或写入点数量计数。显式设置 `require` / `allow` / 非默认 `expect` 时按实际变量修改数量校验契约，
@@ -1234,6 +1235,12 @@ CallbackInfoReturnable<T>(returnValue: T? = null, cancellable: Boolean = false)
 - `returnValue: T? = null` - 初始返回值；RETURN 注入会在 handler 调用前预置原始返回值
 - `cancellable: Boolean = false` - 是否允许取消目标方法
 
+#### 属性
+
+##### `value: T?`
+
+当前返回值。该属性等价于 `getTypedReturnValue()` / `setTypedReturnValue(value)`，适合 Kotlin handler 用属性语法读取或写入返回值。当前回调可取消时，写入该属性会与 `setReturnValue(...)` 一样自动标记取消。
+
 #### 方法
 
 ##### `getTypedReturnValue(): T?`
@@ -1257,8 +1264,7 @@ CallbackInfoReturnable<T>(returnValue: T? = null, cancellable: Boolean = false)
 ```kotlin
 @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
 fun onReturn(callback: CallbackInfoReturnable<String>) {
-    val original = callback.getTypedReturnValue()
-    callback.setTypedReturnValue("$original patched")
+    callback.value = "${callback.value} patched"
 }
 ```
 
