@@ -65,15 +65,74 @@ package kim.der.asm.api.annotation
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class AsmInject(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、注入点类型与签名兼容性推断唯一同名目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 普通注入使用的目标注入点。
+     *
+     * HEAD、TAIL 与 RETURN 不需要 [at]；其他指令点需要通过 [at] 描述更具体的匹配条件。
+     */
     val target: InjectionPoint = InjectionPoint.HEAD,
+
+    /**
+     * 是否允许 handler 通过 [CallbackInfo] 取消后续执行。
+     *
+     * 当前取消语义只由 HEAD 注入消费，未声明可取消时调用 [CallbackInfo.cancel] 会失败。
+     */
     val cancellable: Boolean = false,
+
+    /**
+     * 最小命中数。
+     *
+     * 大于 0 时覆盖默认的至少一次命中要求，实际命中数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 指令级定位信息。
+     *
+     * 当 [target] 不是 HEAD、TAIL 或 RETURN 时，用于描述目标指令、插入位置和附加过滤参数。
+     */
     val at: At = At(),
+
+    /**
+     * 匹配点序号过滤。
+     *
+     * `-1` 表示处理所有匹配点；`0` 及以上表示只处理切片内重新计数后的第 N 个匹配点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 指令查找切片。
+     *
+     * 只在支持切片的注入点上生效，候选点会限制在 [Slice.from] 之后、[Slice.to] 之前。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最大命中数。
+     *
+     * 大于等于 0 时实际命中数不能超过该值，适合防止目标字节码新增重复候选点后误注入。
+     */
     val allow: Int = -1,
+
+    /**
+     * 期望命中数。
+     *
+     * 非默认值且实际命中数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 是否内联 handler 字节码。
+     *
+     * 开启后转换器复制 handler 方法体到目标方法，而不是生成一次普通方法调用。
+     */
     val inline: Boolean = false,
 )
 
@@ -210,10 +269,37 @@ enum class InjectionPoint {
  * @date 2025-11-24
  */
 annotation class At(
+    /**
+     * 当前定位对象对应的注入点类型。
+     *
+     * 在 [Slice] 边界中当前仅支持 [InjectionPoint.INVOKE]。
+     */
     val value: InjectionPoint = InjectionPoint.HEAD,
+
+    /**
+     * 目标指令签名或过滤文本。
+     *
+     * 具体格式由 [value] 决定；部分注入点允许为空并按 handler 签名或候选类型推断。
+     */
     val target: String = "",
+
+    /**
+     * 相对匹配指令的插入或替换策略。
+     */
     val shift: Shift = Shift.BEFORE,
+
+    /**
+     * 在 [shift] 选定锚点基础上的真实指令偏移量。
+     *
+     * 偏移会跳过 label、frame 与 line number 等伪指令；不支持该能力的注入点会在转换阶段拒绝。
+     */
     val by: Int = 0,
+
+    /**
+     * 附加定位参数。
+     *
+     * 典型值包括 `array=get`、`array=set`、`array=length`、`index=N` 或 `var=N`。
+     */
     val args: Array<String> = [],
 )
 
@@ -272,8 +358,25 @@ enum class Shift {
  * @date 2025-11-24
  */
 annotation class Slice(
+    /**
+     * 起始边界。
+     *
+     * 命中该边界后的下一条真实候选指令才会参与匹配；为空时从方法开头开始。
+     */
     val from: At = At(),
+
+    /**
+     * 结束边界。
+     *
+     * 命中该边界的指令本身不会参与匹配；为空时匹配到方法末尾。
+     */
     val to: At = At(),
+
+    /**
+     * 预留切片标识。
+     *
+     * 当前转换器不使用该字段，保留给未来按名称复用或诊断切片配置。
+     */
     val id: String = "",
 )
 
