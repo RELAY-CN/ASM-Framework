@@ -3522,35 +3522,78 @@ class RedirectInjector(
         return maxIndex
     }
 
+    /**
+     * 字段重定向的目标匹配条件。
+     *
+     * @property owner 字段 owner 的 JVM internal name；为 `null` 时不限制 owner
+     * @property name 字段名；为 `null` 时不限制名称
+     * @property desc 字段描述符；为 `null` 时不限制类型
+     */
     private data class FieldTarget(
         val owner: String?,
         val name: String?,
         val desc: String?,
     )
 
+    /**
+     * 构造表达式中与 `<init>` 调用配对的分配指令。
+     *
+     * @property newInsn 创建对象的 `NEW` 指令
+     * @property dupInsn 紧随 `NEW` 后复制未初始化引用的 `DUP` 指令
+     */
     private data class ConstructorAllocation(
         val newInsn: TypeInsnNode,
         val dupInsn: AbstractInsnNode,
     )
 
+    /**
+     * 方法入口参数或局部变量槽位的类型信息。
+     *
+     * @property index 局部变量槽位下标
+     * @property type 该槽位保存的 ASM 类型
+     */
     private data class LocalSlotType(
         val index: Int,
         val type: Type,
     )
 
+    /**
+     * `@Redirect` 数组访问模式。
+     */
     private enum class ArrayAccessMode {
+        /** 重定向数组元素读取。 */
         GET,
+
+        /** 重定向数组元素写入。 */
         SET,
+
+        /** 重定向数组长度读取。 */
         LENGTH,
     }
 
+    /**
+     * `RedirectInjector` 共用的 opcode 集合与名称索引。
+     */
     private companion object {
+        /** 字段读取指令集合。 */
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+
+        /** 字段写入指令集合。 */
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+
+        /** 局部变量读取指令集合。 */
         private val LOAD_OPS = setOf(Opcodes.ILOAD, Opcodes.LLOAD, Opcodes.FLOAD, Opcodes.DLOAD, Opcodes.ALOAD)
+
+        /** 局部变量写入指令集合。 */
         private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
+
+        /** 可用于引用类型推断的局部变量读写指令集合。 */
         private val SLOT_REFERENCE_OPS = setOf(Opcodes.ALOAD, Opcodes.ASTORE)
+
+        /** JVM 中使用 `int` 类局部变量指令承载的 ASM 类型 sort 集合。 */
         private val INT_VARIABLE_TYPE_SORTS = setOf(Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR)
+
+        /** 数组元素读取指令集合。 */
         private val ARRAY_READ_OPS =
             setOf(
                 Opcodes.IALOAD,
@@ -3562,6 +3605,8 @@ class RedirectInjector(
                 Opcodes.CALOAD,
                 Opcodes.SALOAD,
             )
+
+        /** 数组元素写入指令集合。 */
         private val ARRAY_WRITE_OPS =
             setOf(
                 Opcodes.IASTORE,
@@ -3573,6 +3618,8 @@ class RedirectInjector(
                 Opcodes.CASTORE,
                 Opcodes.SASTORE,
             )
+
+        /** 支持在 `At.target` 中按名称声明的 JVM 跳转 opcode。 */
         private val JUMP_OPCODE_NAMES =
             mapOf(
                 "IFEQ" to Opcodes.IFEQ,
@@ -3594,7 +3641,11 @@ class RedirectInjector(
                 "IFNULL" to Opcodes.IFNULL,
                 "IFNONNULL" to Opcodes.IFNONNULL,
             )
+
+        /** 所有可由跳转重定向识别的 JVM 跳转 opcode。 */
         private val JUMP_OPS = JUMP_OPCODE_NAMES.values.toSet()
+
+        /** 可被 handler 布尔结果替换分支决策的条件跳转 opcode。 */
         private val CONDITIONAL_JUMP_OPS = JUMP_OPS - setOf(Opcodes.GOTO, Opcodes.JSR)
     }
 }
