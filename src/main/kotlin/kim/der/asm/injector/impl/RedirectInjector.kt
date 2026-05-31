@@ -3081,6 +3081,14 @@ class RedirectInjector(
         return null
     }
 
+    /**
+     * 推断直接抛出的异常构造类型。
+     *
+     * 仅在 `ATHROW` 前一个真实指令是构造器调用时返回 owner，用于非推断模式下匹配 `THROW` 目标类型。
+     *
+     * @param throwInsn 候选 `ATHROW` 指令
+     * @return 直接构造并抛出的异常 internal name；无法确认时返回 `null`
+     */
     private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
         val previous = previousRealInstruction(throwInsn)
         if (previous is MethodInsnNode &&
@@ -3092,6 +3100,16 @@ class RedirectInjector(
         return null
     }
 
+    /**
+     * 查找构造器调用对应的对象分配指令。
+     *
+     * 从 `<init>` 调用向前查找同 owner 的 `NEW`，并要求该 `NEW` 后的下一条真实指令为 `DUP`，
+     * 以便替换构造表达式时可以同时移除分配与复制指令。
+     *
+     * @param constructorInsn 被重定向的 `<init>` 调用
+     * @return 与构造器调用配对的 `NEW` 与 `DUP`
+     * @throws IllegalArgumentException 找不到配对 `NEW` 或 `NEW` 后缺少 `DUP` 时抛出
+     */
     private fun findConstructorAllocation(constructorInsn: MethodInsnNode): ConstructorAllocation {
         var cursor = constructorInsn.previous
         while (cursor != null) {
@@ -3112,6 +3130,15 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 查找 `NEW` 指令后配对的构造器调用。
+     *
+     * 扫描过程中会统计同 owner 的嵌套 `NEW`，避免把内层构造器调用误配给外层分配。
+     *
+     * @param newInsn 被 [InjectionPoint.NEW] 命中的 `NEW` 指令
+     * @return 与该分配配对的 `<init>` 调用
+     * @throws IllegalArgumentException 找不到配对构造器调用时抛出
+     */
     private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
         var nestedSameOwnerNewCount = 0
         var cursor = newInsn.next
@@ -3135,6 +3162,15 @@ class RedirectInjector(
         throw IllegalArgumentException("Redirect cannot find constructor call for NEW ${newInsn.desc}")
     }
 
+    /**
+     * 解析条件跳转重定向的 opcode 过滤条件。
+     *
+     * 目标可声明为 JVM 跳转 opcode 数值或名称；空目标表示不按 opcode 过滤。
+     *
+     * @param target `At.target` 中声明的跳转 opcode 目标
+     * @return 解析出的跳转 opcode；未声明目标时返回 `null`
+     * @throws IllegalArgumentException 目标不是受支持的跳转 opcode 时抛出
+     */
     private fun parseJumpOpcodeTarget(target: String): Int? {
         if (target.isEmpty()) {
             return null
@@ -3154,6 +3190,14 @@ class RedirectInjector(
             )
     }
 
+    /**
+     * 查找下一条真实字节码指令。
+     *
+     * 会跳过 label、line number、frame 等 `opcode < 0` 的伪节点。
+     *
+     * @param insn 起始指令节点
+     * @return 下一条真实指令；不存在时返回 `null`
+     */
     private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var cursor = insn.next
         while (cursor != null && cursor.opcode < 0) {
@@ -3162,6 +3206,14 @@ class RedirectInjector(
         return cursor
     }
 
+    /**
+     * 查找上一条真实字节码指令。
+     *
+     * 会跳过 label、line number、frame 等 `opcode < 0` 的伪节点。
+     *
+     * @param insn 起始指令节点
+     * @return 上一条真实指令；不存在时返回 `null`
+     */
     private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var cursor = insn.previous
         while (cursor != null && cursor.opcode < 0) {
