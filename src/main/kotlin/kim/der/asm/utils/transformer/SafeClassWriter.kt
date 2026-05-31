@@ -15,7 +15,12 @@ import java.io.IOException
  *
  * 通过读取 classfile 字节码计算两个类型的公共父类，避免在 frame 计算阶段直接加载目标类型及其依赖。
  *
+ * @param cr 原始类读取器；可为 `null`
+ * @param loader 解析依赖类型 classfile 时使用的类加载器；为 `null` 时使用系统类加载器
+ * @param flags [ClassWriter] 写入标志
+ *
  * @author Eric Bruneton
+ * @date 2025-11-24
  */
 @Suppress("UNUSED")
 internal class SafeClassWriter(
@@ -25,6 +30,20 @@ internal class SafeClassWriter(
 ) : ClassWriter(cr, flags) {
     private val loader = loader ?: ClassLoader.getSystemClassLoader()
 
+    /**
+     * 计算两个类型的公共父类。
+     *
+     * 该实现通过 [ClassReader] 读取继承信息，避免调用 [Class.forName] 触发目标类型或依赖类型加载。
+     * 当任一类型是接口时，只有能证明另一类型实现该接口时才返回接口本身，否则回退到 `java/lang/Object`。
+     *
+     * @param type1 第一个类型的 internal name
+     * @param type2 第二个类型的 internal name
+     * @return 两个类型的公共父类 internal name
+     * @throws RuntimeException 当任一类型 classfile 无法读取时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
     override fun getCommonSuperClass(
         type1: String,
         type2: String,
@@ -83,6 +102,9 @@ internal class SafeClassWriter(
      * @param infoIn [typeIn] 对应的 [ClassReader]
      * @return 包含继承链 internal name 的字符串构建器
      * @throws IOException 当指定类型或其父类字节码无法读取时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     @Throws(IOException::class)
     private fun typeAncestors(
@@ -110,6 +132,9 @@ internal class SafeClassWriter(
      * @param itf 目标接口的 internal name
      * @return 直接或间接实现 [itf] 时返回 `true`
      * @throws IOException 当指定类型、接口或父类字节码无法读取时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     @Throws(IOException::class)
     private fun typeImplements(
@@ -145,6 +170,9 @@ internal class SafeClassWriter(
      * @param type 类或接口的 internal name
      * @return [type] 对应的 [ClassReader]
      * @throws IOException 当字节码资源无法读取时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     @Throws(IOException::class)
     private fun typeInfo(type: String): ClassReader {

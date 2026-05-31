@@ -248,6 +248,9 @@ object BytecodeUtil {
      * @param method 方法节点
      * @param flag ASM 访问标志
      * @return 方法访问标志完整包含 [flag] 时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun hasFlag(
         method: MethodNode,
@@ -260,6 +263,9 @@ object BytecodeUtil {
      * @param classNode 类节点
      * @param flag ASM 访问标志
      * @return 类访问标志完整包含 [flag] 时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun hasFlag(
         classNode: ClassNode,
@@ -272,6 +278,9 @@ object BytecodeUtil {
      * @param field 字段节点
      * @param flag ASM 访问标志
      * @return 字段访问标志完整包含 [flag] 时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun hasFlag(
         field: FieldNode,
