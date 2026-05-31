@@ -21,6 +21,7 @@ import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -47,8 +48,8 @@ import java.lang.reflect.Modifier
  * 未指定类型目标时，会按 handler 返回类型筛选兼容的 `CHECKCAST` 候选。类型判断使用 [InjectionPoint.INSTANCEOF]
  * 与类型 internal name 或 binary name 匹配；未指定类型目标时，会匹配切片内全部 `INSTANCEOF` 判断。
  * 局部变量读取和待写入值使用 [InjectionPoint.LOAD] 或 [InjectionPoint.STORE]，可通过 [args] 中的 `index=N`
- * 或 `var=N` 按 JVM 局部变量槽位过滤。读取模式只替换这一次 `xLOAD` 读取结果，不写回局部槽位；写入模式会改写原 `xSTORE`
- * 消费前的待写入值。
+ * 或 `var=N` 按 JVM 局部变量槽位过滤，也可通过 `name=localName` 按 LocalVariableTable 变量名过滤。
+ * 读取模式只替换这一次 `xLOAD` 读取结果，不写回局部槽位；写入模式会改写原 `xSTORE` 消费前的待写入值。
  * 条件跳转使用 [InjectionPoint.JUMP] 与跳转操作码名或数字匹配；未指定跳转目标时，会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持重定向。
  * switch selector 使用 [InjectionPoint.SWITCH] 匹配 `tableswitch` 与 `lookupswitch` 消费前的 `Int` selector；该模式不使用目标签名。
  * 常量加载使用 [InjectionPoint.CONSTANT] 与常量文本匹配；未指定常量目标时，会按 handler 首参与返回类型筛选兼容常量。
@@ -70,7 +71,7 @@ import java.lang.reflect.Modifier
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
  * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配数组长度；
- * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 支持 `index=N` 或 `var=N` 槽位过滤
+ * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 支持 `index=N`、`var=N` 槽位过滤或 `name=localName` 变量名过滤
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -674,7 +675,8 @@ class RedirectInjector(
     /**
      * 重定向局部变量读取值。
      *
-     * 该入口只替换当前 `xLOAD` 指令压入栈的值，不写回局部变量槽位；可通过 `index=N` 或 `var=N` 过滤槽位。
+     * 该入口只替换当前 `xLOAD` 指令压入栈的值，不写回局部变量槽位；可通过 `index=N`、`var=N` 或 `name=localName`
+     * 过滤 JVM 局部变量槽位或 LocalVariableTable 变量名。
      *
      * @param target 目标方法
      * @return 实际重定向的局部变量读取数量
@@ -682,9 +684,9 @@ class RedirectInjector(
      */
     private fun injectLoadCount(target: MethodNode): Int {
         require(redirectTarget.isEmpty()) {
-            "Redirect LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
+            "Redirect LOAD uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
         }
-        val localVariableIndex = parseLocalVariableIndex("LOAD")
+        val localVariableFilter = parseLocalVariableFilter("LOAD")
         val handlerValueType = requireLocalHandlerValueType("LOAD")
         val instructions = target.instructions
         var injectionCount = 0
@@ -699,7 +701,7 @@ class RedirectInjector(
             if (insn !is VarInsnNode || insn.opcode !in LOAD_OPS) {
                 continue
             }
-            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
                 continue
             }
             if (!isLoadCompatibleWithHandler(insn.opcode, handlerValueType)) {
@@ -707,11 +709,11 @@ class RedirectInjector(
             }
 
             val resolvedValueType = resolveIndexedLocalValueType(target, insn.`var`, handlerValueType)
-            if (localVariableIndex == null && handlerValueType.isReferenceType() && resolvedValueType == null) {
+            if (localVariableFilter.index == null && handlerValueType.isReferenceType() && resolvedValueType == null) {
                 continue
             }
             val valueType = resolvedValueType ?: handlerValueType
-            if (localVariableIndex == null && !isLocalHandlerCompatible(valueType)) {
+            if (localVariableFilter.index == null && !isLocalHandlerCompatible(valueType)) {
                 continue
             }
 
@@ -740,9 +742,9 @@ class RedirectInjector(
      */
     private fun injectStoreCount(target: MethodNode): Int {
         require(redirectTarget.isEmpty()) {
-            "Redirect STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
+            "Redirect STORE uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
         }
-        val localVariableIndex = parseLocalVariableIndex("STORE")
+        val localVariableFilter = parseLocalVariableFilter("STORE")
         val handlerValueType = requireLocalHandlerValueType("STORE")
         val instructions = target.instructions
         var injectionCount = 0
@@ -757,7 +759,7 @@ class RedirectInjector(
             if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
                 continue
             }
-            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
                 continue
             }
             if (!isStoreCompatibleWithHandler(insn.opcode, handlerValueType)) {
@@ -765,11 +767,11 @@ class RedirectInjector(
             }
 
             val resolvedValueType = resolveIndexedLocalValueType(target, insn.`var`, handlerValueType)
-            if (localVariableIndex == null && handlerValueType.isReferenceType() && resolvedValueType == null) {
+            if (localVariableFilter.index == null && handlerValueType.isReferenceType() && resolvedValueType == null) {
                 continue
             }
             val valueType = resolvedValueType ?: handlerValueType
-            if (localVariableIndex == null && !isLocalHandlerCompatible(valueType)) {
+            if (localVariableFilter.index == null && !isLocalHandlerCompatible(valueType)) {
                 continue
             }
 
@@ -2824,16 +2826,20 @@ class RedirectInjector(
     }
 
     /**
-     * 解析局部变量槽位过滤条件。
+     * 解析局部变量过滤条件。
      *
-     * 支持在 `At.args` 中使用 `index=<n>` 或 `var=<n>`，并限制同一个注入点只能声明一个槽位过滤条件。
+     * 支持在 `At.args` 中使用 `index=N` 或 `var=N` 按槽位过滤，也支持 `name=localName`
+     * 按 LocalVariableTable 变量名过滤。
      *
      * @param pointName 当前重定向点名称，用于错误信息
-     * @return 指定的局部变量槽位；未声明过滤条件时返回 `null`
-     * @throws IllegalArgumentException 槽位不是整数、为负数或重复声明时抛出
+     * @return 局部变量过滤条件；未声明时返回空过滤
+     * @throws IllegalArgumentException 声明多个同类过滤条件、非整数、负数槽位或空变量名时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
      */
-    private fun parseLocalVariableIndex(pointName: String): Int? {
-        val values =
+    private fun parseLocalVariableFilter(pointName: String): LocalVariableFilter {
+        val slotValues =
             args.mapNotNull { arg ->
                 val trimmed = arg.trim()
                 when {
@@ -2842,23 +2848,162 @@ class RedirectInjector(
                     else -> null
                 }
             }
+        val nameValues =
+            args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                if (trimmed.startsWith("name=")) {
+                    trimmed.substringAfter("name=")
+                } else {
+                    null
+                }
+            }
 
-        if (values.isEmpty()) {
-            return null
-        }
-        require(values.size == 1) {
+        require(slotValues.size <= 1) {
             "Redirect $pointName supports only one local variable slot filter in At.args"
+        }
+        require(nameValues.size <= 1) {
+            "Redirect $pointName supports only one local variable name filter in At.args"
         }
 
         val index =
-            values.single().toIntOrNull()
-                ?: throw IllegalArgumentException(
-                    "Redirect $pointName local variable slot filter must be an integer: ${values.single()}",
-                )
-        require(index >= 0) {
-            "Redirect $pointName local variable slot filter must be non-negative: $index"
+            slotValues.singleOrNull()?.let { value ->
+                val parsed =
+                    value.toIntOrNull()
+                        ?: throw IllegalArgumentException(
+                            "Redirect $pointName local variable slot filter must be an integer: $value",
+                        )
+                require(parsed >= 0) {
+                    "Redirect $pointName local variable slot filter must be non-negative: $parsed"
+                }
+                parsed
+            }
+        val name =
+            nameValues.singleOrNull()?.trim()?.also { value ->
+                require(value.isNotEmpty()) {
+                    "Redirect $pointName local variable name filter must not be blank"
+                }
+            }
+
+        return LocalVariableFilter(index, name)
+    }
+
+    /**
+     * 局部变量读写过滤条件。
+     *
+     * @property index JVM 局部变量槽位；为 `null` 时不按槽位过滤
+     * @property name LocalVariableTable 中的变量名；为 `null` 时不按名称过滤
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private data class LocalVariableFilter(
+        val index: Int? = null,
+        val name: String? = null,
+    ) {
+        /**
+         * 当前过滤条件是否为空。
+         *
+         * @return 未声明槽位和名称过滤时返回 `true`
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun isEmpty(): Boolean = index == null && name == null
+    }
+
+    /**
+     * 判断局部变量指令是否满足槽位和名称过滤条件。
+     *
+     * @param target 目标方法
+     * @param insn 候选局部变量读写指令
+     * @param filter 注解声明的局部变量过滤条件
+     * @return 候选指令满足过滤条件时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun matchesLocalVariableFilter(
+        target: MethodNode,
+        insn: VarInsnNode,
+        filter: LocalVariableFilter,
+    ): Boolean {
+        if (filter.isEmpty()) {
+            return true
         }
-        return index
+        if (filter.index != null && insn.`var` != filter.index) {
+            return false
+        }
+        if (filter.name == null) {
+            return true
+        }
+        return localVariableAt(target, localVariableAnchor(insn), insn.`var`)?.name == filter.name
+    }
+
+    /**
+     * 选择局部变量名称过滤使用的锚点。
+     *
+     * STORE 指令可能位于变量作用域起点标签之前，因此优先使用写入后的下一条真实指令判断变量名范围。
+     *
+     * @param insn 候选局部变量读写指令
+     * @return 用于 LocalVariableTable 范围判断的锚点
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAnchor(insn: VarInsnNode): AbstractInsnNode =
+        if (injectionPoint == InjectionPoint.STORE) {
+            nextRealInstruction(insn) ?: insn
+        } else {
+            insn
+        }
+
+    /**
+     * 查找锚点处覆盖指定槽位的局部变量表记录。
+     *
+     * @param target 目标方法
+     * @param anchor 待匹配的锚点指令
+     * @param index JVM 局部变量槽位
+     * @return 覆盖锚点的局部变量记录；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAt(
+        target: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): LocalVariableNode? {
+        val insns = target.instructions.toArray()
+        val anchorIndex = insns.indexOf(anchor)
+        if (anchorIndex < 0) {
+            return null
+        }
+
+        return target.localVariables.firstOrNull { local ->
+            local.index == index && local.containsInstruction(insns, anchorIndex)
+        }
+    }
+
+    /**
+     * 判断局部变量表记录是否覆盖给定指令下标。
+     *
+     * @param insns 目标方法指令数组
+     * @param instructionIndex 待判断的指令下标
+     * @return 指令下标处于该局部变量生命周期内时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun LocalVariableNode.containsInstruction(
+        insns: Array<AbstractInsnNode>,
+        instructionIndex: Int,
+    ): Boolean {
+        val startIndex = insns.indexOf(start)
+        val endIndex = insns.indexOf(end)
+        return startIndex >= 0 &&
+            endIndex >= 0 &&
+            instructionIndex >= startIndex &&
+            instructionIndex < endIndex
     }
 
     /**

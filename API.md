@@ -581,17 +581,17 @@ handler 先接收数组引用与 `Operation<Int>`，返回类型必须为 `Int`�
 即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。数组读取、数组长度与数组写入也可用 `slice.from` / `slice.to`
 把候选数组访问限制在一段 `INVOKE` 边界之间。
 
-`LOAD` 模式匹配 `xLOAD` 局部变量读取表达式，不使用 `At.target`；可通过 `at.args = ["index=N"]` 或
-`["var=N"]` 按 JVM 局部变量槽位过滤。handler 先接收 `xLOAD` 读取出的栈顶表达式值，再接收 `Operation<T>`；
-`operation.call(original)` 返回传入的原读取值。handler 返回值只替换这一次读取结果，不写回局部变量槽位。省略槽位过滤时，
+`LOAD` 模式匹配 `xLOAD` 局部变量读取表达式，不使用 `At.target`；可通过 `at.args = ["index=N"]`、`["var=N"]`
+或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。handler 先接收 `xLOAD` 读取出的栈顶表达式值，再接收 `Operation<T>`；
+`operation.call(original)` 返回传入的原读取值。handler 返回值只替换这一次读取结果，不写回局部变量槽位。省略局部变量过滤时，
 框架会按 handler 读取值参数与返回类型筛选兼容的读取点，不兼容 `LOAD` 候选不计入 `ordinal` 或命中数。
 `LOAD` 也可用 `slice.from` / `slice.to` 把候选读取限制在一段 `INVOKE` 边界之间。
 
 `STORE` 模式匹配 `xSTORE` 消费前的局部变量待写入表达式，不使用 `At.target`；可通过
-`at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。handler 先接收待写入栈顶值，再接收
-`Operation<T>`；`operation.call(original)` 返回传入的待写入值。handler 返回值交给原 `xSTORE` 继续写入槽位。省略槽位过滤时，
+`at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。handler 先接收待写入栈顶值，再接收
+`Operation<T>`；`operation.call(original)` 返回传入的待写入值。handler 返回值交给原 `xSTORE` 继续写入槽位。省略局部变量过滤时，
 框架会按 handler 待写入值参数与返回类型筛选兼容的写入点，不兼容 `STORE` 候选不计入 `ordinal` 或命中数。
-`STORE` 也可用 `slice.from` / `slice.to` 把候选写入限制在一段 `INVOKE` 边界之间。
+`STORE` 也可用 `slice.from` / `slice.to` 把候选写入限制在一段 `INVOKE` 边界之间。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中，应改用槽位或 `ordinal`。
 
 `Operation.call` 的参数形态与原操作栈参数一致：实例调用传入 receiver 与原方法参数，静态调用和 `invokedynamic` 调用只传入原调用参数；
 构造器调用只传入构造器参数；
@@ -800,8 +800,8 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 会替换匹配的 `GETFIELD` / `GETSTATIC` 指令。字段写入重定向需要将 `at.value` 设置为 `InjectionPoint.FIELD_ASSIGN`，
 会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问与数组长度重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
 并通过 `at.args = ["array=get"]`、`at.args = ["array=set"]` 或 `at.args = ["array=length"]` 区分数组读取、写入与长度读取。
-局部变量读取重定向使用 `at.value = InjectionPoint.LOAD` 匹配 `xLOAD` 读取表达式，不使用 `target` 或 `At.target`；可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤。handler 接收原读取值并返回替换值，返回值只替换这一次读取结果，不写回局部变量槽位。
-局部变量写入重定向使用 `at.value = InjectionPoint.STORE` 匹配 `xSTORE` 消费前的待写入表达式，不使用 `target` 或 `At.target`；可通过同样的槽位过滤指定候选。handler 接收原待写入值并返回替换值，返回值交给原 `xSTORE` 继续写入槽位。
+局部变量读取重定向使用 `at.value = InjectionPoint.LOAD` 匹配 `xLOAD` 读取表达式，不使用 `target` 或 `At.target`；可通过 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。handler 接收原读取值并返回替换值，返回值只替换这一次读取结果，不写回局部变量槽位。
+局部变量写入重定向使用 `at.value = InjectionPoint.STORE` 匹配 `xSTORE` 消费前的待写入表达式，不使用 `target` 或 `At.target`；可通过同样的槽位或名称过滤指定候选。handler 接收原待写入值并返回替换值，返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。
 类型转换重定向使用 `at.value = InjectionPoint.CAST` 与类型 `at.target` 匹配 `CHECKCAST` 指令，handler 接收原待转换对象并返回目标类型兼容对象。省略 `at.target` 时会遍历所有 `CHECKCAST`，并按 handler 返回类型筛选兼容目标；不兼容的转换目标不会计入 `ordinal` 或命中数。
 类型判断重定向使用 `at.value = InjectionPoint.INSTANCEOF` 与类型 `at.target` 匹配 `INSTANCEOF` 指令，handler 接收原被判断对象并返回新的 `Boolean` 结果。省略 `at.target` 时会遍历所有 `INSTANCEOF` 判断，并按实际重定向的类型判断计入 `ordinal` 和命中数。
 条件跳转重定向使用 `at.value = InjectionPoint.JUMP` 与跳转操作码名或数字匹配条件跳转指令，handler 接收原始分支结果 `Boolean` 并返回新的 `Boolean` 分支结果。省略 `at.target` 时会遍历所有条件跳转，`GOTO` 与 `JSR` 不支持重定向。
@@ -842,7 +842,7 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、重定向点和签名兼容规则推断唯一同名目标方法
 - `target: String = ""` - 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型、类型签名、跳转操作码、常量文本或直接构造异常类型；`LOAD` / `STORE` / `SWITCH` 不使用该参数
-- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`LOAD` / `STORE` 时按局部变量读取或待写入值语义匹配且不使用 `At.target`，可用 `at.args = ["index=N"]` 或 `["var=N"]` 过滤槽位，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配，`JUMP` 时按条件跳转语义匹配，`SWITCH` 时按 switch selector 语义匹配且不使用 `At.target`，`CONSTANT` 时按常量加载语义匹配，`THROW` 时按抛异常点语义匹配
+- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`LOAD` / `STORE` 时按局部变量读取或待写入值语义匹配且不使用 `At.target`，可用 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 过滤槽位或 LocalVariableTable 变量名，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配，`JUMP` 时按条件跳转语义匹配，`SWITCH` 时按 switch selector 语义匹配且不使用 `At.target`，`CONSTANT` 时按常量加载语义匹配，`THROW` 时按抛异常点语义匹配
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向中生效
 - `slice: Slice = Slice()` - 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际重定向数必须不少于该值
@@ -1404,7 +1404,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 `Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 可用 `Slice`
 把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
 不会把局部变量值传给 handler，也可以用
-`at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `@AsmInject` 与 `@ModifyExpressionValue` 还可用 `["name=localName"]` 匹配 LocalVariableTable 变量名。需要只替换本次读取表达式值时使用 `@ModifyExpressionValue(LOAD)`，需要改写本次写入前栈值并让原 `xSTORE` 继续写入时使用 `@ModifyExpressionValue(STORE)`，需要保留可调用原读取值的操作句柄时使用 `@WrapOperation(LOAD)`，需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时使用 `@WrapOperation(STORE)`，需要读取并写回变量值时使用 `@ModifyVariable`。
+`at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。需要只替换本次读取表达式值时使用 `@ModifyExpressionValue(LOAD)`，需要改写本次写入前栈值并让原 `xSTORE` 继续写入时使用 `@ModifyExpressionValue(STORE)`，需要保留可调用原读取值的操作句柄时使用 `@WrapOperation(LOAD)`，需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时使用 `@WrapOperation(STORE)`，需要读取并写回变量值时使用 `@ModifyVariable`。
 普通 `@AsmInject(INSTANCEOF)` 只在匹配类型判断指令前后插入 handler，不接收也不修改 boolean 结果；需要替换类型判断时使用 `@Redirect`，需要按需调用原判断时使用 `@WrapOperation`，只需要改写类型判断结果时使用
 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `@AsmInject(JUMP)` 只观察跳转指令位置，不接收条件栈值或改写跳转目标；`At.target` 可省略，也可写 `IFEQ`、`IF_ICMPGT` 或数字操作码过滤；需要直接替换条件跳转分支结果时使用 `@Redirect(at = At(value = InjectionPoint.JUMP, target = "..."))`，需要保留原条件结果并改写新结果时使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`，需要保留可调用原分支结果的操作句柄时使用 `@WrapOperation(at = At(value = InjectionPoint.JUMP, target = "..."))`，只需要按额外条件决定是否保留原跳转时使用 `@WrapWithCondition(at = At(value = InjectionPoint.JUMP, target = "..."))`。普通 `@AsmInject(SWITCH)` 只观察 `tableswitch` / `lookupswitch` 指令位置，不接收或改写 selector，且不支持 `At.target`；需要直接替换 switch selector 时使用 `@Redirect(at = At(value = InjectionPoint.SWITCH))`，需要保留原 switch 指令并改写 selector 时使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.SWITCH))`，需要保留可调用原 selector 的操作句柄时使用 `@WrapOperation(at = At(value = InjectionPoint.SWITCH))`。普通 `@AsmInject(THROW)` 只观察抛异常位置，不接收异常对象；需要直接替换异常对象时使用 `@Redirect(at = At(value = InjectionPoint.THROW, target = "..."))`，需要保留原 `ATHROW` 并改写异常对象时使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.THROW, target = "..."))`，需要保留可调用原异常对象的操作句柄时使用 `@WrapOperation(at = At(value = InjectionPoint.THROW, target = "..."))`，只需要按条件决定是否保留原抛出时使用 `@WrapWithCondition(at = At(value = InjectionPoint.THROW, target = "..."))`。普通 `@AsmInject(CONSTANT)` 的 `BEFORE` / `AFTER` 只观察常量加载位置，不接收常量值；`Shift.REPLACE` 会删除原常量加载，并把 handler 返回值作为新的常量表达式值。`At.target` 可省略，也可写常量文本过滤。
 
@@ -1419,7 +1419,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 支持按真实字节码指令数正负移动锚点
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`、
-  `array=length`，以及 `LOAD` / `STORE` 的 `index=N` 与 `var=N` 槽位过滤；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N` 与 `var=N` 槽位过滤；`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
+  `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
   与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=set` 需配合 `FIELD_ASSIGN`；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
 
 **`target` 格式：**
@@ -1430,16 +1430,16 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
 - `CAST`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
 - `INSTANCEOF`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
-- `LOAD`: 不使用 `target`；可通过 `args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `@AsmInject(LOAD)` 与 `@ModifyExpressionValue(LOAD)` 还可通过 `["name=localName"]` 按 LocalVariableTable 名称过滤
-- `STORE`: 不使用 `target`；可通过 `args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `@AsmInject(STORE)` 与 `@ModifyExpressionValue(STORE)` 还可通过 `["name=localName"]` 按 LocalVariableTable 名称过滤
+- `LOAD`: 不使用 `target`；可通过 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 名称过滤
+- `STORE`: 不使用 `target`；可通过 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 名称过滤
 - `JUMP`: 跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`；省略时匹配所有跳转，`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)`、`@WrapOperation(JUMP)` 与 `@WrapWithCondition(JUMP)` 只支持条件跳转
 - `SWITCH`: 不使用 `target`；匹配 `tableswitch` 与 `lookupswitch`
 - `CONSTANT`: 常量文本；类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符；普通 `@AsmInject(CONSTANT)`、`@Redirect(CONSTANT)`、`@WrapOperation(CONSTANT)` 与 `@ModifyExpressionValue(CONSTANT)` 可省略目标以匹配或推断常量
 - `THROW`: 通常不需要 `target`，匹配 `ATHROW`；普通 `@AsmInject`、`@Redirect`、`@WrapOperation`、`@WrapWithCondition` 与 `@ModifyExpressionValue` 可用类型 internal name 或 binary name 只匹配直接构造后抛出的同类型异常
 
 `@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]`、`args = ["array=set"]` 或 `args = ["array=length"]`，
-把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取、数组元素写入或 `ARRAYLENGTH`。`@Redirect(LOAD)` 可用 `args = ["index=N"]` 或 `["var=N"]` 重定向指定 JVM 局部变量槽位的本次读取值，只替换这一次读取结果，不写回槽位；`@Redirect(STORE)` 可用同样的槽位过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。`@WrapOperation`
-可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入，使用 `FIELD + array=length` 包裹数组长度读取；也可使用 `LOAD` 与 `args = ["index=N"]` 或 `["var=N"]` 包裹指定 JVM 局部变量槽位的本次读取值，handler 接收 `xLOAD` 读取出的栈顶表达式值与 `Operation<T>`，`operation.call(original)` 返回传入的原读取值，handler 返回值只替换这一次读取结果，不写回槽位；使用 `STORE` 与同样的槽位过滤包裹 `xSTORE` 消费前的待写入栈顶值，handler 返回值交给原 `xSTORE` 继续写入槽位。
+把目标字段解释为产生数组引用的字段，并重定向紧随其后的数组元素读取、数组元素写入或 `ARRAYLENGTH`。`@Redirect(LOAD)` 可用 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 重定向指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值，只替换这一次读取结果，不写回槽位；`@Redirect(STORE)` 可用同样的槽位或名称过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。`@WrapOperation`
+可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入，使用 `FIELD + array=length` 包裹数组长度读取；也可使用 `LOAD` 与 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 包裹指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值，handler 接收 `xLOAD` 读取出的栈顶表达式值与 `Operation<T>`，`operation.call(original)` 返回传入的原读取值，handler 返回值只替换这一次读取结果，不写回槽位；使用 `STORE` 与同样的槽位或名称过滤包裹 `xSTORE` 消费前的待写入栈顶值，handler 返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。
 `@ModifyExpressionValue` 可在 `FIELD_ASSIGN` 目标上改写 `PUTFIELD` / `PUTSTATIC` 消费前的字段待写入值。也可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；在 `FIELD_ASSIGN` 目标上使用 `args = ["array=set"]`，改写紧随目标数组字段后的 `xASTORE` 待写入元素值；或使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。`@ModifyExpressionValue(LOAD)` 可用 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 改写指定槽位或 LocalVariableTable 变量名的本次 `xLOAD` 读取表达式值，不写回局部变量槽位；`@ModifyExpressionValue(STORE)` 可用同样的槽位或名称过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。
 普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
 的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会把槽位值传入 handler，也不会写回槽位。

@@ -2298,6 +2298,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun redirectAtLoadArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(RedirectLoadNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedLoadVariableTarget", namedLoadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:redirect-second", result)
+    }
+
+    @Test
+    fun redirectAtStoreArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(RedirectStoreNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedStoreVariableTarget", namedStoreVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedStoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:redirect-store-second", result)
+    }
+
+    @Test
     fun modifyExpressionValueAtInvokeRewritesInvokeDynamicReturnValue() {
         AsmRegistry.register(ModifyExpressionValueInvokeDynamicMixin::class.java)
 
@@ -3834,6 +3860,32 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("wrap-store-raw", result)
+    }
+
+    @Test
+    fun wrapOperationAtLoadArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(WrapOperationLoadNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedLoadVariableTarget", namedLoadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:wrap-second", result)
+    }
+
+    @Test
+    fun wrapOperationAtStoreArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(WrapOperationStoreNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedStoreVariableTarget", namedStoreVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedStoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:wrap-store-second", result)
     }
 
     @Test
@@ -10344,6 +10396,30 @@ class FrameworkReliabilityTest {
         fun redirect(original: String): String = "redirect-store-$original"
     }
 
+    @AsmMixin("NamedLoadVariableTarget")
+    object RedirectLoadNameMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-$original"
+    }
+
+    @AsmMixin("NamedStoreVariableTarget")
+    object RedirectStoreNameMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-store-$original"
+    }
+
     @AsmMixin("InvokeDynamicExpressionValueTarget")
     object ModifyExpressionValueInvokeDynamicMixin {
         @ModifyExpressionValue(
@@ -11927,6 +12003,36 @@ class FrameworkReliabilityTest {
             method = "value()Ljava/lang/String;",
             at = At(value = InjectionPoint.STORE, args = ["index=1"]),
             ordinal = 0,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = operation.call("wrap-store-$original")
+    }
+
+    @AsmMixin("NamedLoadVariableTarget")
+    object WrapOperationLoadNameMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = "wrap-${operation.call(original)}"
+    }
+
+    @AsmMixin("NamedStoreVariableTarget")
+    object WrapOperationStoreNameMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=target"]),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun wrap(

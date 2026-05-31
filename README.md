@@ -23,7 +23,7 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **类似 Fabric Mixin 的注解系统** - 简洁易用的注解驱动编程，无需直接操作字节码
 - **强大的注入点支持** - HEAD, TAIL, RETURN, INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, JUMP, SWITCH, CONSTANT, THROW，满足各种场景需求
 - **注入命中数契约** - `@AsmInject`、`@ModifyArg`、`@ModifyArgs`、`@ModifyReceiver`、`@WrapOperation`、`@WrapMethod`、`@WrapWithCondition`、`@ModifyVariable`、`@ModifyReturnValue`、`@ModifyExpressionValue`、`@ModifyConstant` 与 `@Redirect` 支持 `require`、`allow` 与 `expect`，可在目标字节码漂移时快速发现补丁失效
-- **精确定位能力** - 普通 `@AsmInject(INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`、`@Redirect`、参数/receiver/表达式/变量/返回值/常量修改与操作包裹可用 `Slice` 把候选点限制在指定调用边界内；普通 `@AsmInject(LOAD/STORE)` 与 `@Redirect(LOAD/STORE)` 可按局部变量槽位过滤，`@ModifyVariable` 可按局部变量槽位或调试变量名过滤
+- **精确定位能力** - 普通 `@AsmInject(INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`、`@Redirect`、参数/receiver/表达式/变量/返回值/常量修改与操作包裹可用 `Slice` 把候选点限制在指定调用边界内；普通 `@AsmInject(LOAD/STORE)`、`@Redirect(LOAD/STORE)`、`@WrapOperation(LOAD/STORE)`、`@ModifyExpressionValue(LOAD/STORE)` 与 `@ModifyVariable` 可按局部变量槽位或调试变量名过滤
 - **丰富的转换类型** - Inject, Overwrite, Redirect, RedirectAllMethods, ModifyArg, ModifyArgs, ModifyReceiver, WrapOperation, WrapMethod, WrapWithCondition, ModifyExpressionValue, ModifyVariable, ModifyReturnValue, Unique, AddInterface, RemoveInterface, AddField, RemoveField 等十多种转换类型
 - **参数修改能力** - `@ModifyArg` 可修改入口参数、普通调用参数、构造器参数或 `invokedynamic` 调用参数；`@ModifyArgs` 可批量修改普通调用、构造器调用或 `invokedynamic` 调用参数组
 - **receiver 改写能力** - `@ModifyReceiver` 可替换实例方法调用、实例字段读取与实例字段写入的 receiver，保留原参数、字段值与原操作逻辑

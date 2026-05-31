@@ -23,6 +23,7 @@ import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -58,10 +59,10 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.SWITCH] 可包裹 `tableswitch` 与 `lookupswitch` 消费前的 `Int` selector；该模式不支持 [At.target]。
  * [InjectionPoint.CONSTANT] 可包裹 `LDC`、`ACONST_NULL`、数值常量、
  * `BIPUSH` 与 `SIPUSH`；省略常量目标时会按 handler 常量参数与返回类型筛选兼容常量。
- * [InjectionPoint.LOAD] 可包裹 `xLOAD` 读取出的局部变量表达式值，可通过 [At.args] 中的 `index=N` 或 `var=N`
- * 按 JVM 局部变量槽位过滤；handler 返回值只替换这一次读取结果，不写回原槽位。
- * [InjectionPoint.STORE] 可包裹 `xSTORE` 消费前的局部变量待写入值，可通过 [At.args] 中的 `index=N` 或 `var=N`
- * 按 JVM 局部变量槽位过滤；handler 返回值交给原 `xSTORE` 继续写入槽位。
+ * [InjectionPoint.LOAD] 可包裹 `xLOAD` 读取出的局部变量表达式值，可通过 [At.args] 中的 `index=N`、`var=N`
+ * 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；handler 返回值只替换这一次读取结果，不写回原槽位。
+ * [InjectionPoint.STORE] 可包裹 `xSTORE` 消费前的局部变量待写入值，可通过 [At.args] 中的 `index=N`、`var=N`
+ * 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；handler 返回值交给原 `xSTORE` 继续写入槽位。
  * [InjectionPoint.THROW] 可包裹 `ATHROW` 前的异常对象；指定目标时只匹配直接构造后抛出的同类型异常。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
@@ -654,7 +655,8 @@ class WrapOperationInjector(
     /**
      * 包裹局部变量读取操作产生的表达式值。
      *
-     * `LOAD` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * `LOAD` 不使用 `at.target`，可通过 `At.args` 的 `index=N`、`var=N` 或 `name=localName`
+     * 限定 JVM 局部变量槽位或 LocalVariableTable 变量名。
      * 注入逻辑插入在读取指令之后，只替换本次读取压入栈顶的值，不回写局部变量槽位。
      *
      * @param target 目标方法
@@ -663,9 +665,9 @@ class WrapOperationInjector(
      */
     private fun injectLoad(target: MethodNode): Int {
         require(at.target.isEmpty()) {
-            "@WrapOperation LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
+            "@WrapOperation LOAD uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
         }
-        val localVariableIndex = parseLocalVariableIndex("LOAD")
+        val localVariableFilter = parseLocalVariableFilter("LOAD")
         val handlerLoadType = requireHandlerLocalArgumentType("LOAD")
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -678,7 +680,7 @@ class WrapOperationInjector(
             if (insn !is VarInsnNode || insn.opcode !in LOAD_OPS) {
                 continue
             }
-            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
                 continue
             }
             if (!isLoadCompatibleWithHandler(insn.opcode, handlerLoadType)) {
@@ -686,11 +688,11 @@ class WrapOperationInjector(
             }
 
             val resolvedLoadType = resolveIndexedLoadType(target, insn.`var`, handlerLoadType)
-            if (localVariableIndex == null && handlerLoadType.isReferenceType() && resolvedLoadType == null) {
+            if (localVariableFilter.index == null && handlerLoadType.isReferenceType() && resolvedLoadType == null) {
                 continue
             }
             val loadType = resolvedLoadType ?: handlerLoadType
-            if (localVariableIndex == null && !isLoadHandlerCompatible(target, loadType)) {
+            if (localVariableFilter.index == null && !isLoadHandlerCompatible(target, loadType)) {
                 continue
             }
 
@@ -711,7 +713,8 @@ class WrapOperationInjector(
     /**
      * 包裹局部变量写入操作即将消费的表达式值。
      *
-     * `STORE` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * `STORE` 不使用 `at.target`，可通过 `At.args` 的 `index=N`、`var=N` 或 `name=localName`
+     * 限定 JVM 局部变量槽位或 LocalVariableTable 变量名。
      * 注入逻辑插入在写入指令之前，让原 `xSTORE` 继续把 handler 返回的新值写入局部变量槽位。
      *
      * @param target 目标方法
@@ -720,9 +723,9 @@ class WrapOperationInjector(
      */
     private fun injectStore(target: MethodNode): Int {
         require(at.target.isEmpty()) {
-            "@WrapOperation STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
+            "@WrapOperation STORE uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
         }
-        val localVariableIndex = parseLocalVariableIndex("STORE")
+        val localVariableFilter = parseLocalVariableFilter("STORE")
         val handlerStoreType = requireHandlerLocalArgumentType("STORE")
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -735,7 +738,7 @@ class WrapOperationInjector(
             if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
                 continue
             }
-            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
                 continue
             }
             if (!isStoreCompatibleWithHandler(insn.opcode, handlerStoreType)) {
@@ -743,11 +746,11 @@ class WrapOperationInjector(
             }
 
             val resolvedStoreType = resolveIndexedLoadType(target, insn.`var`, handlerStoreType)
-            if (localVariableIndex == null && handlerStoreType.isReferenceType() && resolvedStoreType == null) {
+            if (localVariableFilter.index == null && handlerStoreType.isReferenceType() && resolvedStoreType == null) {
                 continue
             }
             val storeType = resolvedStoreType ?: handlerStoreType
-            if (localVariableIndex == null && !isLoadHandlerCompatible(target, storeType)) {
+            if (localVariableFilter.index == null && !isLoadHandlerCompatible(target, storeType)) {
                 continue
             }
 
@@ -2921,16 +2924,19 @@ class WrapOperationInjector(
     }
 
     /**
-     * 从 `At.args` 解析局部变量槽位过滤条件。
+     * 从 `At.args` 解析局部变量过滤条件。
      *
-     * 支持 `index=N` 与 `var=N` 两种写法；未声明时返回 `null`，表示不按槽位过滤。
+     * 支持 `index=N` 与 `var=N` 按槽位过滤，也支持 `name=localName` 按 LocalVariableTable 变量名过滤。
      *
      * @param pointName 当前定位点名称，用于错误提示
-     * @return 指定的 JVM 局部变量槽位；未指定时返回 `null`
-     * @throws IllegalArgumentException 声明多个过滤条件、非整数或负数槽位时抛出
+     * @return 局部变量过滤条件；未指定时返回空过滤
+     * @throws IllegalArgumentException 声明多个同类过滤条件、非整数、负数槽位或空变量名时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
      */
-    private fun parseLocalVariableIndex(pointName: String): Int? {
-        val values =
+    private fun parseLocalVariableFilter(pointName: String): LocalVariableFilter {
+        val slotValues =
             at.args.mapNotNull { arg ->
                 val trimmed = arg.trim()
                 when {
@@ -2939,23 +2945,162 @@ class WrapOperationInjector(
                     else -> null
                 }
             }
+        val nameValues =
+            at.args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                if (trimmed.startsWith("name=")) {
+                    trimmed.substringAfter("name=")
+                } else {
+                    null
+                }
+            }
 
-        if (values.isEmpty()) {
-            return null
-        }
-        require(values.size == 1) {
+        require(slotValues.size <= 1) {
             "@WrapOperation $pointName supports only one local variable slot filter in At.args"
+        }
+        require(nameValues.size <= 1) {
+            "@WrapOperation $pointName supports only one local variable name filter in At.args"
         }
 
         val index =
-            values.single().toIntOrNull()
-                ?: throw IllegalArgumentException(
-                    "@WrapOperation $pointName local variable slot filter must be an integer: ${values.single()}",
-                )
-        require(index >= 0) {
-            "@WrapOperation $pointName local variable slot filter must be non-negative: $index"
+            slotValues.singleOrNull()?.let { value ->
+                val parsed =
+                    value.toIntOrNull()
+                        ?: throw IllegalArgumentException(
+                            "@WrapOperation $pointName local variable slot filter must be an integer: $value",
+                        )
+                require(parsed >= 0) {
+                    "@WrapOperation $pointName local variable slot filter must be non-negative: $parsed"
+                }
+                parsed
+            }
+        val name =
+            nameValues.singleOrNull()?.trim()?.also { value ->
+                require(value.isNotEmpty()) {
+                    "@WrapOperation $pointName local variable name filter must not be blank"
+                }
+            }
+
+        return LocalVariableFilter(index, name)
+    }
+
+    /**
+     * 局部变量读写过滤条件。
+     *
+     * @property index JVM 局部变量槽位；为 `null` 时不按槽位过滤
+     * @property name LocalVariableTable 中的变量名；为 `null` 时不按名称过滤
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private data class LocalVariableFilter(
+        val index: Int? = null,
+        val name: String? = null,
+    ) {
+        /**
+         * 当前过滤条件是否为空。
+         *
+         * @return 未声明槽位和名称过滤时返回 `true`
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun isEmpty(): Boolean = index == null && name == null
+    }
+
+    /**
+     * 判断局部变量指令是否满足槽位和名称过滤条件。
+     *
+     * @param target 目标方法
+     * @param insn 候选局部变量读写指令
+     * @param filter 注解声明的局部变量过滤条件
+     * @return 候选指令满足过滤条件时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun matchesLocalVariableFilter(
+        target: MethodNode,
+        insn: VarInsnNode,
+        filter: LocalVariableFilter,
+    ): Boolean {
+        if (filter.isEmpty()) {
+            return true
         }
-        return index
+        if (filter.index != null && insn.`var` != filter.index) {
+            return false
+        }
+        if (filter.name == null) {
+            return true
+        }
+        return localVariableAt(target, localVariableAnchor(insn), insn.`var`)?.name == filter.name
+    }
+
+    /**
+     * 选择局部变量名称过滤使用的锚点。
+     *
+     * STORE 指令可能位于变量作用域起点标签之前，因此优先使用写入后的下一条真实指令判断变量名范围。
+     *
+     * @param insn 候选局部变量读写指令
+     * @return 用于 LocalVariableTable 范围判断的锚点
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAnchor(insn: VarInsnNode): AbstractInsnNode =
+        if (at.value == InjectionPoint.STORE) {
+            nextRealInstruction(insn) ?: insn
+        } else {
+            insn
+        }
+
+    /**
+     * 查找锚点处覆盖指定槽位的局部变量表记录。
+     *
+     * @param target 目标方法
+     * @param anchor 待匹配的锚点指令
+     * @param index JVM 局部变量槽位
+     * @return 覆盖锚点的局部变量记录；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAt(
+        target: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): LocalVariableNode? {
+        val insns = target.instructions.toArray()
+        val anchorIndex = insns.indexOf(anchor)
+        if (anchorIndex < 0) {
+            return null
+        }
+
+        return target.localVariables.firstOrNull { local ->
+            local.index == index && local.containsInstruction(insns, anchorIndex)
+        }
+    }
+
+    /**
+     * 判断局部变量表记录是否覆盖给定指令下标。
+     *
+     * @param insns 目标方法指令数组
+     * @param instructionIndex 待判断的指令下标
+     * @return 指令下标处于该局部变量生命周期内时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun LocalVariableNode.containsInstruction(
+        insns: Array<AbstractInsnNode>,
+        instructionIndex: Int,
+    ): Boolean {
+        val startIndex = insns.indexOf(start)
+        val endIndex = insns.indexOf(end)
+        return startIndex >= 0 &&
+            endIndex >= 0 &&
+            instructionIndex >= startIndex &&
+            instructionIndex < endIndex
     }
 
     /**

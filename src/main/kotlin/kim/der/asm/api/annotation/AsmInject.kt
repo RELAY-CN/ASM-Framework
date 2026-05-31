@@ -238,12 +238,13 @@ enum class InjectionPoint {
  * - 除普通 CONSTANT 外，REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
  * - [Redirect] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取；
- *   也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 与 `index=N` 或 `var=N`
- *   重定向指定 JVM 局部变量槽位的本次读取值或待写入值。
+ *   也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 与 `index=N`、`var=N`
+ *   或 `name=localName` 重定向指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值或待写入值。
  * - [WrapOperation] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素读取、写入或数组长度读取。
- *   也可通过 [InjectionPoint.LOAD] 与 `index=N` 或 `var=N` 包裹指定 JVM 局部变量槽位的本次读取值，
- *   handler 返回值只替换这一次读取结果，不写回槽位；通过 [InjectionPoint.STORE] 与同样的槽位过滤包裹本次待写入值，
+ *   也可通过 [InjectionPoint.LOAD] 与 `index=N`、`var=N` 或 `name=localName`
+ *   包裹指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值，
+ *   handler 返回值只替换这一次读取结果，不写回槽位；通过 [InjectionPoint.STORE] 与同样的槽位或名称过滤包裹本次待写入值，
  *   handler 返回值会交给原 `xSTORE` 继续写入槽位。
  * - [WrapWithCondition] 可通过 [args] 中的 `array=set`，把 [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素写入。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [InjectionPoint.FIELD_ASSIGN] 改写字段待写入值；
@@ -266,8 +267,8 @@ enum class InjectionPoint {
  * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.SWITCH] /
  * [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set`、`array=length`，以及
- * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，
- * [WrapOperation] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，[WrapWithCondition] 支持 `array=set`，
+ * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
+ * [WrapOperation] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，[WrapWithCondition] 支持 `array=set`，
  * [ModifyExpressionValue] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
  * 其中 `array=set` 需配合 [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`
