@@ -6,6 +6,7 @@ package kim.der.asm.injector.util
 
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.data.AsmInfo
+import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree.*
@@ -168,6 +169,8 @@ object AsmMethodCallGenerator {
      * @param il 指令列表
      * @param asmMethod ASM 方法；用于按 handler 首参创建 [CallbackInfo] 或其子类
      * @param cancellable 创建的 CallbackInfo 是否允许取消目标方法
+     * @param returnValueType 初始返回值的 JVM 类型；为空时使用 `null` 初始化回调返回值
+     * @param returnValueVarIndex 初始返回值所在局部变量槽位；为空时使用 `null` 初始化回调返回值
      *
      * @author Dr (dr@der.kim)
      * @date 2026-05-31
@@ -176,13 +179,20 @@ object AsmMethodCallGenerator {
         il: InsnList,
         asmMethod: Method,
         cancellable: Boolean = false,
+        returnValueType: Type? = null,
+        returnValueVarIndex: Int? = null,
     ) {
         val callbackType = callbackInfoType(asmMethod)
         val callbackInternalName = Type.getInternalName(callbackType)
 
         il.add(TypeInsnNode(Opcodes.NEW, callbackInternalName))
         il.add(InsnNode(Opcodes.DUP))
-        il.add(InsnNode(Opcodes.ACONST_NULL))
+        if (returnValueType != null && returnValueVarIndex != null) {
+            il.add(InstructionUtil.loadParam(returnValueType, returnValueVarIndex))
+            InstructionUtil.box(returnValueType)?.let { il.add(it) }
+        } else {
+            il.add(InsnNode(Opcodes.ACONST_NULL))
+        }
         il.add(InsnNode(if (cancellable) Opcodes.ICONST_1 else Opcodes.ICONST_0))
         il.add(
             MethodInsnNode(

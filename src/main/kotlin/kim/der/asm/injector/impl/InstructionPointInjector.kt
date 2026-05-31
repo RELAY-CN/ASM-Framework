@@ -21,6 +21,7 @@ import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
+import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -39,7 +40,8 @@ import java.lang.reflect.Method
  * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
  * 边界缩小候选指令查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；
  * 也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
- * `index=N` 或 `var=N` 限制 JVM 局部变量槽位；JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，SWITCH 不支持 `At.target`，CONSTANT
+ * `index=N` 或 `var=N` 限制 JVM 局部变量槽位，也可用 `name=localName` 按 LocalVariableTable 名称过滤；
+ * JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，SWITCH 不支持 `At.target`，CONSTANT
  * 指定 `At.target` 时按常量文本过滤，THROW 指定 `At.target`
  * 时只匹配 `ATHROW` 前直接构造出的同类型异常。
  * [InjectionPoint.CONSTANT] 搭配 [Shift.REPLACE] 时会删除原常量加载指令，并用 handler 返回值作为新的常量表达式值；
@@ -84,8 +86,8 @@ class InstructionPointInjector(
     override fun injectCount(target: MethodNode): Int {
         val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
         requireSupportedShift(injectAnnotation.at.shift, injectAnnotation.at.by)
-        val localVariableIndex = parseLocalVariableIndex(injectAnnotation.at.args)
-        val matcher = buildMatcher(injectAnnotation.at.target, localVariableIndex)
+        val localVariableFilter = parseLocalVariableFilter(injectAnnotation.at.args)
+        val matcher = buildMatcher(target, injectAnnotation.at.target, localVariableFilter)
         val instructions = target.instructions
         val insns = instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) =
@@ -350,20 +352,24 @@ class InstructionPointInjector(
     }
 
     /**
-     * 解析 `LOAD` / `STORE` 指令点的局部变量槽位过滤条件。
+     * 解析 `LOAD` / `STORE` 指令点的局部变量过滤条件。
      *
-     * 支持在 `At.args` 中使用 `index=<n>` 或 `var=<n>`，其他注入点会忽略该过滤。
+     * 支持在 `At.args` 中使用 `index=<n>` 或 `var=<n>` 按槽位过滤，也支持 `name=<localName>`
+     * 按 LocalVariableTable 中的变量名过滤；其他注入点会忽略该过滤。
      *
      * @param args 注解声明的 `At.args`
-     * @return 指定的局部变量槽位；未声明或当前不是局部变量指令点时返回 `null`
-     * @throws IllegalArgumentException 槽位不是整数、为负数或重复声明时抛出
+     * @return 局部变量过滤条件；未声明或当前不是局部变量指令点时返回空过滤
+     * @throws IllegalArgumentException 槽位不是整数、为负数、名称为空或重复声明时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
      */
-    private fun parseLocalVariableIndex(args: Array<String>): Int? {
+    private fun parseLocalVariableFilter(args: Array<String>): LocalVariableFilter {
         if (point != InjectionPoint.LOAD && point != InjectionPoint.STORE) {
-            return null
+            return LocalVariableFilter()
         }
 
-        val values =
+        val slotValues =
             args.mapNotNull { arg ->
                 val trimmed = arg.trim()
                 when {
@@ -372,39 +378,103 @@ class InstructionPointInjector(
                     else -> null
                 }
             }
+        val nameValues =
+            args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                if (trimmed.startsWith("name=")) {
+                    trimmed.substringAfter("name=")
+                } else {
+                    null
+                }
+            }
 
-        if (values.isEmpty()) {
-            return null
-        }
-        require(values.size == 1) {
+        require(slotValues.size <= 1) {
             "@AsmInject ${point.name} supports only one local variable slot filter in At.args"
+        }
+        require(nameValues.size <= 1) {
+            "@AsmInject ${point.name} supports only one local variable name filter in At.args"
         }
 
         val index =
-            values.single().toIntOrNull()
-                ?: throw IllegalArgumentException(
-                    "@AsmInject ${point.name} local variable slot filter must be an integer: ${values.single()}",
-                )
-        require(index >= 0) {
-            "@AsmInject ${point.name} local variable slot filter must be non-negative: $index"
-        }
-        return index
+            slotValues.singleOrNull()?.let { value ->
+                val parsed =
+                    value.toIntOrNull()
+                        ?: throw IllegalArgumentException(
+                            "@AsmInject ${point.name} local variable slot filter must be an integer: $value",
+                        )
+                require(parsed >= 0) {
+                    "@AsmInject ${point.name} local variable slot filter must be non-negative: $parsed"
+                }
+                parsed
+            }
+        val name =
+            nameValues.singleOrNull()?.trim()?.also { value ->
+                require(value.isNotEmpty()) {
+                    "@AsmInject ${point.name} local variable name filter must not be blank"
+                }
+            }
+
+        return LocalVariableFilter(index, name)
     }
+
+    /**
+     * 局部变量读写过滤条件。
+     *
+     * @property index JVM 局部变量槽位；为 `null` 时不按槽位过滤
+     * @property name LocalVariableTable 中的变量名；为 `null` 时不按名称过滤
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private data class LocalVariableFilter(
+        val index: Int? = null,
+        val name: String? = null,
+    ) {
+        /**
+         * 当前过滤条件是否为空。
+         *
+         * @return 未声明槽位和名称过滤时返回 `true`
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun isEmpty(): Boolean = index == null && name == null
+    }
+
+    /**
+     * 选择局部变量名称过滤使用的锚点。
+     *
+     * STORE 指令可能位于变量作用域起点标签之前，因此优先使用写入后的下一条真实指令判断变量名范围。
+     *
+     * @param insn 候选局部变量读写指令
+     * @return 用于 LocalVariableTable 范围判断的锚点
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAnchor(insn: VarInsnNode): AbstractInsnNode =
+        if (point == InjectionPoint.STORE) {
+            nextRealInstruction(insn) ?: insn
+        } else {
+            insn
+        }
 
     /**
      * 构造当前指令点的候选指令匹配器。
      *
      * 匹配器会把 `At.target` 解析为字段、类型、跳转 opcode、常量文本或异常类型约束；
-     * `LOAD` / `STORE` 还会叠加局部变量槽位过滤。
+     * `LOAD` / `STORE` 还会叠加局部变量槽位或名称过滤。
      *
+     * @param method 目标方法
      * @param target 注解声明的 `At.target`
-     * @param localVariableIndex `LOAD` / `STORE` 的局部变量槽位过滤
+     * @param localVariableFilter `LOAD` / `STORE` 的局部变量过滤条件
      * @return 用于筛选候选指令的谓词
      * @throws IllegalArgumentException 当前指令点不支持声明的目标格式时抛出
      */
     private fun buildMatcher(
+        method: MethodNode,
         target: String,
-        localVariableIndex: Int?,
+        localVariableFilter: LocalVariableFilter,
     ): (AbstractInsnNode) -> Boolean {
         return when (point) {
             InjectionPoint.FIELD -> {
@@ -464,13 +534,13 @@ class InstructionPointInjector(
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is VarInsnNode &&
                         insn.opcode in LOAD_OPS &&
-                        matchesLocalVariableIndex(insn, localVariableIndex)
+                        matchesLocalVariableFilter(method, insn, localVariableFilter)
             }
             InjectionPoint.STORE -> {
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is VarInsnNode &&
                         insn.opcode in STORE_OPS &&
-                        matchesLocalVariableIndex(insn, localVariableIndex)
+                        matchesLocalVariableFilter(method, insn, localVariableFilter)
             }
             InjectionPoint.THROW -> {
                 val normalizedTarget = target.replace('.', '/')
@@ -511,16 +581,98 @@ class InstructionPointInjector(
     }
 
     /**
-     * 判断局部变量指令是否满足槽位过滤条件。
+     * 判断局部变量指令是否满足槽位和名称过滤条件。
      *
+     * @param method 目标方法
      * @param insn 候选局部变量读写指令
-     * @param requestedIndex 注解声明的槽位过滤；为 `null` 时不限制槽位
-     * @return 候选指令槽位满足过滤条件时返回 `true`
+     * @param filter 注解声明的局部变量过滤条件
+     * @return 候选指令满足过滤条件时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
      */
-    private fun matchesLocalVariableIndex(
+    private fun matchesLocalVariableFilter(
+        method: MethodNode,
         insn: VarInsnNode,
-        requestedIndex: Int?,
-    ): Boolean = requestedIndex == null || insn.`var` == requestedIndex
+        filter: LocalVariableFilter,
+    ): Boolean {
+        if (filter.isEmpty()) {
+            return true
+        }
+        if (filter.index != null && insn.`var` != filter.index) {
+            return false
+        }
+        if (filter.name == null) {
+            return true
+        }
+        return localVariableAt(method, localVariableAnchor(insn), insn.`var`)?.name == filter.name
+    }
+
+    /**
+     * 查找锚点处覆盖指定槽位的局部变量表记录。
+     *
+     * @param method 目标方法
+     * @param anchor 待匹配的锚点指令
+     * @param index JVM 局部变量槽位
+     * @return 覆盖锚点的局部变量记录；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAt(
+        method: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): LocalVariableNode? {
+        val insns = method.instructions.toArray()
+        val anchorIndex = insns.indexOf(anchor)
+        if (anchorIndex < 0) {
+            return null
+        }
+
+        return method.localVariables.firstOrNull { local ->
+            local.index == index && local.containsInstruction(insns, anchorIndex)
+        }
+    }
+
+    /**
+     * 判断局部变量表记录是否覆盖给定指令下标。
+     *
+     * @param insns 目标方法指令数组
+     * @param instructionIndex 待判断的指令下标
+     * @return 指令下标处于该局部变量生命周期内时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun LocalVariableNode.containsInstruction(
+        insns: Array<AbstractInsnNode>,
+        instructionIndex: Int,
+    ): Boolean {
+        val startIndex = insns.indexOf(start)
+        val endIndex = insns.indexOf(end)
+        return startIndex >= 0 &&
+            endIndex >= 0 &&
+            instructionIndex >= startIndex &&
+            instructionIndex < endIndex
+    }
+
+    /**
+     * 查找下一条真实字节码指令。
+     *
+     * @param insn 起始指令节点
+     * @return 下一条真实指令；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.next
+        while (current != null && current.opcode < 0) {
+            current = current.next
+        }
+        return current
+    }
 
     /**
      * 推断直接抛出的异常构造类型。

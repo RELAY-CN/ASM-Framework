@@ -356,6 +356,30 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun tailInjectionSupportsCallbackInfoReturnable() {
+        AsmRegistry.register(TailCallbackInfoReturnableMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-tail", result)
+    }
+
+    @Test
+    fun cancellableTailSetReturnValueReturnsCallbackValue() {
+        AsmRegistry.register(CancellableTailSetReturnValueMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("tail-cancelled", result)
+    }
+
+    @Test
     fun callbackInfoReturnableSupportsTypedSetAndPrimitiveGetters() {
         val callback = CallbackInfoReturnable(41, cancellable = true)
 
@@ -6266,6 +6290,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun asmInjectLoadArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(LoadInjectNameMixin::class.java)
+        LoadInjectNameMixin.injectCount = 0
+
+        val transformed =
+            AsmProcessor().transform("NamedLoadVariableTarget", namedLoadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:second", result)
+        assertEquals(1, LoadInjectNameMixin.injectCount)
+    }
+
+    @Test
     fun asmInjectCanRunAfterLocalVariableStore() {
         AsmRegistry.register(StoreInjectMixin::class.java)
         StoreInjectMixin.injectCount = 0
@@ -6291,6 +6330,21 @@ class FrameworkReliabilityTest {
 
         assertEquals("first:second", result)
         assertEquals(1, StoreInjectVarMixin.injectCount)
+    }
+
+    @Test
+    fun asmInjectStoreArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(StoreInjectNameMixin::class.java)
+        StoreInjectNameMixin.injectCount = 0
+
+        val transformed =
+            AsmProcessor().transform("NamedStoreVariableTarget", namedStoreVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedStoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:second", result)
+        assertEquals(1, StoreInjectNameMixin.injectCount)
     }
 
     @Test
@@ -8252,6 +8306,24 @@ class FrameworkReliabilityTest {
         fun inject(callback: CallbackInfoReturnable<String>) {
             val original: String? = callback.getReturnValue()
             callback.setReturnValue("${original}-typed")
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object TailCallbackInfoReturnableMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.TAIL)
+        @JvmStatic
+        fun inject(callback: CallbackInfoReturnable<String>) {
+            callback.value = "${callback.value}-tail"
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object CancellableTailSetReturnValueMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.TAIL, cancellable = true)
+        @JvmStatic
+        fun inject(callback: CallbackInfoReturnable<String>) {
+            callback.value = "tail-cancelled"
         }
     }
 
@@ -13854,6 +13926,23 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("NamedLoadVariableTarget")
+    object LoadInjectNameMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.LOAD,
+            at = At(value = InjectionPoint.LOAD, shift = Shift.BEFORE, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
     @AsmMixin("InvokeDynamicSliceLoadVariableTarget")
     object LoadInjectInvokeDynamicSliceMixin {
         var injectCount: Int = 0
@@ -13905,6 +13994,23 @@ class FrameworkReliabilityTest {
             method = "value()Ljava/lang/String;",
             target = InjectionPoint.STORE,
             at = At(value = InjectionPoint.STORE, shift = Shift.AFTER, args = ["var=2"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+            injectCount++
+        }
+    }
+
+    @AsmMixin("NamedStoreVariableTarget")
+    object StoreInjectNameMixin {
+        var injectCount: Int = 0
+
+        @AsmInject(
+            method = "value()Ljava/lang/String;",
+            target = InjectionPoint.STORE,
+            at = At(value = InjectionPoint.STORE, shift = Shift.AFTER, args = ["name=target"]),
             require = 1,
             allow = 1,
         )
@@ -15812,6 +15918,35 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun namedLoadVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NamedLoadVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            val start = org.objectweb.asm.Label()
+            val end = org.objectweb.asm.Label()
+            visitCode()
+            visitLabel(start)
+            visitLdcInsn("first")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLabel(end)
+            visitInsn(Opcodes.ARETURN)
+            visitLocalVariable("other", "Ljava/lang/String;", null, start, end, 1)
+            visitLocalVariable("target", "Ljava/lang/String;", null, start, end, 2)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun loadExpressionValueTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadExpressionValueTarget", null, "java/lang/Object", null)
@@ -15846,6 +15981,35 @@ class FrameworkReliabilityTest {
             visitVarInsn(Opcodes.ALOAD, 1)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun namedStoreVariableTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NamedStoreVariableTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            val start = org.objectweb.asm.Label()
+            val end = org.objectweb.asm.Label()
+            visitCode()
+            visitLabel(start)
+            visitLdcInsn("first")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLabel(end)
+            visitInsn(Opcodes.ARETURN)
+            visitLocalVariable("other", "Ljava/lang/String;", null, start, end, 1)
+            visitLocalVariable("target", "Ljava/lang/String;", null, start, end, 2)
+            visitMaxs(2, 3)
             visitEnd()
         }
         cw.visitEnd()

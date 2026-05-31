@@ -424,9 +424,9 @@ object RemoveInterfacesMixin
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、注入点和签名兼容规则推断唯一同名目标方法
 - `target: InjectionPoint = InjectionPoint.HEAD` - 注入点位置
-- `cancellable: Boolean = false` - 是否允许 handler 调用 `CallbackInfo.cancel()` 或通过 `CallbackInfo.setReturnValue(...)` 触发取消；当前 `HEAD` 注入会据此生成提前返回分支
+- `cancellable: Boolean = false` - 是否允许 handler 调用 `CallbackInfo.cancel()` 或通过 `CallbackInfo.setReturnValue(...)` 触发取消；当前 `HEAD` 与 `TAIL` 注入会据此生成提前返回分支
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
-- `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
+- `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可通过 `["name=localName"]` 按 LocalVariableTable 变量名过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
 - `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
@@ -445,10 +445,10 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 以及普通非替换指令点注入的 handler 返回值不会参与目标方法结果，框架会在调用后丢弃该返回值以保持栈平衡。
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容注入点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
-需要在 `HEAD` 注入中提前返回时，必须设置 `cancellable = true`。未声明可取消的 `CallbackInfo` 调用 `cancel()` 会抛出
+需要在 `HEAD` 或 `TAIL` 注入中提前返回时，必须设置 `cancellable = true`。未声明可取消的 `CallbackInfo` 调用 `cancel()` 会抛出
 `IllegalStateException`，避免配置错误被静默忽略。对于非 `void` 目标方法，可取消回调调用 `setReturnValue(...)`
-会同时标记取消，并提前返回该值。普通 `RETURN` 注入会先把原始返回值预置到 `CallbackInfo`，handler 调用
-`setReturnValue(null)` 时，引用类型返回值会被明确替换为 `null`，不会被当作未修改。
+会同时标记取消，并提前返回该值。普通 `RETURN` 与非 `void` `TAIL` 注入会先把原始返回值预置到 `CallbackInfo`，handler 调用
+`setReturnValue(null)` 时，引用类型返回值会被明确替换为 `null`，不会被当作未修改；`TAIL` handler 修改后的回调返回值会写回原返回点。
 `CallbackInfoReturnable<T>` 继承自 `CallbackInfo`，可用于相同注入点，主要用于让 handler 签名直接表达返回值类型。
 
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
@@ -460,7 +460,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 结束边界之前查找目标调用、字段读写指令、局部变量读写指令、对象创建、类型转换、类型判断、跳转、switch、常量或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
 也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
-`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 属于指令点注入。它们默认会在匹配指令附近插入 handler，不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、switch selector、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位；普通 `JUMP` 可省略 `At.target` 匹配所有跳转，或使用 `IFEQ`、`IF_ICMPGT`、数字操作码等只匹配指定跳转指令，但不会改变控制流；普通 `SWITCH` 匹配 `tableswitch` 与 `lookupswitch`，不支持 `At.target`，也不会改变 selector；普通 `CONSTANT` 可省略 `At.target` 匹配所有常量，或使用字符串、数字、`null`、类名、方法描述符等常量文本过滤；`Shift.REPLACE` 会用 handler 返回值替换匹配常量加载，`BEFORE` / `AFTER` 仍只观察常量位置；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但仍不会把异常对象传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `INSTANCEOF` 只观察类型判断位置，不接收也不改写 boolean 结果；需要改写类型判断结果时使用 `@ModifyExpressionValue`。普通 `THROW` 只观察抛异常位置；需要直接替换异常对象时使用 `@Redirect(THROW)`，需要保留原指令并改写异常对象时使用 `@ModifyExpressionValue(THROW)`，需要保留可调用原异常对象的操作句柄时使用 `@WrapOperation(THROW)`，只需要按条件决定是否保留原抛出时使用 `@WrapWithCondition(THROW)`。普通 `NEW` 不支持 `At.by`，且只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 属于指令点注入。它们默认会在匹配指令附近插入 handler，不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、switch selector、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位，也可用 `["name=localName"]` 只匹配 LocalVariableTable 作用域内的同名变量；目标 class 缺少调试变量表时名称过滤不会命中，应改用槽位或 `ordinal`。普通 `JUMP` 可省略 `At.target` 匹配所有跳转，或使用 `IFEQ`、`IF_ICMPGT`、数字操作码等只匹配指定跳转指令，但不会改变控制流；普通 `SWITCH` 匹配 `tableswitch` 与 `lookupswitch`，不支持 `At.target`，也不会改变 selector；普通 `CONSTANT` 可省略 `At.target` 匹配所有常量，或使用字符串、数字、`null`、类名、方法描述符等常量文本过滤；`Shift.REPLACE` 会用 handler 返回值替换匹配常量加载，`BEFORE` / `AFTER` 仍只观察常量位置；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但仍不会把异常对象传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `INSTANCEOF` 只观察类型判断位置，不接收也不改写 boolean 结果；需要改写类型判断结果时使用 `@ModifyExpressionValue`。普通 `THROW` 只观察抛异常位置；需要直接替换异常对象时使用 `@Redirect(THROW)`，需要保留原指令并改写异常对象时使用 `@ModifyExpressionValue(THROW)`，需要保留可调用原异常对象的操作句柄时使用 `@WrapOperation(THROW)`，只需要按条件决定是否保留原抛出时使用 `@WrapWithCondition(THROW)`。普通 `NEW` 不支持 `At.by`，且只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -1111,7 +1111,7 @@ private val field: String? = null
 ##### `cancel()`
 
 取消方法的继续执行。该方法只能在可取消回调上调用；未声明 `cancellable = true` 的普通 `@AsmInject`
-调用会抛出 `IllegalStateException`。当前实际提前返回分支由 `HEAD` 注入支持。
+调用会抛出 `IllegalStateException`。当前实际提前返回分支由 `HEAD` 与 `TAIL` 注入支持。
 
 **示例：**
 
@@ -1171,8 +1171,8 @@ val value = callback.getReturnValue<String>()
 
 ##### `setReturnValue(value: Any?)`
 
-设置返回值（仅在支持返回值修改的注入点有效）。当回调来自 `cancellable = true` 的 `HEAD` 注入时，
-该方法也会标记取消，使目标方法提前返回该值；普通 `RETURN` 注入中的非可取消回调只会改写当前返回点。
+设置返回值（仅在支持返回值修改的注入点有效）。当回调来自 `cancellable = true` 的 `HEAD` 或 `TAIL` 注入时，
+该方法也会标记取消，使目标方法提前返回该值；普通 `RETURN` 与非 `void` `TAIL` 注入中的非可取消回调只会改写当前返回点。
 引用类型返回值可以设置为 `null`，并会作为明确的新返回值写回。
 
 **参数：**
@@ -1232,7 +1232,7 @@ CallbackInfoReturnable<T>(returnValue: T? = null, cancellable: Boolean = false)
 
 **参数：**
 
-- `returnValue: T? = null` - 初始返回值；RETURN 注入会在 handler 调用前预置原始返回值
+- `returnValue: T? = null` - 初始返回值；RETURN 与非 `void` TAIL 注入会在 handler 调用前预置原始返回值
 - `cancellable: Boolean = false` - 是否允许取消目标方法
 
 #### 属性
@@ -1432,7 +1432,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 支持按真实字节码指令数正负移动锚点
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`、
   `array=length`，以及 `LOAD` / `STORE` 的 `index=N` 与 `var=N` 槽位过滤；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N` 与 `var=N` 槽位过滤；`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
-  与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N` 与 `var=N` 槽位过滤，其中 `array=set` 需配合 `FIELD_ASSIGN`；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N` 与 `var=N`
+  与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N` 与 `var=N` 槽位过滤，其中 `array=set` 需配合 `FIELD_ASSIGN`；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
 
 **`target` 格式：**
 
@@ -1442,8 +1442,8 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
 - `CAST`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
 - `INSTANCEOF`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`
-- `LOAD`: 不使用 `target`；可通过 `args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
-- `STORE`: 不使用 `target`；可通过 `args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤
+- `LOAD`: 不使用 `target`；可通过 `args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `@AsmInject(LOAD)` 还可通过 `["name=localName"]` 按 LocalVariableTable 名称过滤
+- `STORE`: 不使用 `target`；可通过 `args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤；普通 `@AsmInject(STORE)` 还可通过 `["name=localName"]` 按 LocalVariableTable 名称过滤
 - `JUMP`: 跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`；省略时匹配所有跳转，`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)`、`@WrapOperation(JUMP)` 与 `@WrapWithCondition(JUMP)` 只支持条件跳转
 - `SWITCH`: 不使用 `target`；匹配 `tableswitch` 与 `lookupswitch`
 - `CONSTANT`: 常量文本；类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符；普通 `@AsmInject(CONSTANT)`、`@Redirect(CONSTANT)`、`@WrapOperation(CONSTANT)` 与 `@ModifyExpressionValue(CONSTANT)` 可省略目标以匹配或推断常量
@@ -1454,7 +1454,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入，使用 `FIELD + array=length` 包裹数组长度读取；也可使用 `LOAD` 与 `args = ["index=N"]` 或 `["var=N"]` 包裹指定 JVM 局部变量槽位的本次读取值，handler 接收 `xLOAD` 读取出的栈顶表达式值与 `Operation<T>`，`operation.call(original)` 返回传入的原读取值，handler 返回值只替换这一次读取结果，不写回槽位；使用 `STORE` 与同样的槽位过滤包裹 `xSTORE` 消费前的待写入栈顶值，handler 返回值交给原 `xSTORE` 继续写入槽位。
 `@ModifyExpressionValue` 可在 `FIELD_ASSIGN` 目标上改写 `PUTFIELD` / `PUTSTATIC` 消费前的字段待写入值。也可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；在 `FIELD_ASSIGN` 目标上使用 `args = ["array=set"]`，改写紧随目标数组字段后的 `xASTORE` 待写入元素值；或使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。`@ModifyExpressionValue(LOAD)` 可用 `args = ["index=N"]` 或 `["var=N"]` 改写指定槽位的本次 `xLOAD` 读取表达式值，不写回局部变量槽位；`@ModifyExpressionValue(STORE)` 可用同样的槽位过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。
 普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
-的 `xLOAD` / `xSTORE` 指令附近插入 handler；这不会把槽位值传入 handler，也不会写回槽位。
+的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会把槽位值传入 handler，也不会写回槽位。
 
 **示例：**
 

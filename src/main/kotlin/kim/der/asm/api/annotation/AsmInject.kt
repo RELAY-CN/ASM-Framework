@@ -12,10 +12,12 @@ package kim.der.asm.api.annotation
  *
  * ## 取消与返回值
  *
- * - 当 HEAD 注入声明 [cancellable] 为 `true` 且第一个参数为 [CallbackInfo] 时，
+ * - 当 HEAD 或 TAIL 注入声明 [cancellable] 为 `true` 且第一个参数为 [CallbackInfo] 时，
  *   可在注入方法内通过 [CallbackInfo.cancel] 标记取消并提前返回。
  *   对非 `void` 目标方法，也可调用 [CallbackInfo.setReturnValue] 设置返回值并自动标记取消。
  * - 未声明可取消的回调调用 [CallbackInfo.cancel] 会抛出 [IllegalStateException]，用于尽早发现错误配置。
+ * - RETURN 与非 `void` TAIL 注入会在 handler 调用前把原始返回值预置到 [CallbackInfo]，
+ *   handler 修改后的回调返回值会写回当前返回点。
  *
  * ## Handler 参数
  *
@@ -42,12 +44,12 @@ package kim.der.asm.api.annotation
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`；为空时按 handler 名称和注入点兼容性推断唯一同名目标方法
  * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW
- * @param cancellable 是否声明该注入点允许取消；当前 HEAD 注入会据此允许 [CallbackInfo.cancel] 或
+ * @param cancellable 是否声明该注入点允许取消；当前 HEAD 与 TAIL 注入会据此允许 [CallbackInfo.cancel] 或
  * [CallbackInfo.setReturnValue] 触发提前返回分支
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param at 当 [target] 为 INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
- * 或 `var=N` 按 JVM 局部变量槽位过滤
+ * 或 `var=N` 按 JVM 局部变量槽位过滤，也可用 `name=localName` 按 LocalVariableTable 中的变量名过滤
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入、普通 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.LOAD] /
@@ -82,7 +84,7 @@ annotation class AsmInject(
     /**
      * 是否允许 handler 通过 [CallbackInfo] 取消后续执行。
      *
-     * 当前取消语义只由 HEAD 注入消费，未声明可取消时调用 [CallbackInfo.cancel] 会失败。
+     * 当前取消语义由 HEAD 与 TAIL 注入消费，未声明可取消时调用 [CallbackInfo.cancel] 会失败。
      */
     val cancellable: Boolean = false,
 
@@ -250,7 +252,8 @@ enum class InjectionPoint {
  *   通过 [InjectionPoint.LOAD] 与 `index=N` 或 `var=N` 改写指定 JVM 局部变量槽位的本次读取表达式值，不写回槽位；
  *   通过 [InjectionPoint.STORE] 与 `index=N` 或 `var=N` 改写指定 JVM 局部变量槽位的本次待写入表达式值，返回值交给原 `xSTORE` 继续写入。
  * - 普通 [AsmInject] 的 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可通过 [args] 中的
- *   `index=N` 或 `var=N`，只匹配指定 JVM 局部变量槽位的读写指令。
+ *   `index=N` 或 `var=N` 只匹配指定 JVM 局部变量槽位的读写指令，也可用 `name=localName`
+ *   只匹配 LocalVariableTable 作用域内同名变量；缺少调试变量表时名称过滤不会命中。
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
@@ -264,7 +267,7 @@ enum class InjectionPoint {
  * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，
  * [WrapOperation] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，[WrapWithCondition] 支持 `array=set`，
  * [ModifyExpressionValue] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，
- * 其中 `array=set` 需配合 [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N` 与 `var=N`
+ * 其中 `array=set` 需配合 [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -298,7 +301,7 @@ annotation class At(
     /**
      * 附加定位参数。
      *
-     * 典型值包括 `array=get`、`array=set`、`array=length`、`index=N` 或 `var=N`。
+     * 典型值包括 `array=get`、`array=set`、`array=length`、`index=N`、`var=N` 或 `name=localName`。
      */
     val args: Array<String> = [],
 )
