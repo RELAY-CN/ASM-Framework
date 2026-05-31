@@ -370,6 +370,15 @@ class Operation<T> private constructor(
         return method.invoke(receiver, *methodArgs) as T
     }
 
+    /**
+     * 执行原始 `invokedynamic` 调用点。
+     *
+     * 该方法通过 bootstrap method 创建 [CallSite]，再调用其 dynamic invoker。
+     *
+     * @param args 动态调用点参数
+     * @return 动态调用点返回值
+     * @throws IllegalArgumentException 参数数量不匹配或缺少动态调用元数据时抛出
+     */
     private fun invokeDynamic(args: Array<out Any?>): Any? {
         require(args.size == parameterTypes.size) {
             "Operation invokedynamic $name$desc expects ${parameterTypes.size} argument(s), actual ${args.size}"
@@ -393,6 +402,16 @@ class Operation<T> private constructor(
         return callSite.dynamicInvoker().invokeWithArguments(*args)
     }
 
+    /**
+     * 执行原字段读取。
+     *
+     * 实例字段读取需要传入 receiver，静态字段读取不接收参数。
+     *
+     * @param args 字段读取参数
+     * @return 字段当前值
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     * @throws ReflectiveOperationException 字段无法解析或读取失败时抛出
+     */
     private fun readField(args: Array<out Any?>): Any? {
         val expectedArgumentCount = if (staticCall) 0 else 1
         require(args.size == expectedArgumentCount) {
@@ -404,6 +423,16 @@ class Operation<T> private constructor(
         return field.get(if (staticCall) null else args[0])
     }
 
+    /**
+     * 执行原字段写入。
+     *
+     * 实例字段写入参数为 receiver 与新字段值，静态字段写入只接收新字段值。
+     *
+     * @param args 字段写入参数
+     * @return [Unit]
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     * @throws ReflectiveOperationException 字段无法解析或写入失败时抛出
+     */
     private fun writeField(args: Array<out Any?>): Any {
         val expectedArgumentCount = if (staticCall) 1 else 2
         require(args.size == expectedArgumentCount) {
@@ -420,6 +449,13 @@ class Operation<T> private constructor(
         return Unit
     }
 
+    /**
+     * 执行原数组元素读取。
+     *
+     * @param args 数组实例与 `Int` 索引
+     * @return 指定索引的数组元素值
+     * @throws IllegalArgumentException 参数数量不匹配或索引不是 `Int` 时抛出
+     */
     private fun readArray(args: Array<out Any?>): Any? {
         require(args.size == 2) {
             "Operation ${ownerClass.name}.$name:$desc expects 2 argument(s), actual ${args.size}"
@@ -431,6 +467,13 @@ class Operation<T> private constructor(
         return ReflectArray.get(args[0], index)
     }
 
+    /**
+     * 执行原数组元素写入。
+     *
+     * @param args 数组实例、`Int` 索引与新元素值
+     * @return [Unit]
+     * @throws IllegalArgumentException 参数数量不匹配或索引不是 `Int` 时抛出
+     */
     private fun writeArray(args: Array<out Any?>): Any {
         require(args.size == 3) {
             "Operation ${ownerClass.name}.$name:$desc expects 3 argument(s), actual ${args.size}"
@@ -443,6 +486,13 @@ class Operation<T> private constructor(
         return Unit
     }
 
+    /**
+     * 执行原数组长度读取。
+     *
+     * @param args 单个数组实例
+     * @return 数组长度
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     */
     private fun readArrayLength(args: Array<out Any?>): Int {
         require(args.size == 1) {
             "Operation ${ownerClass.name}.$name:$desc expects 1 argument(s), actual ${args.size}"
@@ -451,6 +501,14 @@ class Operation<T> private constructor(
         return ReflectArray.getLength(args[0])
     }
 
+    /**
+     * 执行原 `CHECKCAST` 类型转换。
+     *
+     * @param args 单个待转换引用
+     * @return 转换后的引用值
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     * @throws ClassCastException 值不能转换为目标类型时抛出
+     */
     private fun cast(args: Array<out Any?>): Any? {
         require(args.size == 1) {
             "Operation ${ownerClass.name}.$name:$desc expects 1 argument(s), actual ${args.size}"
@@ -459,6 +517,13 @@ class Operation<T> private constructor(
         return ownerClass.cast(args[0])
     }
 
+    /**
+     * 执行原 `INSTANCEOF` 类型判断。
+     *
+     * @param args 单个待判断引用
+     * @return 原类型判断结果
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     */
     private fun instanceOf(args: Array<out Any?>): Boolean {
         require(args.size == 1) {
             "Operation ${ownerClass.name}.$name:$desc expects 1 argument(s), actual ${args.size}"
@@ -467,6 +532,13 @@ class Operation<T> private constructor(
         return ownerClass.isInstance(args[0])
     }
 
+    /**
+     * 返回原局部变量读取值或待写入值。
+     *
+     * @param args 单个局部变量值
+     * @return 传入的局部变量值
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     */
     private fun passLocal(args: Array<out Any?>): Any? {
         require(args.size == 1) {
             "Operation local value $desc expects 1 argument(s), actual ${args.size}"
@@ -475,6 +547,13 @@ class Operation<T> private constructor(
         return args[0]
     }
 
+    /**
+     * 返回原条件跳转分支结果。
+     *
+     * @param args 单个原始分支结果
+     * @return 传入的布尔分支结果
+     * @throws IllegalArgumentException 参数数量不匹配或参数不是 [Boolean] 时抛出
+     */
     private fun passBoolean(args: Array<out Any?>): Boolean {
         require(args.size == 1) {
             "Operation jump $desc expects 1 argument(s), actual ${args.size}"
@@ -484,6 +563,13 @@ class Operation<T> private constructor(
             ?: throw IllegalArgumentException("Operation jump $desc requires Boolean argument")
     }
 
+    /**
+     * 返回原 switch selector。
+     *
+     * @param args 单个原始 selector
+     * @return 传入的 `Int` selector
+     * @throws IllegalArgumentException 参数数量不匹配或参数不是 [Int] 时抛出
+     */
     private fun passInt(args: Array<out Any?>): Int {
         require(args.size == 1) {
             "Operation switch $desc expects 1 argument(s), actual ${args.size}"
@@ -493,6 +579,13 @@ class Operation<T> private constructor(
             ?: throw IllegalArgumentException("Operation switch $desc requires Int argument")
     }
 
+    /**
+     * 返回原即将抛出的异常对象。
+     *
+     * @param args 单个原始异常对象
+     * @return 传入的 [Throwable]
+     * @throws IllegalArgumentException 参数数量不匹配或参数不是 [Throwable] 时抛出
+     */
     private fun passThrowable(args: Array<out Any?>): Throwable {
         require(args.size == 1) {
             "Operation throw $desc expects 1 argument(s), actual ${args.size}"
@@ -502,6 +595,14 @@ class Operation<T> private constructor(
             ?: throw IllegalArgumentException("Operation throw $desc requires Throwable argument")
     }
 
+    /**
+     * 执行原构造器调用。
+     *
+     * @param args 构造器参数
+     * @return 新建对象实例
+     * @throws IllegalArgumentException 参数数量不匹配时抛出
+     * @throws ReflectiveOperationException 构造器无法解析或调用失败时抛出
+     */
     private fun construct(args: Array<out Any?>): Any {
         require(args.size == parameterTypes.size) {
             "Operation ${ownerClass.name}$desc expects ${parameterTypes.size} argument(s), actual ${args.size}"
@@ -512,6 +613,13 @@ class Operation<T> private constructor(
         return constructor.newInstance(*args)
     }
 
+    /**
+     * 读取原常量值。
+     *
+     * @param args 必须为空
+     * @return 构造 [Operation] 时保存的常量值
+     * @throws IllegalArgumentException 传入任何参数时抛出
+     */
     private fun readConstant(args: Array<out Any?>): Any? {
         require(args.isEmpty()) {
             "Operation constant $desc expects 0 argument(s), actual ${args.size}"
@@ -520,6 +628,15 @@ class Operation<T> private constructor(
         return constantValue
     }
 
+    /**
+     * 查找原方法调用目标。
+     *
+     * 优先查找声明方法，找不到时退回公开继承方法。
+     *
+     * @param ownerClass 方法 owner 类
+     * @return 匹配名称和参数类型的方法
+     * @throws NoSuchMethodException 找不到方法时抛出
+     */
     private fun findMethod(ownerClass: Class<*>): Method =
         try {
             ownerClass.getDeclaredMethod(name, *parameterTypes)
@@ -527,6 +644,15 @@ class Operation<T> private constructor(
             ownerClass.getMethod(name, *parameterTypes)
         }
 
+    /**
+     * 查找原构造器调用目标。
+     *
+     * 优先查找声明构造器，找不到时退回公开构造器。
+     *
+     * @param ownerClass 构造器 owner 类
+     * @return 匹配参数类型的构造器
+     * @throws NoSuchMethodException 找不到构造器时抛出
+     */
     private fun findConstructor(ownerClass: Class<*>): Constructor<*> =
         try {
             ownerClass.getDeclaredConstructor(*parameterTypes)
@@ -534,6 +660,15 @@ class Operation<T> private constructor(
             ownerClass.getConstructor(*parameterTypes)
         }
 
+    /**
+     * 查找原字段操作目标。
+     *
+     * 优先查找声明字段，找不到时退回公开继承字段。
+     *
+     * @param ownerClass 字段 owner 类
+     * @return 匹配名称的字段
+     * @throws NoSuchFieldException 找不到字段时抛出
+     */
     private fun findField(ownerClass: Class<*>): Field =
         try {
             ownerClass.getDeclaredField(name)
@@ -541,26 +676,70 @@ class Operation<T> private constructor(
             ownerClass.getField(name)
         }
 
+    /**
+     * [Operation] 支持的原始操作类别。
+     */
     private enum class OperationKind {
+        /** 普通方法调用。 */
         METHOD_CALL,
+
+        /** 构造器调用。 */
         CONSTRUCTOR_CALL,
+
+        /** 字段读取。 */
         FIELD_READ,
+
+        /** 字段写入。 */
         FIELD_WRITE,
+
+        /** 数组元素读取。 */
         ARRAY_READ,
+
+        /** 数组元素写入。 */
         ARRAY_WRITE,
+
+        /** 数组长度读取。 */
         ARRAY_LENGTH,
+
+        /** 类型转换。 */
         CAST,
+
+        /** 类型判断。 */
         INSTANCEOF,
+
+        /** 局部变量读取。 */
         LOAD,
+
+        /** 局部变量写入值。 */
         STORE,
+
+        /** 条件跳转分支结果。 */
         JUMP,
+
+        /** switch selector。 */
         SWITCH,
+
+        /** 即将抛出的异常。 */
         THROW,
+
+        /** `invokedynamic` 调用。 */
         INVOKE_DYNAMIC,
+
+        /** 常量读取。 */
         CONSTANT,
     }
 
+    /**
+     * [Operation] 标记字符串到操作类别的映射。
+     */
     private companion object {
+        /**
+         * 解析标记操作类别。
+         *
+         * @param marker 构造标记
+         * @return 标记对应的操作类别
+         * @throws IllegalArgumentException 不支持的标记值传入时抛出
+         */
         fun markerOperationKind(marker: String): OperationKind =
             when (marker) {
                 "<checkcast>" -> OperationKind.CAST
