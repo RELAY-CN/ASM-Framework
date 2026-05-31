@@ -969,13 +969,60 @@ annotation class WrapWithCondition(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyExpressionValue(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、表达式定位和签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 要改写的表达式定位。
+     *
+     * 支持调用返回、字段值、数组值、构造结果、类型判断、局部变量表达式、跳转、switch、常量和抛异常点。
+     */
     val at: At = At(value = InjectionPoint.INVOKE),
+
+    /**
+     * 匹配表达式序号过滤。
+     *
+     * `-1` 表示修改所有匹配表达式；`0` 及以上表示只修改第 N 个匹配表达式。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 表达式查找切片。
+     *
+     * 候选表达式会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小表达式修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望表达式修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大表达式修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1024,15 +1071,74 @@ annotation class ModifyExpressionValue(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyVariable(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、变量筛选条件和签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 变量修改位置。
+     *
+     * 支持入口参数、局部变量读取前和局部变量写入后；HEAD 当前不使用 [slice]。
+     */
     val at: At = At(value = InjectionPoint.HEAD),
+
+    /**
+     * JVM 局部变量槽位索引。
+     *
+     * 负数表示按 handler 首参类型、[name] 与 [ordinal] 推断候选变量。
+     */
     val index: Int = -1,
+
+    /**
+     * 局部变量名过滤列表。
+     *
+     * 非空时依赖目标方法的 LocalVariableTable；缺少调试变量表时不会命中。
+     */
     val name: Array<String> = [],
+
+    /**
+     * 同类型变量序号过滤。
+     *
+     * 未显式指定 [index] 时使用；HEAD 模式同类型入口参数唯一时可保持默认值。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 局部变量读写点查找切片。
+     *
+     * 仅 LOAD / STORE 模式生效，候选读写点会限制在 [Slice.from] 之后、[Slice.to] 之前。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小变量修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望变量修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大变量修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1069,13 +1175,60 @@ annotation class ModifyVariable(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyReturnValue(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、返回类型和真实返回点兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 预留定位参数。
+     *
+     * 当前实现始终修改目标方法非 void 返回点，不使用该字段改变定位方式。
+     */
     val at: At = At(),
+
+    /**
+     * 返回点序号过滤。
+     *
+     * `-1` 表示修改所有非 void 返回点；`0` 及以上表示只修改第 N 个返回点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 最小返回值修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望返回值修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大返回值修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
+
+    /**
+     * 返回点查找切片。
+     *
+     * 位于参数列表末尾以兼容既有位置参数调用；候选返回点会限制在切片边界之间。
+     */
     val slice: Slice = Slice(),
 )
 
@@ -1121,13 +1274,60 @@ annotation class ModifyReturnValue(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyConstant(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、常量过滤和签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 常量文本过滤。
+     *
+     * 为空时只按 handler 类型筛选；可写字符串、数字、`true` / `false`、`null`、类名、方法类型或方法句柄签名。
+     */
     val constant: String = "",
+
+    /**
+     * 匹配常量序号过滤。
+     *
+     * `-1` 表示修改所有匹配常量；`0` 及以上表示只修改第 N 个匹配常量。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 常量查找切片。
+     *
+     * 候选常量会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小常量修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望常量修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大常量修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1209,14 +1409,67 @@ annotation class ModifyConstant(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Redirect(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、重定向点和签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 兼容旧式写法的重定向目标组件。
+     *
+     * 会与 [at] 中的定位信息组合；LOAD、STORE 和 SWITCH 模式不使用该字段。
+     */
     val target: String = "",
+
+    /**
+     * 重定向点定位。
+     *
+     * [At.value] 决定重定向调用、字段、数组、构造、局部变量、类型、跳转、switch、常量或抛异常点。
+     */
     val at: At = At(),
+
+    /**
+     * 匹配重定向点序号过滤。
+     *
+     * `-1` 表示重定向所有匹配点；`0` 及以上表示只重定向第 N 个匹配点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 重定向点查找切片。
+     *
+     * 候选点会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小重定向数。
+     *
+     * 大于 0 时实际重定向数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望重定向数。
+     *
+     * 非默认值且实际重定向数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大重定向数。
+     *
+     * 大于等于 0 时实际重定向数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1244,7 +1497,18 @@ annotation class Redirect(
 @Target(AnnotationTarget.FIELD, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Shadow(
+    /**
+     * 目标成员名称提示。
+     *
+     * 为空时使用声明名；以 [prefix] 开头时会去掉前缀；其他非空值直接作为目标名。
+     */
     val method: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 ) {
     companion object {
@@ -1284,7 +1548,18 @@ annotation class Shadow(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Accessor(
+    /**
+     * 目标字段名。
+     *
+     * 为空时按 `getXxx`、`setXxx` 或 `isXxx` 访问器方法名推断字段名。
+     */
     val value: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1321,7 +1596,18 @@ annotation class Accessor(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Invoker(
+    /**
+     * 目标方法名或构造器标记。
+     *
+     * 为空时按 `callXxx` 或 `invokeXxx` 方法名推断；`"<init>"` 表示生成构造器工厂。
+     */
     val value: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1370,7 +1656,18 @@ annotation class Final
 @Target(AnnotationTarget.FIELD)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class AddField(
+    /**
+     * 目标字段名。
+     *
+     * 为空时使用被标注 ASM 字段名。
+     */
     val field: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1395,7 +1692,18 @@ annotation class AddField(
 @Target(AnnotationTarget.FIELD, AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class RemoveField(
+    /**
+     * 目标字段名。
+     *
+     * 为空时按被标注字段名或访问器风格函数名推断。
+     */
     val field: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1413,7 +1721,18 @@ annotation class RemoveField(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class RemoveMethod(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时使用被标注 ASM 方法自身的方法名与描述符。
+     */
     val method: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -1431,7 +1750,18 @@ annotation class RemoveMethod(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class RemoveSynchronized(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时使用被标注 ASM 方法自身的方法名与描述符。
+     */
     val method: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
