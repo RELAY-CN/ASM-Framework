@@ -493,6 +493,15 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 通过 [InjectionPoint.NEW] 重定向对象构造表达式。
+     *
+     * 该入口从 `NEW` 指令出发查找配对构造器调用，并用 handler 调用替换整段构造流程。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的构造表达式数量
+     * @throws IllegalArgumentException NEW 目标为空、找不到配对构造器或 handler 签名不兼容时抛出
+     */
     private fun injectNewConstructorCount(target: MethodNode): Int {
         val typeTarget = redirectTarget.replace('.', '/')
         if (typeTarget.isEmpty()) {
@@ -523,6 +532,16 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向简单数组元素访问或数组长度读取。
+     *
+     * 数组引用必须来自匹配字段的直接读取，复杂栈表达式不会被当前入口处理。
+     *
+     * @param target 目标方法
+     * @param mode 数组访问模式
+     * @return 实际重定向的数组访问数量
+     * @throws IllegalArgumentException 数组字段目标不合法、目标字段不是数组或 handler 签名不兼容时抛出
+     */
     private fun injectArrayAccessCount(
         target: MethodNode,
         mode: ArrayAccessMode,
@@ -568,6 +587,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向 `INSTANCEOF` 类型判断结果。
+     *
+     * 显式声明目标时只匹配对应类型；未声明目标时匹配切片内全部 `INSTANCEOF` 指令。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的类型判断数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectInstanceofCount(target: MethodNode): Int {
         val typeTarget = redirectTarget.replace('.', '/')
         val matchAnyTarget = typeTarget.isEmpty()
@@ -595,6 +623,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向 `CHECKCAST` 类型转换结果。
+     *
+     * 显式声明目标时按转换类型匹配；未声明目标时按 handler 返回值筛选可接收的转换结果。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的类型转换数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectCastCount(target: MethodNode): Int {
         val typeTarget = redirectTarget.replace('.', '/')
         val matchAnyTarget = typeTarget.isEmpty()
@@ -625,9 +662,24 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 返回值是否能替代指定 `CHECKCAST` 结果。
+     *
+     * @param castType 原 `CHECKCAST` 目标类型
+     * @return handler 返回值可作为转换结果时返回 `true`
+     */
     private fun isCastReturnCompatible(castType: Type): Boolean =
         isReturnCompatible(castType, Type.getReturnType(asmMethod))
 
+    /**
+     * 重定向局部变量读取值。
+     *
+     * 该入口只替换当前 `xLOAD` 指令压入栈的值，不写回局部变量槽位；可通过 `index=N` 或 `var=N` 过滤槽位。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的局部变量读取数量
+     * @throws IllegalArgumentException `At.target` 非空、槽位过滤或 handler 签名不合法时抛出
+     */
     private fun injectLoadCount(target: MethodNode): Int {
         require(redirectTarget.isEmpty()) {
             "Redirect LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
@@ -677,6 +729,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向局部变量待写入值。
+     *
+     * 该入口在 `xSTORE` 消费栈顶值前调用 handler，并把 handler 返回值交给原 store 指令继续写入。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的局部变量写入数量
+     * @throws IllegalArgumentException `At.target` 非空、槽位过滤或 handler 签名不合法时抛出
+     */
     private fun injectStoreCount(target: MethodNode): Int {
         require(redirectTarget.isEmpty()) {
             "Redirect STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
@@ -726,6 +787,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向常量加载结果。
+     *
+     * 显式声明目标时按常量文本匹配；未声明目标时按 handler 首参和返回值筛选兼容常量。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的常量加载数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectConstantCount(target: MethodNode): Int {
         val inferTarget = redirectTarget.isEmpty()
         val instructions = target.instructions
@@ -764,6 +834,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向条件跳转结果。
+     *
+     * handler 接收原分支结果并返回新的 boolean 结果，替代原条件跳转是否跳转的判断。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的条件跳转数量
+     * @throws IllegalArgumentException 跳转目标不是条件跳转 opcode 或 handler 签名不兼容时抛出
+     */
     private fun injectJumpCount(target: MethodNode): Int {
         val targetOpcode = parseJumpOpcodeTarget(redirectTarget)
         if (targetOpcode != null && targetOpcode !in CONDITIONAL_JUMP_OPS) {
@@ -802,6 +881,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向 switch selector。
+     *
+     * 该入口匹配 `tableswitch` 与 `lookupswitch` 消费前的 `Int` selector，不支持 `At.target` 过滤。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的 switch selector 数量
+     * @throws IllegalArgumentException `At.target` 非空或 handler 签名不兼容时抛出
+     */
     private fun injectSwitchCount(target: MethodNode): Int {
         if (redirectTarget.isNotEmpty()) {
             throw IllegalArgumentException("Redirect SWITCH does not support target")
@@ -833,6 +921,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向即将抛出的异常对象。
+     *
+     * 显式声明目标时只匹配直接构造后抛出的对应异常；未声明目标时按 handler 签名筛选 `ATHROW` 候选。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的抛异常点数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     */
     private fun injectThrowCount(target: MethodNode): Int {
         val normalizedTarget = redirectTarget.replace('.', '/')
         val inferTarget = normalizedTarget.isEmpty()
@@ -868,9 +965,26 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 判断 handler 是否兼容 `ATHROW` 候选。
+     *
+     * 该方法用于目标推断模式，签名校验失败的候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @return handler 签名可重定向异常对象时返回 `true`
+     */
     private fun isThrowHandlerCompatible(target: MethodNode): Boolean =
         runCatching { validateThrowHandlerSignature(target) }.isSuccess
 
+    /**
+     * 重定向字段读取结果。
+     *
+     * 该入口匹配 `GETFIELD` 或 `GETSTATIC`，并用 handler 调用替换原字段读取。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的字段读取数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldReadCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
         if (fieldTarget.name == null) {
@@ -903,6 +1017,15 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 重定向字段待写入值。
+     *
+     * 该入口匹配 `PUTFIELD` 或 `PUTSTATIC`，并用 handler 返回值替代原字段写入值。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的字段写入数量
+     * @throws IllegalArgumentException 字段目标缺少名称或 handler 签名不兼容时抛出
+     */
     private fun injectFieldAssignCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
         if (fieldTarget.name == null) {
