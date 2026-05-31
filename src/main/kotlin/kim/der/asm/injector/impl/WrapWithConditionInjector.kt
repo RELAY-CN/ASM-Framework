@@ -791,6 +791,17 @@ class WrapWithConditionInjector(
         return il
     }
 
+    /**
+     * 校验普通方法调用条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，并按原调用栈顺序接收被调用实例与调用参数；
+     * `INVOKESTATIC` 不需要实例参数，额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param callInsn 被条件包裹的普通方法调用指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、原调用参数或追加目标参数不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         callInsn: MethodInsnNode,
@@ -845,6 +856,17 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验 `invokedynamic` 调用条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，前缀参数需要与动态调用点描述符的参数兼容；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param callInsn 被条件包裹的 `invokedynamic` 调用指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、动态调用参数或追加目标参数不兼容时抛出
+     */
     private fun validateInvokeDynamicHandlerSignature(
         target: MethodNode,
         callInsn: InvokeDynamicInsnNode,
@@ -899,6 +921,17 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验字段写入条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`；静态字段写入接收待写入值，实例字段写入先接收字段 owner 再接收待写入值。
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 被条件包裹的字段写入指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、字段写入参数或追加目标参数不兼容时抛出
+     */
     private fun validateFieldAssignHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -953,6 +986,17 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验数组元素写入条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，并依次接收数组引用、元素索引与待写入元素值；
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、数组写入参数或追加目标参数不兼容时抛出
+     */
     private fun validateArrayAssignHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -1007,6 +1051,16 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验条件跳转包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收原条件跳转结果；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、原分支结果参数或追加目标参数不兼容时抛出
+     */
     private fun validateJumpHandlerSignature(target: MethodNode): Int {
         val returnType = Type.getReturnType(asmMethod)
         if (returnType.sort != Type.BOOLEAN) {
@@ -1052,6 +1106,16 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验异常抛出条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收原始异常对象；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、异常参数或追加目标参数不兼容时抛出
+     */
     private fun validateThrowHandlerSignature(target: MethodNode): Int {
         val returnType = Type.getReturnType(asmMethod)
         if (returnType.sort != Type.BOOLEAN) {
