@@ -20,8 +20,25 @@ package kim.der.asm.api.annotation
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class AsmMixin(
+    /**
+     * 单个目标类 internal name。
+     *
+     * 为空时使用 [targets]；两者都为空时注册器会跳过该 Mixin 类。
+     */
     val value: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
+
+    /**
+     * 多个目标类 internal name。
+     *
+     * 适合同一个 Mixin 需要应用到一组结构兼容目标类的场景。
+     */
     val targets: Array<String> = [],
 )
 
@@ -47,8 +64,25 @@ annotation class AsmMixin(
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class AddInterface(
+    /**
+     * 单个待添加接口名。
+     *
+     * 可写 JVM internal name 或 Java binary name；为空时使用 [interfaces]。
+     */
     val value: String = "",
+
+    /**
+     * 多个待添加接口名。
+     *
+     * 已存在于目标类接口列表中的接口会被跳过。
+     */
     val interfaces: Array<String> = [],
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -74,8 +108,25 @@ annotation class AddInterface(
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class RemoveInterface(
+    /**
+     * 单个待移除接口名。
+     *
+     * 可写 JVM internal name 或 Java binary name；为空时使用 [interfaces]。
+     */
     val value: String = "",
+
+    /**
+     * 多个待移除接口名。
+     *
+     * 目标类未声明的接口会被跳过，不会使转换失败。
+     */
     val interfaces: Array<String> = [],
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -102,7 +153,18 @@ annotation class RemoveInterface(
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ReplaceAllMethods(
+    /**
+     * 是否移除同步语义。
+     *
+     * 为 `true` 时会移除方法的 `synchronized` 标志及相关同步指令。
+     */
     val removeSync: Boolean = false,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -131,6 +193,11 @@ annotation class ReplaceAllMethods(
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class RedirectAllMethods(
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -155,7 +222,18 @@ annotation class RedirectAllMethods(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Overwrite(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时使用被标注 ASM 方法自身的方法名与描述符定位目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -174,7 +252,18 @@ annotation class Overwrite(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class Copy(
+    /**
+     * 复制到目标类后的方法 JVM 签名。
+     *
+     * 为空时使用被标注 ASM 方法自身的方法名与描述符。
+     */
     val method: String = "",
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -233,14 +322,67 @@ annotation class Unique
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyArg(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、参数索引、handler 签名和实际兼容调用点推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 要修改的参数索引。
+     *
+     * 入口模式下表示目标方法参数索引；INVOKE 模式下表示目标调用参数索引；负数表示按兼容性推断唯一参数。
+     */
     val index: Int = -1,
+
+    /**
+     * 参数修改位置。
+     *
+     * 默认 HEAD 修改目标方法入口参数；[InjectionPoint.INVOKE] 修改匹配方法、构造器或 `invokedynamic` 调用参数。
+     */
     val at: At = At(),
+
+    /**
+     * 匹配调用点序号过滤。
+     *
+     * 仅在 INVOKE 模式下生效；`-1` 表示修改所有匹配点，`0` 及以上表示只修改第 N 个匹配点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 调用点查找切片。
+     *
+     * 仅在 INVOKE 模式下生效，候选调用会限制在 [Slice.from] 之后、[Slice.to] 之前。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小参数修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望参数修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大参数修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -282,13 +424,60 @@ annotation class ModifyArg(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyArgs(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、调用点、[Args] 首参和后续目标方法参数前缀推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 参数组修改调用点。
+     *
+     * 当前仅支持 [InjectionPoint.INVOKE]，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用。
+     */
     val at: At = At(value = InjectionPoint.INVOKE),
+
+    /**
+     * 匹配调用点序号过滤。
+     *
+     * `-1` 表示修改所有匹配调用点；`0` 及以上表示只修改第 N 个匹配调用点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 调用点查找切片。
+     *
+     * 候选调用会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小参数组修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望参数组修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大参数组修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
