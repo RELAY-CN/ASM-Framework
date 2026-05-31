@@ -202,8 +202,29 @@ class RedirectInjector(
         return injectionCount
     }
 
+    /**
+     * 判断当前命中序号是否满足注解声明的 ordinal 过滤。
+     *
+     * 负数 ordinal 表示不按序号过滤。
+     *
+     * @param currentOrdinal 当前候选点在同类重定向点中的命中序号
+     * @return 当前候选点应被处理时返回 `true`
+     */
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
+    /**
+     * 判断普通方法调用候选是否应参与重定向。
+     *
+     * 显式目标模式按 owner、名称与描述符匹配；目标推断模式按 handler 签名兼容性筛选。
+     *
+     * @param target 目标方法
+     * @param insn 候选普通方法调用指令
+     * @param inferTarget 是否根据 handler 签名推断目标
+     * @param targetOwner 目标 owner；推断模式下可为 `null`
+     * @param targetName 目标方法名；推断模式下可为 `null`
+     * @param targetDesc 目标方法描述符；推断模式下可为 `null`
+     * @return 候选调用满足当前目标模式时返回 `true`
+     */
     private fun matchesRedirectMethodCandidate(
         target: MethodNode,
         insn: MethodInsnNode,
@@ -218,6 +239,20 @@ class RedirectInjector(
         return canRedirectMethodCall(target, insn)
     }
 
+    /**
+     * 判断 `invokedynamic` 候选是否应参与重定向。
+     *
+     * 显式目标模式按 bootstrap owner、调用名或 bootstrap 名、描述符匹配；
+     * 目标推断模式按 handler 签名兼容性筛选。
+     *
+     * @param target 目标方法
+     * @param insn 候选 `invokedynamic` 指令
+     * @param inferTarget 是否根据 handler 签名推断目标
+     * @param targetOwner 目标 bootstrap owner；推断模式下可为 `null`
+     * @param targetName 目标调用名或 bootstrap 方法名；推断模式下可为 `null`
+     * @param targetDesc 目标动态调用描述符；推断模式下可为 `null`
+     * @return 候选动态调用满足当前目标模式时返回 `true`
+     */
     private fun matchesRedirectInvokeDynamicCandidate(
         target: MethodNode,
         insn: InvokeDynamicInsnNode,
@@ -232,6 +267,15 @@ class RedirectInjector(
         return canRedirectInvokeDynamicCall(target, insn)
     }
 
+    /**
+     * 判断 handler 是否兼容候选普通方法调用或构造器调用。
+     *
+     * 该方法用于目标推断模式，签名校验失败的候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选普通方法调用指令
+     * @return handler 签名可重定向该调用时返回 `true`
+     */
     private fun canRedirectMethodCall(
         target: MethodNode,
         insn: MethodInsnNode,
@@ -244,6 +288,15 @@ class RedirectInjector(
             }
         }.isSuccess
 
+    /**
+     * 判断 handler 是否兼容候选 `invokedynamic` 调用。
+     *
+     * 该方法用于目标推断模式，签名校验失败的候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param insn 候选 `invokedynamic` 指令
+     * @return handler 签名可重定向该动态调用时返回 `true`
+     */
     private fun canRedirectInvokeDynamicCall(
         target: MethodNode,
         insn: InvokeDynamicInsnNode,
@@ -252,6 +305,14 @@ class RedirectInjector(
             validateInvokeDynamicHandlerSignature(target, insn)
         }.isSuccess
 
+    /**
+     * 解析当前切片在指令数组中的起止范围。
+     *
+     * `from` 边界命中后从下一条指令开始，`to` 边界命中前结束；边界未命中时返回空范围。
+     *
+     * @param insns 目标方法指令数组
+     * @return 左闭右开的指令范围
+     */
     private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
         val startIndex =
             if (hasSliceBoundary(slice.from)) {
@@ -270,10 +331,33 @@ class RedirectInjector(
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
+    /**
+     * 判断切片边界是否已声明目标。
+     *
+     * @param at 切片边界定位点
+     * @return `target` 非空时返回 `true`
+     */
     private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
 
+    /**
+     * 构造位于方法末尾的空切片范围。
+     *
+     * @param insns 目标方法指令数组
+     * @return 左右边界都等于指令数量的空范围
+     */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 
+    /**
+     * 查找切片边界方法调用在指令数组中的位置。
+     *
+     * 当前只支持 `INVOKE` 边界，可匹配普通方法调用或 `invokedynamic` 调用。
+     *
+     * @param insns 目标方法指令数组
+     * @param at 切片边界定位点
+     * @param startIndex 开始查找的指令下标
+     * @return 边界指令下标；未命中时返回 `null`
+     * @throws IllegalArgumentException 边界类型不是 [InjectionPoint.INVOKE] 或目标签名不完整时抛出
+     */
     private fun findSliceBoundaryIndex(
         insns: Array<AbstractInsnNode>,
         at: At,
@@ -310,30 +394,95 @@ class RedirectInjector(
         return null
     }
 
+    /**
+     * 判断当前配置是否按字段读取语义重定向。
+     *
+     * 除显式 [InjectionPoint.FIELD] 外，兼容旧式 `field:desc` 目标格式自动进入字段读取模式。
+     *
+     * @return 当前配置表示字段读取重定向时返回 `true`
+     */
     private fun isFieldReadRedirect(): Boolean =
         injectionPoint == InjectionPoint.FIELD ||
             (redirectTarget.contains(':') && !redirectTarget.contains('('))
 
+    /**
+     * 判断当前配置是否按字段写入语义重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.FIELD_ASSIGN] 时返回 `true`
+     */
     private fun isFieldAssignRedirect(): Boolean = injectionPoint == InjectionPoint.FIELD_ASSIGN
 
+    /**
+     * 判断当前配置是否按 `INSTANCEOF` 结果重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.INSTANCEOF] 时返回 `true`
+     */
     private fun isInstanceofRedirect(): Boolean = injectionPoint == InjectionPoint.INSTANCEOF
 
+    /**
+     * 判断当前配置是否按 `CHECKCAST` 结果重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.CAST] 时返回 `true`
+     */
     private fun isCastRedirect(): Boolean = injectionPoint == InjectionPoint.CAST
 
+    /**
+     * 判断当前配置是否按条件跳转结果重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.JUMP] 时返回 `true`
+     */
     private fun isJumpRedirect(): Boolean = injectionPoint == InjectionPoint.JUMP
 
+    /**
+     * 判断当前配置是否按 switch selector 重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.SWITCH] 时返回 `true`
+     */
     private fun isSwitchRedirect(): Boolean = injectionPoint == InjectionPoint.SWITCH
 
+    /**
+     * 判断当前配置是否按即将抛出的异常对象重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.THROW] 时返回 `true`
+     */
     private fun isThrowRedirect(): Boolean = injectionPoint == InjectionPoint.THROW
 
+    /**
+     * 判断当前配置是否按局部变量读取值重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.LOAD] 时返回 `true`
+     */
     private fun isLoadRedirect(): Boolean = injectionPoint == InjectionPoint.LOAD
 
+    /**
+     * 判断当前配置是否按局部变量待写入值重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.STORE] 时返回 `true`
+     */
     private fun isStoreRedirect(): Boolean = injectionPoint == InjectionPoint.STORE
 
+    /**
+     * 判断当前配置是否按对象构造表达式重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.NEW] 时返回 `true`
+     */
     private fun isNewRedirect(): Boolean = injectionPoint == InjectionPoint.NEW
 
+    /**
+     * 判断当前配置是否按常量加载结果重定向。
+     *
+     * @return 当前定位点为 [InjectionPoint.CONSTANT] 时返回 `true`
+     */
     private fun isConstantRedirect(): Boolean = injectionPoint == InjectionPoint.CONSTANT
 
+    /**
+     * 解析数组访问重定向模式。
+     *
+     * `args` 中声明 `array=get`、`array=set` 或 `array=length` 时进入数组读取、写入或长度重定向。
+     *
+     * @return 数组访问模式；未声明数组模式时返回 `null`
+     * @throws IllegalArgumentException 声明了不支持的数组访问模式时抛出
+     */
     private fun arrayAccessMode(): ArrayAccessMode? {
         val arrayArg = args.firstOrNull { it.trim().startsWith("array=") } ?: return null
         return when (arrayArg.substringAfter('=').trim().lowercase()) {
