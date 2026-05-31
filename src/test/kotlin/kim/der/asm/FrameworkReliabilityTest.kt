@@ -12,6 +12,7 @@ import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.CallbackInfo
+import kim.der.asm.api.annotation.CallbackInfoReturnable
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Invoker
 import kim.der.asm.api.annotation.ModifyArg
@@ -284,6 +285,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun cancellableHeadSupportsCallbackInfoReturnable() {
+        AsmRegistry.register(CancellableHeadCallbackInfoReturnableMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("typed-head", result)
+    }
+
+    @Test
     fun returnInjectionCanReplaceReferenceReturnValueWithNull() {
         AsmRegistry.register(ReturnSetNullMixin::class.java)
 
@@ -293,6 +306,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals(null, result)
+    }
+
+    @Test
+    fun returnInjectionSupportsCallbackInfoReturnable() {
+        AsmRegistry.register(ReturnCallbackInfoReturnableMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("value-typed", result)
     }
 
     @Test
@@ -3511,6 +3536,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("original-wrapped-call", result)
+    }
+
+    @Test
+    fun wrapOperationSupportsKotlinInvokeSyntax() {
+        AsmRegistry.register(WrapOperationInvokeSyntaxMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("original-invoke-call", result)
     }
 
     @Test
@@ -8056,11 +8093,30 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ReturnTarget")
+    object CancellableHeadCallbackInfoReturnableMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.HEAD, cancellable = true)
+        @JvmStatic
+        fun inject(callback: CallbackInfoReturnable<String>) {
+            callback.setReturnValue("typed-head")
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
     object ReturnSetNullMixin {
         @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
         @JvmStatic
         fun inject(callback: CallbackInfo) {
             callback.setReturnValue(null)
+        }
+    }
+
+    @AsmMixin("ReturnTarget")
+    object ReturnCallbackInfoReturnableMixin {
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
+        @JvmStatic
+        fun inject(callback: CallbackInfoReturnable<String>) {
+            val original: String? = callback.getReturnValue()
+            callback.setReturnValue("${original}-typed")
         }
     }
 
@@ -11391,6 +11447,27 @@ class FrameworkReliabilityTest {
             target.length
             value.length
             return operation.call(target, "-wrapped-call")
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object WrapOperationInvokeSyntaxMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String {
+            target.length
+            value.length
+            return operation(target, "-invoke-call")
         }
     }
 

@@ -433,8 +433,9 @@ object RemoveInterfacesMixin
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `inline: Boolean = false` - 是否内联代码
 
-handler 首参可以是 `CallbackInfo`。普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
-指令点注入，可在 `CallbackInfo` 后按顺序接收目标方法参数前缀。
+handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 `CallbackInfoReturnable<T>` 标注返回值类型。
+普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
+指令点注入，可在回调参数后按顺序接收目标方法参数前缀。
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入和 `INVOKE_ASSIGN` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入；`invokedynamic` 调用没有 receiver，handler 参数来自动态调用点描述符。
@@ -448,6 +449,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 `IllegalStateException`，避免配置错误被静默忽略。对于非 `void` 目标方法，可取消回调调用 `setReturnValue(...)`
 会同时标记取消，并提前返回该值。普通 `RETURN` 注入会先把原始返回值预置到 `CallbackInfo`，handler 调用
 `setReturnValue(null)` 时，引用类型返回值会被明确替换为 `null`，不会被当作未修改。
+`CallbackInfoReturnable<T>` 继承自 `CallbackInfo`，可用于相同注入点，主要用于让 handler 签名直接表达返回值类型。
 
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
@@ -1198,6 +1200,42 @@ val callback = CallbackInfo.cancellable()
 
 ```kotlin
 val callback = CallbackInfo.returnable("value")
+```
+
+### CallbackInfoReturnable<T>
+
+带目标返回值类型的回调信息类，用于在非 `void` 目标方法的 `@AsmInject` handler 中读取或替换返回值。
+它继承自 `CallbackInfo`，因此可直接使用 `cancel()`、`isCancelled()`、`getReturnValue()` 与 `setReturnValue(...)`。
+
+#### 构造函数
+
+```kotlin
+CallbackInfoReturnable<T>(returnValue: T? = null, cancellable: Boolean = false)
+```
+
+**参数：**
+
+- `returnValue: T? = null` - 初始返回值；RETURN 注入会在 handler 调用前预置原始返回值
+- `cancellable: Boolean = false` - 是否允许取消目标方法
+
+#### 方法
+
+##### `getTypedReturnValue(): T?`
+
+获取带类级泛型标注的返回值。该方法等价于 `getReturnValue<T>()`，适合调用点缺少类型推断上下文时使用。
+
+**返回值：**
+
+- `T?`: 当前保存的返回值；类型不匹配或值为 `null` 时返回 `null`
+
+**示例：**
+
+```kotlin
+@AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
+fun onReturn(callback: CallbackInfoReturnable<String>) {
+    val original = callback.getTypedReturnValue()
+    callback.setReturnValue("$original patched")
+}
 ```
 
 ### Args

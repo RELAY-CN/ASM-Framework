@@ -7,6 +7,7 @@ package kim.der.asm
 import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.listener.RedirectionListener
+import kim.der.asm.injector.util.AsmMethodCallGenerator
 import java.lang.reflect.Method
 
 /**
@@ -51,12 +52,13 @@ class AsmListener(
         desc: String,
         vararg args: Any?,
     ) {
-        val callback = CallbackInfo()
         val parameters = mutableListOf<Any?>()
 
         // 第一个参数通常是 CallbackInfo（如果方法需要）
         val paramTypes = method.parameterTypes
-        if (paramTypes.isNotEmpty() && paramTypes[0] == CallbackInfo::class.java) {
+        val hasCallbackInfo = paramTypes.isNotEmpty() && AsmMethodCallGenerator.isCallbackInfoType(paramTypes[0])
+        if (hasCallbackInfo) {
+            val callback = createCallbackInfo(paramTypes[0])
             parameters.add(callback)
             // 检查 @AsmInject 注解的 cancellable 属性
             val injectAnnotation = method.getAnnotation(AsmInject::class.java)
@@ -68,7 +70,7 @@ class AsmListener(
 
         // 添加其他参数
         for (i in args.indices) {
-            val argIndex = if (paramTypes.isNotEmpty() && paramTypes[0] == CallbackInfo::class.java) i + 1 else i
+            val argIndex = if (hasCallbackInfo) i + 1 else i
             if (argIndex < paramTypes.size) {
                 parameters.add(args[i])
             }
@@ -80,6 +82,21 @@ class AsmListener(
             throw RuntimeException("Failed to invoke asm method: ${method.name}", e)
         }
     }
+
+    /**
+     * 按 handler 声明的首参类型创建回调对象。
+     *
+     * @param callbackType handler 首参类型，必须是 [CallbackInfo] 或其子类
+     * @return 可传给 handler 的回调对象
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun createCallbackInfo(callbackType: Class<*>): CallbackInfo =
+        callbackType
+            .asSubclass(CallbackInfo::class.java)
+            .getConstructor(Any::class.java, Boolean::class.javaPrimitiveType)
+            .newInstance(null, false)
 
     companion object {
         /**

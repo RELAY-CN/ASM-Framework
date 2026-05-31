@@ -4,6 +4,7 @@
 
 package kim.der.asm.injector.util
 
+import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.data.AsmInfo
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -152,41 +153,75 @@ object AsmMethodCallGenerator {
      * 检查方法是否需要 CallbackInfo 参数。
      *
      * @param asmMethod ASM 方法
-     * @return 首个参数是 [kim.der.asm.api.annotation.CallbackInfo] 时返回 `true`
+     * @return 首个参数是 [CallbackInfo] 或其子类时返回 `true`
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
     fun needsCallbackInfo(asmMethod: Method): Boolean =
         asmMethod.parameterTypes.isNotEmpty() &&
-            asmMethod.parameterTypes[0] == kim.der.asm.api.annotation.CallbackInfo::class.java
+            isCallbackInfoType(asmMethod.parameterTypes[0])
 
     /**
      * 生成创建 CallbackInfo 实例的指令。
      *
      * @param il 指令列表
+     * @param asmMethod ASM 方法；用于按 handler 首参创建 [CallbackInfo] 或其子类
      * @param cancellable 创建的 CallbackInfo 是否允许取消目标方法
      *
      * @author Dr (dr@der.kim)
-     * @date 2025-11-24
+     * @date 2026-05-31
      */
     fun generateCallbackInfoCreation(
         il: InsnList,
+        asmMethod: Method,
         cancellable: Boolean = false,
     ) {
-        il.add(TypeInsnNode(Opcodes.NEW, Type.getInternalName(kim.der.asm.api.annotation.CallbackInfo::class.java)))
+        val callbackType = callbackInfoType(asmMethod)
+        val callbackInternalName = Type.getInternalName(callbackType)
+
+        il.add(TypeInsnNode(Opcodes.NEW, callbackInternalName))
         il.add(InsnNode(Opcodes.DUP))
         il.add(InsnNode(Opcodes.ACONST_NULL))
         il.add(InsnNode(if (cancellable) Opcodes.ICONST_1 else Opcodes.ICONST_0))
         il.add(
             MethodInsnNode(
                 Opcodes.INVOKESPECIAL,
-                Type.getInternalName(kim.der.asm.api.annotation.CallbackInfo::class.java),
+                callbackInternalName,
                 "<init>",
                 "(Ljava/lang/Object;Z)V",
                 false,
             ),
         )
+    }
+
+    /**
+     * 判断类型是否为可作为注入回调首参的类型。
+     *
+     * @param type 待判断类型
+     * @return [CallbackInfo] 或其子类返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    fun isCallbackInfoType(type: Class<*>): Boolean = CallbackInfo::class.java.isAssignableFrom(type)
+
+    /**
+     * 读取 ASM handler 声明的回调首参类型。
+     *
+     * @param asmMethod ASM 方法
+     * @return handler 首参类型；没有回调首参时返回 [CallbackInfo]
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun callbackInfoType(asmMethod: Method): Class<out CallbackInfo> {
+        val firstParameter = asmMethod.parameterTypes.firstOrNull()
+        return if (firstParameter != null && isCallbackInfoType(firstParameter)) {
+            firstParameter.asSubclass(CallbackInfo::class.java)
+        } else {
+            CallbackInfo::class.java
+        }
     }
 
     /**

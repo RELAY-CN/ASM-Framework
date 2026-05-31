@@ -30,7 +30,7 @@ package kim.der.asm.api.annotation
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
-class CallbackInfo
+open class CallbackInfo
     @JvmOverloads
     constructor(
         private var returnValue: Any? = null,

@@ -371,6 +371,21 @@ class Operation<T> private constructor(
     }
 
     /**
+     * 以 Kotlin 函数式语法执行原始操作。
+     *
+     * 该方法完全等价于 [call]，用于让 `@WrapOperation` 与 `@WrapMethod` handler 可以写成
+     * `operation(receiver, arg)` 形式。参数契约、返回值语义和异常语义均与 [call] 保持一致。
+     *
+     * @param args 原始操作参数
+     * @return 原始操作返回值
+     * @throws IllegalArgumentException 参数数量不符合原操作形态时抛出
+     * @throws ReflectiveOperationException 目标方法或字段无法解析，或调用/读取失败时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    operator fun invoke(vararg args: Any?): T = call(*args)
+
+    /**
      * 执行原始 `invokedynamic` 调用点。
      *
      * 该方法通过 bootstrap method 创建 [CallSite]，再调用其 dynamic invoker。

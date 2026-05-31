@@ -49,7 +49,7 @@ class HeadInjector(
 
         var callbackVarIndex: Int? = null
         if (needsCallbackInfo) {
-            AsmMethodCallGenerator.generateCallbackInfoCreation(il, injectAnnotation?.cancellable == true)
+            AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod, injectAnnotation?.cancellable == true)
             callbackVarIndex = allocateLocalVariable(target, Type.getType(CallbackInfo::class.java))
             il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
         }

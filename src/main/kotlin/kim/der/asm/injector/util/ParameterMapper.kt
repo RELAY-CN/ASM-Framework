@@ -53,7 +53,7 @@ object ParameterMapper {
         var targetVarIndex = if (isStatic) 0 else 1
 
         // 第一个参数可能是 CallbackInfo
-        if (skipCallbackInfo && paramTypes.isNotEmpty() && paramTypes[0] == CallbackInfo::class.java) {
+        if (skipCallbackInfo && paramTypes.isNotEmpty() && AsmMethodCallGenerator.isCallbackInfoType(paramTypes[0])) {
             asmParamIndex++
         }
 

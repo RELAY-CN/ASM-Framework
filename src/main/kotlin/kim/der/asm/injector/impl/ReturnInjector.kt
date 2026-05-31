@@ -92,7 +92,7 @@ class ReturnInjector(
                 // 创建 CallbackInfo 实例（如果需要）
                 var callbackVarIndex: Int? = null
                 if (needsCallbackInfo) {
-                    AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+                    AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod)
                     // 存储到局部变量（确保在 returnVarIndex 之后）
                     callbackVarIndex =
                         if (returnVarIndex != null) {

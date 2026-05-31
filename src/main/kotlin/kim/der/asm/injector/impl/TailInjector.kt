@@ -48,7 +48,7 @@ class TailInjector(
 
         var callbackVarIndex: Int? = null
         if (needsCallbackInfo) {
-            AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+            AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod)
             callbackVarIndex = allocateLocalVariable(target, Type.getType(CallbackInfo::class.java))
             il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
         }

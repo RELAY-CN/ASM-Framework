@@ -164,8 +164,9 @@ object LoggingMixin {
 }
 ```
 
-普通 `@AsmInject` handler 首参可以是 `CallbackInfo`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT`、`THROW`
-等指令点注入可在 `CallbackInfo` 后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
+普通 `@AsmInject` handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用带返回值类型标注的
+`CallbackInfoReturnable<T>`。`HEAD`、`TAIL`、`RETURN` 与字段、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT`、`THROW`
+等指令点注入可在回调参数后继续接收目标方法参数前缀。`INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER`
 注入会先接收匹配调用的方法参数前缀，再追加目标方法参数前缀，例如上面的 `message` 来自 `println` 调用点，
 `param` 来自 `process` 目标方法。`INVOKE_ASSIGN` 默认在匹配调用完成后插入 handler；需要调用前注入时使用 `INVOKE`。
 普通 `INVOKE` / `INVOKE_ASSIGN` 也可匹配 `invokedynamic` 调用；动态调用没有 receiver，handler 参数来自动态调用点描述符，
@@ -177,6 +178,8 @@ object LoggingMixin {
 只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
 普通 `RETURN` 注入会把原始返回值预置到 `CallbackInfo`，handler 可调用 `setReturnValue(null)` 把引用类型返回值明确替换为 `null`。
+`CallbackInfoReturnable<T>` 继承自 `CallbackInfo`，可直接使用同一组 `cancel()`、`getReturnValue()` 与 `setReturnValue(...)`
+方法，适合让 handler 签名直接表达目标返回值类型。
 
 当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、switch、常量或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT` 或 `THROW`
 注入限制在一段调用边界内：

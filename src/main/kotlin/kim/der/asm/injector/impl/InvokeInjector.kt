@@ -947,7 +947,7 @@ class InvokeInjector(
             return null
         }
 
-        AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+        AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod)
         val callbackVarIndex = allocateVariableAfterSavedCallState(targetMethod, savedParamTypes, savedParamIndexes, savedInstanceIndex)
         il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
         return callbackVarIndex

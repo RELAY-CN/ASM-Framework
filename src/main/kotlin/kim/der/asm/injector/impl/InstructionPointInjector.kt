@@ -569,7 +569,7 @@ class InstructionPointInjector(
         val il = InsnList()
         val callbackVarIndex =
             if (AsmMethodCallGenerator.needsCallbackInfo(asmMethod)) {
-                AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+                AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod)
                 allocateLocalVariable(target, Type.getType(CallbackInfo::class.java)).also {
                     il.add(VarInsnNode(Opcodes.ASTORE, it))
                 }
@@ -617,7 +617,7 @@ class InstructionPointInjector(
         val il = InsnList()
         val callbackVarIndex =
             if (AsmMethodCallGenerator.needsCallbackInfo(asmMethod)) {
-                AsmMethodCallGenerator.generateCallbackInfoCreation(il)
+                AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod)
                 allocateLocalVariable(target, Type.getType(CallbackInfo::class.java)).also {
                     il.add(VarInsnNode(Opcodes.ASTORE, it))
                 }
