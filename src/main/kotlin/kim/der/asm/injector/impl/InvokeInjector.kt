@@ -249,7 +249,13 @@ class InvokeInjector(
     ): Boolean = requestedOrdinal < 0 || currentOrdinal == requestedOrdinal
 
     /**
-     * 解析目标方法签名
+     * 解析目标方法签名。
+     *
+     * 支持 `owner.name(desc)`、`owner/name(desc)` 与仅方法名加描述符形式；
+     * owner 会统一转换为 JVM internal name。
+     *
+     * @param signature `At.target` 中声明的方法目标
+     * @return owner、方法名与描述符；未声明的部分返回 `null`
      */
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
@@ -283,7 +289,13 @@ class InvokeInjector(
     }
 
     /**
-     * 检查是否匹配目标方法
+     * 判断普通方法调用是否匹配目标方法约束。
+     *
+     * @param insn 候选普通方法调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名
+     * @param targetDesc 目标方法描述符
+     * @return 候选调用满足目标约束时返回 `true`
      */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
@@ -369,7 +381,14 @@ class InvokeInjector(
     }
 
     /**
-     * 在方法调用前注入
+     * 在原调用点前插入 handler 调用。
+     *
+     * 会先把调用点参数和实例 receiver 暂存到局部变量，调用 handler 后再恢复原调用栈，
+     * 保证原方法调用仍按原始参数执行。
+     *
+     * @param instructions 目标方法指令列表
+     * @param callSite 被命中的调用点
+     * @param targetMethod 目标方法
      */
     private fun injectBeforeCall(
         instructions: InsnList,
@@ -428,7 +447,14 @@ class InvokeInjector(
     }
 
     /**
-     * 在方法调用后注入
+     * 在原调用点后插入 handler 调用。
+     *
+     * 对有返回值的调用，会先暂存返回值，执行 handler 后再恢复返回值到栈顶；
+     * 对无返回值的调用，会直接在调用点下一条指令前插入 handler。
+     *
+     * @param instructions 目标方法指令列表
+     * @param callSite 被命中的调用点
+     * @param targetMethod 目标方法
      */
     private fun injectAfterCall(
         instructions: InsnList,
@@ -521,7 +547,15 @@ class InvokeInjector(
     }
 
     /**
-     * 替换调用点
+     * 用 handler 调用替换原调用点。
+     *
+     * 会暂存原调用参数和 receiver，校验 handler 返回值可替代原调用结果，
+     * 再移除原始调用指令。
+     *
+     * @param instructions 目标方法指令列表
+     * @param callSite 被替换的调用点
+     * @param targetMethod 目标方法
+     * @throws IllegalStateException handler 返回值不能替代原调用结果时抛出
      */
     private fun replaceCall(
         instructions: InsnList,
@@ -809,7 +843,13 @@ class InvokeInjector(
     }
 
     /**
-     * 保存参数
+     * 按类型把栈顶调用参数暂存到局部变量槽位。
+     *
+     * 根据 ASM 类型选择 `ISTORE`、`LSTORE`、`FSTORE`、`DSTORE` 或 `ASTORE`。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param paramType 栈顶参数类型
+     * @param varIndex 局部变量槽位
      */
     private fun saveParameter(
         il: InsnList,
@@ -836,7 +876,11 @@ class InvokeInjector(
     }
 
     /**
-     * 保存返回值
+     * 把调用点返回值暂存到局部变量槽位。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param returnType 调用点返回类型
+     * @param varIndex 局部变量槽位
      */
     private fun saveReturnValue(
         il: InsnList,
@@ -847,7 +891,11 @@ class InvokeInjector(
     }
 
     /**
-     * 加载返回值
+     * 从局部变量槽位恢复调用点返回值。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param returnType 调用点返回类型
+     * @param varIndex 局部变量槽位
      */
     private fun loadReturnValue(
         il: InsnList,
@@ -994,7 +1042,14 @@ class InvokeInjector(
     }
 
     /**
-     * 为参数分配局部变量
+     * 为调用点参数和可选 receiver 预留局部变量槽位。
+     *
+     * 返回值是临时区域末尾，用于后续按从右到左的栈顺序递减分配每个参数。
+     *
+     * @param targetMethod 目标方法
+     * @param paramTypes 调用点参数类型
+     * @param reserveInstanceSlot 是否需要为实例 receiver 预留槽位
+     * @return 临时参数区域的末尾槽位
      */
     private fun allocateVariablesForParams(
         targetMethod: MethodNode,
@@ -1010,7 +1065,11 @@ class InvokeInjector(
     }
 
     /**
-     * 为返回值分配局部变量
+     * 为调用点返回值分配局部变量槽位。
+     *
+     * @param targetMethod 目标方法
+     * @param returnType 调用点返回类型
+     * @return 可用于暂存返回值的槽位
      */
     private fun allocateVariableForReturn(
         targetMethod: MethodNode,
