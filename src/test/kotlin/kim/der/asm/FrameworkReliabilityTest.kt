@@ -334,6 +334,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun argsSetAllRejectsMismatchedValueCountWithoutPartialWrite() {
+        val args = Args(arrayOf("old", "value"))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            args.setAll("new")
+        }
+
+        assertEquals("old", args.get<String>(0))
+        assertEquals("value", args.get<String>(1))
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -1348,6 +1360,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("hello joined", result)
+    }
+
+    @Test
+    fun modifyArgsSupportsSetAll() {
+        AsmRegistry.register(ModifyArgsSetAllMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello bulk", result)
     }
 
     @Test
@@ -9079,6 +9103,21 @@ class FrameworkReliabilityTest {
             val joined = args.joinToString(separator = "|")
             args[0] = joined.substringBefore('|').replace("missing", "raw")
             args[1] = "joined"
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsSetAllMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.setAll(args.get<String>(0).replace("missing", "raw"), "bulk")
         }
     }
 

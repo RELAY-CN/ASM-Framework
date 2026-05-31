@@ -10,6 +10,7 @@ package kim.der.asm.api.annotation
  * [ModifyArgs] handler 会接收该容器，用于读取和改写匹配方法调用的整组参数。索引按目标调用
  * 的方法描述符声明顺序计算，不包含实例方法调用的 receiver。
  * Kotlin handler 可用 [get] / [set]，也可用等价的下标语法 `args[index]` 与 `args[index] = value`。
+ * 当需要一次替换整组调用参数时，可使用 [setAll] 保证参数数量匹配后再批量写回。
  * 也可以通过 [size] 属性、`for (value in args)` 或 `joinToString` / `map` 等 [Iterable] 扩展读取参数。
  *
  * ## 类型约束
@@ -74,6 +75,24 @@ class Args(
         value: Any?,
     ) {
         values[index] = value
+    }
+
+    /**
+     * 批量改写整组参数。
+     *
+     * 该方法会先校验 [newValues] 数量必须与当前参数数量一致，再把所有新值写入底层参数数组。
+     * 因此数量不匹配时不会发生部分写入。写入值仍必须与原调用参数类型兼容，类型检查会在后续恢复调用参数时发生。
+     *
+     * @param newValues 新参数组；数量必须等于 [size]
+     * @throws IllegalArgumentException 当 [newValues] 数量与当前参数数量不一致时抛出
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    fun setAll(vararg newValues: Any?) {
+        require(newValues.size == values.size) {
+            "Args.setAll expects ${values.size} value(s), actual ${newValues.size}"
+        }
+        newValues.copyInto(values)
     }
 
     /**

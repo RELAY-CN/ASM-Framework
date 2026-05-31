@@ -1252,6 +1252,7 @@ fun onReturn(callback: CallbackInfoReturnable<String>) {
 
 索引按目标调用描述符中的参数声明顺序计算，不包含实例方法调用的 receiver。构造器调用只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver。
 Kotlin handler 可使用 `args[index]` / `args[index] = value` 下标语法，也可通过 `args.size` 属性读取参数数量。
+需要一次替换整组参数时，可调用 `args.setAll(...)`；该方法会先校验新值数量与参数数量一致，数量不匹配时抛出 `IllegalArgumentException` 且不会部分写入。
 `Args` 实现了 `Iterable<Any?>`，因此支持 `for (value in args)`，也可使用 `joinToString`、`map` 等标准集合扩展。
 
 #### 属性
@@ -1292,6 +1293,18 @@ Kotlin handler 可使用 `args[index]` / `args[index] = value` 下标语法，�
 - `index`: 参数索引，从 0 开始
 - `value`: 新参数值；必须与原调用参数类型兼容
 
+##### `setAll(vararg newValues: Any?)`
+
+批量改写整组参数。该方法会先校验新值数量与当前参数数量一致，再写入底层参数数组；数量不匹配时抛出 `IllegalArgumentException`，并且不会发生部分写入。
+
+**参数：**
+
+- `newValues`: 新参数组；数量必须等于 `args.size`
+
+**异常：**
+
+- `IllegalArgumentException`: 新值数量与当前参数数量不一致
+
 ##### `toArray(): Array<Any?>`
 
 返回底层可变参数数组。该数组主要供注入器生成的字节码读取修改后的参数使用，调用方直接修改它会影响当前容器内容。
@@ -1303,8 +1316,7 @@ Kotlin handler 可使用 `args[index]` / `args[index] = value` 下标语法，�
 fun rewriteArgs(args: Args) {
     check(args.size == 2)
     val oldValues = args.joinToString(separator = "|")
-    args[0] = args.get<String>(0).trim()
-    args[1] = args.get<Int>(1) + oldValues.length
+    args.setAll(args.get<String>(0).trim(), args.get<Int>(1) + oldValues.length)
 }
 ```
 
