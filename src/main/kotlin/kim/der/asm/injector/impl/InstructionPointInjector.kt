@@ -391,6 +391,17 @@ class InstructionPointInjector(
         return index
     }
 
+    /**
+     * 构造当前指令点的候选指令匹配器。
+     *
+     * 匹配器会把 `At.target` 解析为字段、类型、跳转 opcode、常量文本或异常类型约束；
+     * `LOAD` / `STORE` 还会叠加局部变量槽位过滤。
+     *
+     * @param target 注解声明的 `At.target`
+     * @param localVariableIndex `LOAD` / `STORE` 的局部变量槽位过滤
+     * @return 用于筛选候选指令的谓词
+     * @throws IllegalArgumentException 当前指令点不支持声明的目标格式时抛出
+     */
     private fun buildMatcher(
         target: String,
         localVariableIndex: Int?,
@@ -473,6 +484,15 @@ class InstructionPointInjector(
         }
     }
 
+    /**
+     * 解析跳转指令点的 opcode 过滤条件。
+     *
+     * 目标可声明为 JVM 跳转 opcode 数值或名称；空目标表示不按 opcode 过滤。
+     *
+     * @param target `At.target` 中声明的跳转 opcode 目标
+     * @return 解析出的跳转 opcode；未声明目标时返回 `null`
+     * @throws IllegalArgumentException 目标不是受支持的跳转 opcode 时抛出
+     */
     private fun parseJumpOpcodeTarget(target: String): Int? {
         if (target.isEmpty()) {
             return null
@@ -490,11 +510,26 @@ class InstructionPointInjector(
             ?: throw IllegalArgumentException("@AsmInject JUMP target must be a jump opcode name or number: $target")
     }
 
+    /**
+     * 判断局部变量指令是否满足槽位过滤条件。
+     *
+     * @param insn 候选局部变量读写指令
+     * @param requestedIndex 注解声明的槽位过滤；为 `null` 时不限制槽位
+     * @return 候选指令槽位满足过滤条件时返回 `true`
+     */
     private fun matchesLocalVariableIndex(
         insn: VarInsnNode,
         requestedIndex: Int?,
     ): Boolean = requestedIndex == null || insn.`var` == requestedIndex
 
+    /**
+     * 推断直接抛出的异常构造类型。
+     *
+     * 仅在 `ATHROW` 前一条真实指令是构造器调用时返回 owner，用于按 `At.target` 匹配 `THROW`。
+     *
+     * @param throwInsn 候选 `ATHROW` 指令
+     * @return 直接构造并抛出的异常 internal name；无法确认时返回 `null`
+     */
     private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
         val previous = previousRealInstruction(throwInsn)
         if (previous is MethodInsnNode &&
@@ -506,6 +541,14 @@ class InstructionPointInjector(
         return null
     }
 
+    /**
+     * 查找上一条真实字节码指令。
+     *
+     * 会跳过 label、line number、frame 等 `opcode < 0` 的伪节点。
+     *
+     * @param insn 起始指令节点
+     * @return 上一条真实指令；不存在时返回 `null`
+     */
     private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var current = insn.previous
         while (current != null && current.opcode < 0) {
