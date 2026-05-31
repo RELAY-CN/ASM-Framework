@@ -522,13 +522,60 @@ annotation class ModifyArgs(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class ModifyReceiver(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、receiver 操作点和签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * receiver 改写位置。
+     *
+     * 支持实例方法调用、实例字段读取和实例字段写入，不支持静态调用、构造器或静态字段。
+     */
     val at: At = At(value = InjectionPoint.INVOKE),
+
+    /**
+     * 匹配 receiver 操作点序号过滤。
+     *
+     * `-1` 表示修改所有匹配点；`0` 及以上表示只修改第 N 个匹配点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * receiver 操作点查找切片。
+     *
+     * 候选操作会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小 receiver 修改数。
+     *
+     * 大于 0 时实际修改数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望 receiver 修改数。
+     *
+     * 非默认值且实际修改数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大 receiver 修改数。
+     *
+     * 大于等于 0 时实际修改数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -624,13 +671,60 @@ annotation class ModifyReceiver(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class WrapOperation(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、操作点和 [Operation] 签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 要包裹的原始操作定位。
+     *
+     * 支持调用、字段、数组、构造、类型、局部变量、跳转、switch、常量与抛异常等操作点。
+     */
     val at: At = At(value = InjectionPoint.INVOKE),
+
+    /**
+     * 匹配操作点序号过滤。
+     *
+     * `-1` 表示包裹所有匹配点；`0` 及以上表示只包裹第 N 个匹配点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 操作点查找切片。
+     *
+     * 候选操作会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小操作包裹数。
+     *
+     * 大于 0 时实际包裹数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望操作包裹数。
+     *
+     * 非默认值且实际包裹数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大操作包裹数。
+     *
+     * 大于等于 0 时实际包裹数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -665,10 +759,39 @@ annotation class WrapOperation(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class WrapMethod(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称与目标方法签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 最小整方法包裹数。
+     *
+     * 大于 0 时实际包裹数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望整方法包裹数。
+     *
+     * 非默认值且实际包裹数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大整方法包裹数。
+     *
+     * 大于等于 0 时实际包裹数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
@@ -730,13 +853,60 @@ annotation class WrapMethod(
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.RUNTIME)
 annotation class WrapWithCondition(
+    /**
+     * 目标方法 JVM 签名。
+     *
+     * 为空时按 handler 名称、条件包裹点和 boolean handler 签名兼容性推断唯一目标方法。
+     */
     val method: String = "",
+
+    /**
+     * 条件包裹操作点定位。
+     *
+     * 支持 `void` 调用、字段写入、数组元素写入、条件跳转和抛异常点。
+     */
     val at: At = At(value = InjectionPoint.INVOKE),
+
+    /**
+     * 匹配条件包裹点序号过滤。
+     *
+     * `-1` 表示包裹所有匹配点；`0` 及以上表示只包裹第 N 个匹配点。
+     */
     val ordinal: Int = -1,
+
+    /**
+     * 条件包裹点查找切片。
+     *
+     * 候选点会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     */
     val slice: Slice = Slice(),
+
+    /**
+     * 最小条件包裹数。
+     *
+     * 大于 0 时实际包裹数不足会使转换失败。
+     */
     val require: Int = 0,
+
+    /**
+     * 期望条件包裹数。
+     *
+     * 非默认值且实际包裹数不一致时只输出警告，不阻断转换。
+     */
     val expect: Int = 1,
+
+    /**
+     * 最大条件包裹数。
+     *
+     * 大于等于 0 时实际包裹数不能超过该值。
+     */
     val allow: Int = -1,
+
+    /**
+     * 是否启用名称重映射。
+     *
+     * 当前转换流程暂未消费该字段，仅作为兼容 Mixin 风格配置的元数据保留。
+     */
     val remap: Boolean = false,
 )
 
