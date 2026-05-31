@@ -2034,6 +2034,16 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 构造局部变量值或常量值重定向指令序列。
+     *
+     * 序列会先暂存原值，调用 handler 取得替代值，并在需要时补充返回值到原值类型的 `CHECKCAST`。
+     *
+     * @param target 目标方法
+     * @param valueType 原局部变量值或常量值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可插入到原值消费位置附近的指令列表
+     */
     private fun buildLocalValueRedirect(
         target: MethodNode,
         valueType: Type,
@@ -2056,6 +2066,17 @@ class RedirectInjector(
         return il
     }
 
+    /**
+     * 校验普通方法调用重定向的 handler 签名。
+     *
+     * handler 必须是静态方法、`@JvmStatic` 方法或 Kotlin `object` 实例方法；
+     * 参数前缀需要兼容原调用栈参数，额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被重定向的普通方法调用指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         originalInsn: MethodInsnNode,
@@ -2095,6 +2116,17 @@ class RedirectInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验构造器重定向的 handler 签名。
+     *
+     * handler 前缀参数需要兼容原构造器参数，返回值需要能替代构造出的对象类型；
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被重定向的构造器调用指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或构造结果返回值不兼容时抛出
+     */
     private fun validateConstructorHandlerSignature(
         target: MethodNode,
         originalInsn: MethodInsnNode,
@@ -2136,6 +2168,17 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 `invokedynamic` 重定向的 handler 签名。
+     *
+     * handler 前缀参数需要兼容动态调用点描述符参数，返回值需要能替代动态调用点返回值；
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被重定向的 `invokedynamic` 指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateInvokeDynamicHandlerSignature(
         target: MethodNode,
         originalInsn: InvokeDynamicInsnNode,
@@ -2178,6 +2221,17 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 handler 追加接收的目标方法参数前缀。
+     *
+     * [stackParamCount] 之后的 handler 参数会按顺序映射到目标方法参数；请求数量不能超过目标方法参数数量。
+     *
+     * @param target 目标方法
+     * @param actualParams handler 实际声明的参数类型
+     * @param stackParamCount handler 前缀中已经由原栈值提供的参数数量
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException 追加参数数量过多或类型不兼容时抛出
+     */
     private fun validateTargetMethodParameters(
         target: MethodNode,
         actualParams: Array<Type>,
@@ -2204,6 +2258,17 @@ class RedirectInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 校验字段读取重定向的 handler 签名。
+     *
+     * handler 前缀参数需要兼容原字段读取所需的 owner 参数，返回值需要能替代字段值；
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被重定向的字段读取指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateFieldHandlerSignature(
         target: MethodNode,
         originalInsn: FieldInsnNode,
