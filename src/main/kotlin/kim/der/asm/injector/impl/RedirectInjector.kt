@@ -2823,6 +2823,15 @@ class RedirectInjector(
         return null
     }
 
+    /**
+     * 解析局部变量槽位过滤条件。
+     *
+     * 支持在 `At.args` 中使用 `index=<n>` 或 `var=<n>`，并限制同一个注入点只能声明一个槽位过滤条件。
+     *
+     * @param pointName 当前重定向点名称，用于错误信息
+     * @return 指定的局部变量槽位；未声明过滤条件时返回 `null`
+     * @throws IllegalArgumentException 槽位不是整数、为负数或重复声明时抛出
+     */
     private fun parseLocalVariableIndex(pointName: String): Int? {
         val values =
             args.mapNotNull { arg ->
@@ -2852,6 +2861,16 @@ class RedirectInjector(
         return index
     }
 
+    /**
+     * 读取局部变量或常量重定向 handler 的原值参数类型。
+     *
+     * `LOAD`、`STORE` 与 `CONSTANT` handler 的首参必须接收被替换的原始值，
+     * 因此这里会在缺少首参时立即失败。
+     *
+     * @param pointName 当前重定向点名称，用于错误信息
+     * @return handler 首参声明的 ASM 类型
+     * @throws IllegalArgumentException handler 没有声明原值参数时抛出
+     */
     private fun requireLocalHandlerValueType(pointName: String): Type {
         val handlerParams = Type.getArgumentTypes(asmMethod)
         if (handlerParams.isEmpty()) {
@@ -2862,6 +2881,15 @@ class RedirectInjector(
         return handlerParams[0]
     }
 
+    /**
+     * 快速判断局部变量 handler 是否可处理指定原值类型。
+     *
+     * 该检查只校验首参和返回值是否兼容，不校验追加的目标方法参数前缀；
+     * 完整签名校验由 [validateLocalHandlerSignature] 执行。
+     *
+     * @param valueType 候选局部变量值类型
+     * @return handler 首参可接收且返回值可替代原值时返回 `true`
+     */
     private fun isLocalHandlerCompatible(valueType: Type): Boolean {
         val handlerParams = Type.getArgumentTypes(asmMethod)
         if (handlerParams.isEmpty() || !isHandlerParameterCompatible(valueType, handlerParams[0])) {
@@ -2870,6 +2898,15 @@ class RedirectInjector(
         return isReturnCompatible(valueType, Type.getReturnType(asmMethod))
     }
 
+    /**
+     * 判断常量重定向 handler 是否可处理指定常量类型。
+     *
+     * 通过复用完整局部值签名校验并吞掉异常，供候选常量筛选阶段使用。
+     *
+     * @param target 当前目标方法
+     * @param valueType 候选常量值类型
+     * @return handler 签名兼容该常量类型时返回 `true`
+     */
     private fun isConstantHandlerCompatible(
         target: MethodNode,
         valueType: Type,
@@ -2878,6 +2915,17 @@ class RedirectInjector(
             validateLocalHandlerSignature(target, valueType, "CONSTANT")
         }.isSuccess
 
+    /**
+     * 在按槽位过滤 `LOAD` / `STORE` 时尝试推断更精确的引用类型。
+     *
+     * 基础字节码指令只能区分 `ALOAD` / `ASTORE`，无法携带具体引用类型；
+     * 该方法会依次参考方法入口参数、调试局部变量表以及同槽位的相邻使用场景。
+     *
+     * @param target 当前目标方法
+     * @param index 局部变量槽位
+     * @param fallbackType handler 首参声明的兜底类型
+     * @return 推断出的引用类型；无法安全推断或兜底类型不是引用类型时返回 `null`
+     */
     private fun resolveIndexedLocalValueType(
         target: MethodNode,
         index: Int,
@@ -2904,6 +2952,14 @@ class RedirectInjector(
         return referencedTypeFromSlotInstructions(target, index, fallbackType)
     }
 
+    /**
+     * 收集目标方法入口参数占用的局部变量槽位。
+     *
+     * 实例方法会跳过 slot 0 的 `this`，并按 JVM 类型宽度计算 `long` / `double` 的双槽位占用。
+     *
+     * @param target 当前目标方法
+     * @return 方法参数对应的槽位与类型列表
+     */
     private fun collectHeadParameters(target: MethodNode): List<LocalSlotType> {
         val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
         var slot = if (isStatic) 0 else 1
@@ -2915,6 +2971,16 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 根据同一槽位的引用读写指令推断局部变量类型。
+     *
+     * 仅检查 `ALOAD` / `ASTORE`，并要求推断结果能被 handler 首参兼容接收。
+     *
+     * @param target 当前目标方法
+     * @param index 局部变量槽位
+     * @param fallbackType handler 首参声明的兜底类型
+     * @return 第一个可兼容的推断引用类型；没有可靠线索时返回 `null`
+     */
     private fun referencedTypeFromSlotInstructions(
         target: MethodNode,
         index: Int,
@@ -2927,6 +2993,16 @@ class RedirectInjector(
             .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
             .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
 
+    /**
+     * 从局部变量读写指令周围的消费或生产语境推断引用类型。
+     *
+     * `ASTORE` 会优先读取前置 `CHECKCAST` 或字符串常量线索，再向后寻找下一次 `ALOAD` 的消费方；
+     * `ALOAD` 则根据后续实例方法、实例字段、`CHECKCAST` 或 `ARETURN` 推断类型。
+     *
+     * @param target 当前目标方法
+     * @param insn 候选 `ALOAD` 或 `ASTORE` 指令
+     * @return 推断出的引用类型；语境不足时返回 `null`
+     */
     private fun inferReferenceTypeAroundSlotInstruction(
         target: MethodNode,
         insn: VarInsnNode,
@@ -2977,6 +3053,15 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 从一次存储后的下一次同槽位读取推断引用类型。
+     *
+     * 若同槽位在被读取前再次写入，则认为当前存储值已经失效，不再跨写入推断。
+     *
+     * @param target 当前目标方法
+     * @param storeInsn 当前 `ASTORE` 指令
+     * @return 下一次同槽位 `ALOAD` 消费方推断出的引用类型；无法确认时返回 `null`
+     */
     private fun inferReferenceTypeFromNextLoadConsumer(
         target: MethodNode,
         storeInsn: VarInsnNode,
