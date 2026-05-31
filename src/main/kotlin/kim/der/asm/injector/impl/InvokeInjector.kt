@@ -39,6 +39,13 @@ class InvokeInjector(
     asmInfo: AsmInfo,
     private val injectionPoint: InjectionPoint = InjectionPoint.INVOKE,
 ) : AbstractAsmInjector(method, asmInfo) {
+    /**
+     * 被 `INVOKE` / `INVOKE_ASSIGN` 匹配到的调用点信息。
+     *
+     * @property insn 原始方法调用或 `invokedynamic` 指令
+     * @property desc 调用点方法描述符
+     * @property hasReceiver 调用栈中是否包含实例 receiver
+     */
     private data class CallSite(
         val insn: AbstractInsnNode,
         val desc: String,
@@ -58,6 +65,17 @@ class InvokeInjector(
      */
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
+    /**
+     * 在目标方法中执行调用点注入并返回命中数量。
+     *
+     * 会解析 `@AsmInject.at.target` 为目标调用签名，并按 `Slice` 与 `ordinal` 限制候选调用点。
+     * `INVOKE_ASSIGN` 的默认 [Shift.BEFORE] 会转为调用完成后的注入语义。
+     *
+     * @param target 目标方法
+     * @return 实际插入或替换的调用点数量
+     * @throws IllegalArgumentException 目标调用签名不完整时抛出
+     * @throws IllegalStateException handler 参数、返回值或切片边界不兼容时抛出
+     */
     override fun injectCount(target: MethodNode): Int {
         // 从 @AsmInject 注解中获取 @At 信息
         val injectAnnotation =
@@ -124,6 +142,16 @@ class InvokeInjector(
         return injectionCount
     }
 
+    /**
+     * 解析调用点候选扫描范围。
+     *
+     * `from` 边界命中后从下一条指令开始扫描，`to` 边界命中前结束扫描；
+     * 任一边界找不到时返回空范围。
+     *
+     * @param insns 目标方法指令快照
+     * @param slice 注解声明的切片范围
+     * @return 左闭右开的候选扫描下标范围
+     */
     private fun resolveSliceRange(
         insns: Array<AbstractInsnNode>,
         slice: Slice,
@@ -145,10 +173,34 @@ class InvokeInjector(
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
+    /**
+     * 判断切片边界是否声明了可匹配目标。
+     *
+     * @param at 切片边界注入点
+     * @return 边界 `target` 非空时返回 `true`
+     */
     private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
 
+    /**
+     * 构造空切片范围。
+     *
+     * @param insns 目标方法指令快照
+     * @return 位于指令末尾的空范围
+     */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 
+    /**
+     * 查找 `Slice` 边界调用点下标。
+     *
+     * 当前调用点注入只支持以 [InjectionPoint.INVOKE] 作为切片边界，
+     * 边界可匹配普通方法调用、构造器调用或 `invokedynamic`。
+     *
+     * @param insns 目标方法指令快照
+     * @param at 切片边界声明
+     * @param startIndex 起始扫描下标
+     * @return 边界命中的指令下标；未找到时返回 `null`
+     * @throws IllegalArgumentException 边界不是 `INVOKE` 或目标签名不完整时抛出
+     */
     private fun findSliceBoundaryIndex(
         insns: Array<AbstractInsnNode>,
         at: At,
@@ -182,6 +234,15 @@ class InvokeInjector(
         return null
     }
 
+    /**
+     * 判断当前匹配序号是否满足 `ordinal` 过滤。
+     *
+     * 负数表示不限制序号，否则只允许指定的第 N 个候选命中。
+     *
+     * @param currentOrdinal 当前候选在匹配集合中的序号
+     * @param requestedOrdinal 注解声明的目标序号
+     * @return 当前候选应被注入时返回 `true`
+     */
     private fun matchesOrdinal(
         currentOrdinal: Int,
         requestedOrdinal: Int,
@@ -248,6 +309,17 @@ class InvokeInjector(
         return true
     }
 
+    /**
+     * 将候选指令匹配为调用点。
+     *
+     * 普通方法调用会保留是否携带 receiver 的信息，`invokedynamic` 永远不携带 receiver。
+     *
+     * @param insn 候选指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名或动态调用名
+     * @param targetDesc 目标方法描述符
+     * @return 匹配的调用点信息；不匹配时返回 `null`
+     */
     private fun matchCallSite(
         insn: AbstractInsnNode,
         targetOwner: String?,
@@ -270,6 +342,17 @@ class InvokeInjector(
             else -> null
         }
 
+    /**
+     * 判断 `invokedynamic` 调用是否匹配目标方法约束。
+     *
+     * owner 约束会匹配 bootstrap method owner，名称约束可匹配动态调用名或 bootstrap method 名。
+     *
+     * @param insn 候选 `invokedynamic` 调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 bootstrap owner
+     * @param targetName 目标动态调用名或 bootstrap method 名
+     * @param targetDesc 目标动态调用描述符
+     * @return 候选动态调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetInvokeDynamic(
         insn: InvokeDynamicInsnNode,
         targetOwner: String?,
