@@ -532,7 +532,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
-`@ModifyArgs` handler 的第一个参数必须是 `Args`，并返回 `Unit` / `void`。`Args` 按目标调用描述符的参数顺序保存参数，不包含实例方法 receiver；构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。可用 `args.get<T>(index)` 读取参数，用 `args.set(index, value)` 写回兼容类型的新值。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 调用点、handler `Args` 首参、`Unit` 返回类型、后续目标方法参数前缀和实际兼容调用点筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。省略 `at.target` 时，框架会扫描普通方法调用、构造器调用或 `invokedynamic` 调用；若同一目标方法内存在多个兼容候选，应使用 `ordinal`、`slice`、`require` / `allow` 或显式 `at.target` 收窄。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyArgs` handler 的第一个参数必须是 `Args`，并返回 `Unit` / `void`。`Args` 按目标调用描述符的参数顺序保存参数，不包含实例方法 receiver；构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。可用 `args.get<T>(index)` 或 `args[index]` 读取参数，用 `args.set(index, value)` 或 `args[index] = value` 写回兼容类型的新值；Kotlin handler 也可用 `args.size` 读取参数数量，或通过 `for (value in args)` 遍历当前参数。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 调用点、handler `Args` 首参、`Unit` 返回类型、后续目标方法参数前缀和实际兼容调用点筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。省略 `at.target` 时，框架会扫描普通方法调用、构造器调用或 `invokedynamic` 调用；若同一目标方法内存在多个兼容候选，应使用 `ordinal`、`slice`、`require` / `allow` 或显式 `at.target` 收窄。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `@ModifyArgs` 会统计实际写入参数组修改逻辑的调用点数量。显式设置 `require` / `allow` / 非默认 `expect`
 时按实际参数组修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
@@ -1243,6 +1243,13 @@ fun onReturn(callback: CallbackInfoReturnable<String>) {
 `Args` 是 `@ModifyArgs` handler 接收的调用参数容器，用于读取和改写匹配方法调用、构造器调用或 `invokedynamic` 调用的整组参数。
 
 索引按目标调用描述符中的参数声明顺序计算，不包含实例方法调用的 receiver。构造器调用只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver。
+Kotlin handler 可使用 `args[index]` / `args[index] = value` 下标语法，也可通过 `args.size` 属性读取参数数量，并用 `for (value in args)` 遍历当前参数。
+
+#### 属性
+
+##### `size: Int`
+
+当前调用点的方法参数数量，等价于 `size()`。
 
 #### 方法
 
@@ -1285,8 +1292,13 @@ fun onReturn(callback: CallbackInfoReturnable<String>) {
 ```kotlin
 @ModifyArgs(method = "target()V", at = At(value = InjectionPoint.INVOKE, target = "join(Ljava/lang/String;I)V"))
 fun rewriteArgs(args: Args) {
-    args.set(0, args.get<String>(0).trim())
-    args.set(1, args.get<Int>(1) + 1)
+    check(args.size == 2)
+    val oldValues = mutableListOf<String>()
+    for (value in args) {
+        oldValues += value.toString()
+    }
+    args[0] = args.get<String>(0).trim()
+    args[1] = args.get<Int>(1) + oldValues.size
 }
 ```
 

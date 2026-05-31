@@ -1314,6 +1314,18 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyArgsSupportsKotlinSizePropertyAndIteration() {
+        AsmRegistry.register(ModifyArgsIterationMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello iterated", result)
+    }
+
+    @Test
     fun modifyArgsAtInvokeInfersCallTargetByHandlerSignature() {
         AsmRegistry.register(InferredInvokeModifyArgsMixin::class.java)
 
@@ -9004,6 +9016,27 @@ class FrameworkReliabilityTest {
             val needle: String = args[0]
             args[0] = needle.replace("missing", "raw")
             args[1] = "indexed"
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsIterationMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            check(args.size == 2)
+            val values = mutableListOf<String>()
+            for (value in args) {
+                values += value.toString()
+            }
+            args[0] = values[0].replace("missing", "raw")
+            args[1] = "iterated"
         }
     }
 
