@@ -1474,10 +1474,31 @@ class WrapWithConditionInjector(
             Opcodes.INVOKEVIRTUAL
         }
 
+    /**
+     * 判断 handler 是否为静态方法。
+     *
+     * @return handler 带有 `static` 修饰符时返回 `true`
+     */
     private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
 
+    /**
+     * 判断当前命中序号是否满足注解声明的 ordinal 过滤。
+     *
+     * 负数 ordinal 表示不按序号过滤。
+     *
+     * @param currentOrdinal 当前候选点在同类注入点中的命中序号
+     * @return 当前候选点应被处理时返回 `true`
+     */
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
+    /**
+     * 解析当前切片在指令数组中的起止范围。
+     *
+     * `from` 边界命中后从下一条指令开始，`to` 边界命中前结束；边界未命中时返回空范围。
+     *
+     * @param insns 目标方法指令数组
+     * @return 左闭右开的指令范围
+     */
     private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
         val startIndex =
             if (hasSliceBoundary(slice.from)) {
@@ -1496,10 +1517,33 @@ class WrapWithConditionInjector(
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
+    /**
+     * 判断切片边界是否已声明目标。
+     *
+     * @param at 切片边界定位点
+     * @return `target` 非空时返回 `true`
+     */
     private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
 
+    /**
+     * 构造位于方法末尾的空切片范围。
+     *
+     * @param insns 目标方法指令数组
+     * @return 左右边界都等于指令数量的空范围
+     */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 
+    /**
+     * 查找切片边界方法调用在指令数组中的位置。
+     *
+     * 当前只支持 `INVOKE` 边界，可匹配普通方法调用或 `invokedynamic` 调用。
+     *
+     * @param insns 目标方法指令数组
+     * @param at 切片边界定位点
+     * @param startIndex 开始查找的指令下标
+     * @return 边界指令下标；未命中时返回 `null`
+     * @throws IllegalArgumentException 边界类型不是 [InjectionPoint.INVOKE] 或目标签名不完整时抛出
+     */
     private fun findSliceBoundaryIndex(
         insns: Array<AbstractInsnNode>,
         at: At,
@@ -1536,6 +1580,15 @@ class WrapWithConditionInjector(
         return null
     }
 
+    /**
+     * 解析方法目标签名。
+     *
+     * 支持 `owner.name(desc)`、`owner/name(desc)`、`name(desc)` 与仅方法名形式；
+     * owner 会统一转换为 JVM internal name。
+     *
+     * @param signature `At.target` 中声明的方法目标
+     * @return owner、name 与 descriptor；未声明的部分返回 `null`
+     */
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
             return Triple(null, null, null)
@@ -1563,6 +1616,15 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 判断普通方法调用是否匹配目标方法约束。
+     *
+     * @param insn 候选普通方法调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名
+     * @param targetDesc 目标方法描述符；为 `null` 时不限制描述符
+     * @return 候选调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -1578,6 +1640,17 @@ class WrapWithConditionInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 判断 `invokedynamic` 调用是否匹配目标方法约束。
+     *
+     * owner 约束会匹配 bootstrap method owner，名称约束可匹配动态调用名或 bootstrap method 名。
+     *
+     * @param insn 候选 `invokedynamic` 调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 bootstrap owner
+     * @param targetName 目标调用名或 bootstrap method 名
+     * @param targetDesc 目标动态调用描述符；为 `null` 时不限制描述符
+     * @return 候选动态调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetInvokeDynamic(
         insn: InvokeDynamicInsnNode,
         targetOwner: String?,
@@ -1593,6 +1666,15 @@ class WrapWithConditionInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 解析字段目标签名。
+     *
+     * 支持 `owner.name:desc`、`owner/name:desc`、`name:desc` 与仅字段名形式；
+     * owner 会统一转换为 JVM internal name，空签名表示不限制字段。
+     *
+     * @param signature `At.target` 中声明的字段目标
+     * @return 解析后的字段目标约束
+     */
     private fun parseFieldTarget(signature: String): FieldTarget {
         if (signature.isEmpty()) {
             return FieldTarget(null, null, null)
@@ -1616,6 +1698,13 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 判断字段指令是否匹配字段目标约束。
+     *
+     * @param insn 候选字段指令
+     * @param target 字段目标约束
+     * @return 候选字段满足 owner、name 与 descriptor 约束时返回 `true`
+     */
     private fun matchesTargetField(
         insn: FieldInsnNode,
         target: FieldTarget,
@@ -1629,6 +1718,14 @@ class WrapWithConditionInjector(
         return target.desc == null || insn.desc == target.desc
     }
 
+    /**
+     * 计算目标方法中可用于新增临时变量的下一个局部变量槽位。
+     *
+     * 结果会综合方法参数、LocalVariableTable 与已有变量访问指令，避免覆盖现有局部变量。
+     *
+     * @param target 目标方法
+     * @return 可安全分配给新增临时变量的起始槽位
+     */
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
@@ -1650,15 +1747,36 @@ class WrapWithConditionInjector(
         return maxIndex
     }
 
+    /**
+     * 字段目标约束。
+     *
+     * @property owner 字段 owner 的 JVM internal name；为 `null` 时不限制 owner
+     * @property name 字段名；为 `null` 时不限制名称
+     * @property desc 字段描述符；为 `null` 时不限制描述符
+     */
     private data class FieldTarget(
         val owner: String?,
         val name: String?,
         val desc: String?,
     )
 
+    /**
+     * WrapWithCondition 注入器使用的 opcode 集合与助记名索引。
+     */
     private companion object {
+        /**
+         * 可作为数组字段来源或字段写入匹配辅助的字段读取 opcode。
+         */
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+
+        /**
+         * 可被 `FIELD_ASSIGN` 条件包裹的字段写入 opcode。
+         */
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+
+        /**
+         * 可被数组元素写入条件包裹的数组写入 opcode。
+         */
         private val ARRAY_WRITE_OPS = setOf(
             Opcodes.IASTORE,
             Opcodes.LASTORE,
@@ -1669,6 +1787,10 @@ class WrapWithConditionInjector(
             Opcodes.CASTORE,
             Opcodes.SASTORE,
         )
+
+        /**
+         * JUMP 定位点可识别的 JVM 跳转 opcode。
+         */
         private val JUMP_OPS = setOf(
             Opcodes.IFEQ,
             Opcodes.IFNE,
@@ -1689,7 +1811,15 @@ class WrapWithConditionInjector(
             Opcodes.IFNULL,
             Opcodes.IFNONNULL,
         )
+
+        /**
+         * 可实际执行条件包裹的条件跳转 opcode。
+         */
         private val CONDITIONAL_JUMP_OPS = JUMP_OPS - setOf(Opcodes.GOTO, Opcodes.JSR)
+
+        /**
+         * JUMP 目标助记名到 opcode 的映射。
+         */
         private val JUMP_OPCODE_NAMES =
             mapOf(
                 "IFEQ" to Opcodes.IFEQ,
