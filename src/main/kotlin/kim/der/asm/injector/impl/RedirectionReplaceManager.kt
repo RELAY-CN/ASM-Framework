@@ -2,15 +2,17 @@
  * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
-package kim.der.asm.api.replace
+package kim.der.asm.injector.impl
 
+import kim.der.asm.api.replace.RedirectionReplace
 import java.util.function.Supplier
 
 /**
- * 重定向替换管理器。
+ * 内部重定向替换管理器。
  *
  * 管理器在 [RedirectionReplace] 的基础上增加按调用描述符查找替换实现的能力。
- * 调用方可提供 `fallback`，用于在管理器没有显式注册替换器时延迟创建默认替换逻辑。
+ * 该接口仅服务 [RedirectionReplaceApi] 和默认重定向实现，不作为用户扩展 API 暴露。
+ * 内部调用方可提供 `fallback`，用于在管理器没有显式注册替换器时延迟创建默认替换逻辑。
  *
  * ## 设计约束
  *
@@ -19,7 +21,7 @@ import java.util.function.Supplier
  * 直接使用调用方传入的 fallback。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-11-24
+ * @date 2026-05-31
  */
 interface RedirectionReplaceManager : RedirectionReplace {
     /**

@@ -108,6 +108,23 @@ class FrameworkReliabilityTest {
             }
 
         assertEquals(true, "package kim.der.asm.injector.impl" in apiSource.second)
+
+        val apiReplaceFiles =
+            sources
+                .map { (path, _) -> path }
+                .filter { path -> path.startsWith(sourceRoot.resolve(Path.of("kim", "der", "asm", "api", "replace"))) }
+                .map { path -> path.fileName.toString() }
+                .sorted()
+
+        assertEquals(listOf("RedirectionReplace.kt"), apiReplaceFiles)
+
+        val managerSource =
+            sources.single { (path, _) ->
+                path.endsWith(Path.of("kim", "der", "asm", "injector", "impl", "RedirectionReplaceManager.kt"))
+            }
+
+        assertEquals(true, "package kim.der.asm.injector.impl" in managerSource.second)
+        assertEquals(emptyList<String>(), sources.filter { (_, text) -> "kim.der.asm.api.replace.RedirectionReplaceManager" in text }.map { (path, _) -> path.toString() })
     }
 
     @Test

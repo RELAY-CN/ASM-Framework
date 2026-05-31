@@ -5,7 +5,6 @@
 package kim.der.asm.injector.impl
 
 import kim.der.asm.api.replace.RedirectionReplace
-import kim.der.asm.api.replace.RedirectionReplaceManager
 
 /**
  * 类型转换默认替换器。

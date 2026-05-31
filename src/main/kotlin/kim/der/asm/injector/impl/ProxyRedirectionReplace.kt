@@ -5,7 +5,6 @@
 package kim.der.asm.injector.impl
 
 import kim.der.asm.api.replace.RedirectionReplace
-import kim.der.asm.api.replace.RedirectionReplaceManager
 import kim.der.asm.utils.DescriptionUtil.getDesc
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
