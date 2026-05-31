@@ -86,6 +86,16 @@ class ModifyArgInjector(
         return if (modifyParameterAtMethodStart(target, paramType, argIndex)) 1 else 0
     }
 
+    /**
+     * 修改匹配调用点的指定参数并返回实际改写数量。
+     *
+     * `At.target` 为空时会按 handler 签名推断兼容调用点与参数；显式声明目标时先按调用点匹配，
+     * 再按 [argIndex] 或唯一兼容参数选择要改写的调用参数。
+     *
+     * @param target 目标方法
+     * @return 实际插入调用参数改写逻辑的调用点数量
+     * @throws IllegalArgumentException 目标签名不完整、参数索引非法或 handler 签名不兼容时抛出
+     */
     private fun modifyCallArgumentCount(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
@@ -139,12 +149,29 @@ class ModifyArgInjector(
         return injectionCount
     }
 
+    /**
+     * 选中的调用点参数及其 handler 附加参数需求。
+     *
+     * @property index 调用点参数下标
+     * @property type 调用点参数类型
+     * @property targetParamCount handler 追加接收的目标方法参数数量
+     */
     private data class CallArgument(
         val index: Int,
         val type: Type,
         val targetParamCount: Int,
     )
 
+    /**
+     * 在显式匹配调用点后解析要改写的调用参数。
+     *
+     * [argIndex] 非负时直接选择对应参数；为负数时要求 handler 签名只能兼容唯一一个调用参数。
+     *
+     * @param target 目标方法
+     * @param callParamTypes 调用点参数类型列表
+     * @return 选中的调用参数信息
+     * @throws IllegalArgumentException 参数索引越界、无法推断或推断结果不唯一时抛出
+     */
     private fun resolveCallArgument(
         target: MethodNode,
         callParamTypes: Array<Type>,
@@ -169,6 +196,16 @@ class ModifyArgInjector(
         return compatibleArguments.single()
     }
 
+    /**
+     * 在未声明 `At.target` 时尝试解析兼容调用参数。
+     *
+     * 该路径用于按 handler 签名筛选全部候选调用点；不兼容或无法唯一推断的候选会返回 `null`，
+     * 并且不会计入 ordinal。
+     *
+     * @param target 目标方法
+     * @param callParamTypes 调用点参数类型列表
+     * @return 可改写的调用参数信息；当前调用点不适配时返回 `null`
+     */
     private fun resolveInferredCallArgument(
         target: MethodNode,
         callParamTypes: Array<Type>,
@@ -184,6 +221,15 @@ class ModifyArgInjector(
             collectCompatibleCallArguments(target, callParamTypes).singleOrNull()
         }
 
+    /**
+     * 收集 handler 签名可兼容的调用点参数。
+     *
+     * 每个候选会同时记录 handler 还需要追加接收的目标方法参数数量。
+     *
+     * @param target 目标方法
+     * @param callParamTypes 调用点参数类型列表
+     * @return 所有兼容的调用点参数候选
+     */
     private fun collectCompatibleCallArguments(
         target: MethodNode,
         callParamTypes: Array<Type>,
@@ -193,8 +239,25 @@ class ModifyArgInjector(
                 ?.let { CallArgument(index, paramType, it) }
         }
 
+    /**
+     * 判断当前匹配序号是否满足 `ordinal` 过滤。
+     *
+     * 负数表示不限制序号，否则只允许指定的第 N 个兼容候选命中。
+     *
+     * @param currentOrdinal 当前兼容候选在匹配集合中的序号
+     * @return 当前候选应被改写时返回 `true`
+     */
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
 
+    /**
+     * 解析调用点候选扫描范围。
+     *
+     * `from` 边界命中后从下一条指令开始扫描，`to` 边界命中前结束扫描；
+     * 任一边界找不到时返回空范围。
+     *
+     * @param insns 目标方法指令快照
+     * @return 左闭右开的候选扫描下标范围
+     */
     private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
         val startIndex =
             if (hasSliceBoundary(slice.from)) {
@@ -213,10 +276,34 @@ class ModifyArgInjector(
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
+    /**
+     * 判断切片边界是否声明了可匹配目标。
+     *
+     * @param at 切片边界注入点
+     * @return 边界 `target` 非空时返回 `true`
+     */
     private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
 
+    /**
+     * 构造空切片范围。
+     *
+     * @param insns 目标方法指令快照
+     * @return 位于指令末尾的空范围
+     */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 
+    /**
+     * 查找 `Slice` 边界调用点下标。
+     *
+     * 当前 `@ModifyArg(INVOKE)` 只支持以 [InjectionPoint.INVOKE] 作为切片边界，
+     * 边界可匹配普通方法调用、构造器调用或 `invokedynamic`。
+     *
+     * @param insns 目标方法指令快照
+     * @param at 切片边界声明
+     * @param startIndex 起始扫描下标
+     * @return 边界命中的指令下标；未找到时返回 `null`
+     * @throws IllegalArgumentException 边界不是 `INVOKE` 或目标签名不完整时抛出
+     */
     private fun findSliceBoundaryIndex(
         insns: Array<AbstractInsnNode>,
         at: At,
