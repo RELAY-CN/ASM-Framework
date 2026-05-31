@@ -1156,6 +1156,17 @@ class RedirectInjector(
         return target.desc == null || insn.desc == target.desc
     }
 
+    /**
+     * 用 handler 调用替换普通方法调用指令。
+     *
+     * 静态 handler 会沿用当前调用栈参数并追加目标方法参数；实例 handler 会先暂存原 receiver 与参数，
+     * 再创建或读取 handler owner 后按签名顺序重新压栈。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的普通方法调用指令
+     * @throws IllegalArgumentException handler 签名与原调用或目标方法参数不兼容时抛出
+     */
     private fun replaceMethodCall(
         target: MethodNode,
         instructions: InsnList,
@@ -1183,6 +1194,16 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换 `invokedynamic` 调用指令。
+     *
+     * 该方法按动态调用点描述符校验 handler 参数，必要时在 handler 返回引用值后补充 `CHECKCAST`。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的 `invokedynamic` 指令
+     * @throws IllegalArgumentException handler 签名与动态调用点或目标方法参数不兼容时抛出
+     */
     private fun replaceInvokeDynamicCall(
         target: MethodNode,
         instructions: InsnList,
@@ -1210,6 +1231,16 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换普通 `<init>` 构造器调用。
+     *
+     * 该方法会定位与构造器调用配对的 `NEW` 与 `DUP`，再移除整段原构造流程。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的构造器调用指令
+     * @throws IllegalArgumentException 找不到配对构造分配或 handler 签名不兼容时抛出
+     */
     private fun replaceConstructorCall(
         target: MethodNode,
         instructions: InsnList,
@@ -1238,6 +1269,17 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换 [InjectionPoint.NEW] 命中的构造表达式。
+     *
+     * 与普通构造器调用替换不同，该入口从 `NEW` 指令出发，并要求后续真实指令为 `DUP`。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param newInsn 被匹配的 `NEW` 指令
+     * @param originalInsn 与 `NEW` 配对的构造器调用指令
+     * @throws IllegalArgumentException `NEW` 后缺少 `DUP` 或 handler 签名不兼容时抛出
+     */
     private fun replaceNewConstructorCall(
         target: MethodNode,
         instructions: InsnList,
@@ -1270,6 +1312,13 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 向指令列表追加静态 handler 调用。
+     *
+     * 调用前应已按 handler 签名把所有参数压入栈顶。
+     *
+     * @param il 正在构造的替换指令列表
+     */
     private fun addStaticHandlerCall(il: InsnList) {
         val instanceType = Type.getType(asmInfo.asmClass)
         il.add(
@@ -1283,6 +1332,17 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造普通方法调用重定向参数并追加调用。
+     *
+     * 原调用参数会按栈顺序暂存到临时局部变量，实例调用还会暂存 receiver；
+     * 随后压入 handler owner、原调用参数与追加目标方法参数。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被替换的普通方法调用指令
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectHandlerCall(
         target: MethodNode,
         originalInsn: MethodInsnNode,
@@ -1330,6 +1390,16 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造 `invokedynamic` 重定向参数并追加调用。
+     *
+     * 动态调用点参数会先按栈顺序暂存，再在 handler owner 后按描述符顺序重新压栈。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被替换的 `invokedynamic` 指令
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectInvokeDynamicHandlerCall(
         target: MethodNode,
         originalInsn: InvokeDynamicInsnNode,
@@ -1365,6 +1435,16 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造构造器重定向参数并追加调用。
+     *
+     * 构造器参数会按栈顺序暂存，handler 接收这些参数后返回替代构造结果。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被替换的构造器调用指令
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectConstructorHandlerCall(
         target: MethodNode,
         originalInsn: MethodInsnNode,
