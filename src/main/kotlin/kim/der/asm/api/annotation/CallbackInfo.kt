@@ -44,6 +44,8 @@ class CallbackInfo
          * 注入器在支持取消的注入点（例如声明 `cancellable = true` 的 HEAD）会根据该标记决定是否提前返回。
          *
          * @throws IllegalStateException 当前注入点未声明可取消时抛出
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         fun cancel() {
             check(cancellable) {
@@ -54,6 +56,10 @@ class CallbackInfo
 
         /**
          * 是否已取消。
+         *
+         * @return `true` 表示 handler 已请求注入器取消后续目标逻辑
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         fun isCancelled(): Boolean = cancelled
 
@@ -61,6 +67,10 @@ class CallbackInfo
          * 获取返回值。
          *
          * 该方法会尝试将内部保存的值转换为目标类型；类型不匹配时返回 `null`。
+         *
+         * @return 当前保存的返回值；类型不匹配或值为 `null` 时返回 `null`
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         @Suppress("UNCHECKED_CAST")
         fun <T> getReturnValue(): T? = returnValue as? T
@@ -73,6 +83,8 @@ class CallbackInfo
          * 在 RETURN 注入中，引用类型的 `null` 会作为明确的新返回值写回，而不是被视为未修改。
          *
          * @param value 新的返回值；可以为 `null`
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
          */
         fun setReturnValue(value: Any?) {
             this.returnValue = value
@@ -81,15 +93,30 @@ class CallbackInfo
             }
         }
 
+        /**
+         * [CallbackInfo] 工厂方法。
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2025-11-24
+         */
         companion object {
             /**
              * 创建并立即标记为取消的回调信息。
+             *
+             * @return 已处于取消状态的可取消回调信息
+             * @author Dr (dr@der.kim)
+             * @date 2025-11-24
              */
             @JvmStatic
             fun cancellable(): CallbackInfo = CallbackInfo(cancellable = true).apply { cancel() }
 
             /**
              * 创建带初始返回值的回调信息。
+             *
+             * @param returnValue 初始返回值；可以为 `null`
+             * @return 带初始返回值的回调信息
+             * @author Dr (dr@der.kim)
+             * @date 2025-11-24
              */
             @JvmStatic
             fun returnable(returnValue: Any?): CallbackInfo = CallbackInfo(returnValue)
