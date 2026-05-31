@@ -580,6 +580,13 @@ class InvokeInjector(
         instructions.remove(callSite.insn)
     }
 
+    /**
+     * 丢弃 BEFORE / AFTER handler 未被原调用点消费的返回值。
+     *
+     * 普通调用点前后注入不会替换原调用结果，因此 handler 非 `void` 返回值需要从栈顶弹出。
+     *
+     * @param il 正在构造的注入指令列表
+     */
     private fun dropUnusedHandlerReturnValue(il: InsnList) {
         val returnType = Type.getReturnType(asmMethod)
         if (returnType == Type.VOID_TYPE) {
@@ -589,6 +596,19 @@ class InvokeInjector(
         il.add(InsnNode(if (returnType.size == 2) Opcodes.POP2 else Opcodes.POP))
     }
 
+    /**
+     * 生成调用当前 ASM handler 的指令。
+     *
+     * 该方法会按 handler 形态压入 owner、可选 [CallbackInfo]、调用点参数前缀与目标方法参数前缀，
+     * 最后追加 `INVOKESTATIC` 或 `INVOKEVIRTUAL`。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param targetMethod 目标方法
+     * @param callParamTypes 原调用点参数类型
+     * @param savedParamIndexes 已暂存的原调用点参数槽位
+     * @param callbackVarIndex 已暂存的 [CallbackInfo] 槽位；为 `null` 时 handler 不接收 callback
+     * @throws IllegalStateException handler 请求的调用点参数或目标方法参数不兼容时抛出
+     */
     private fun generateCallSiteHandlerCall(
         il: InsnList,
         targetMethod: MethodNode,
@@ -620,6 +640,15 @@ class InvokeInjector(
         )
     }
 
+    /**
+     * 为实例 ASM handler 压入 receiver。
+     *
+     * Kotlin `object` handler 直接读取 `INSTANCE`；普通类 handler 通过目标类上的
+     * `$asmInstance$...` 单例字段懒加载实例。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param instanceType ASM handler 所在类类型
+     */
     private fun loadAsmHandlerReceiver(
         il: InsnList,
         instanceType: Type,
@@ -658,6 +687,18 @@ class InvokeInjector(
         il.add(endLabel)
     }
 
+    /**
+     * 按 handler 签名加载调用点参数与目标方法参数。
+     *
+     * 参数顺序为可选 [CallbackInfo] 后接原调用参数前缀，再接目标方法开头的参数前缀。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param targetMethod 目标方法
+     * @param callParamTypes 原调用点参数类型
+     * @param savedParamIndexes 已暂存的原调用点参数槽位
+     * @param skipCallbackInfo handler 首参是否已由 callback 占用
+     * @throws IllegalStateException handler 请求参数数量过多或类型不兼容时抛出
+     */
     private fun loadCallSiteHandlerArguments(
         il: InsnList,
         targetMethod: MethodNode,
@@ -708,6 +749,16 @@ class InvokeInjector(
         }
     }
 
+    /**
+     * 判断 handler 参数类型是否能接收原栈值类型。
+     *
+     * 基本类型要求完全一致；引用类型允许 handler 声明为更宽的父类型，
+     * 其中 `java.lang.Object` 与 `kotlin.Any` 作为通用引用参数特殊放行。
+     *
+     * @param expected 原栈值类型
+     * @param actual handler 声明的参数类型
+     * @return handler 参数可安全接收原值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -729,8 +780,23 @@ class InvokeInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否为 JVM 引用类型。
+     *
+     * @return 当前类型是对象或数组类型时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 按 ASM 引用类型加载对应的运行时 [Class]。
+     *
+     * 数组类型使用 descriptor 转 Java 类名，对象类型使用 [Type.getClassName]；
+     * 类加载器优先取当前 Mixin 类加载器。
+     *
+     * @param type 待加载的对象或数组类型
+     * @return 对应的运行时类
+     * @throws ClassNotFoundException 类型无法由当前类加载器解析时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -792,6 +858,14 @@ class InvokeInjector(
         il.add(loadInsn)
     }
 
+    /**
+     * 校验 REPLACE handler 返回值是否能替代原调用结果。
+     *
+     * 参数兼容性由 [loadCallSiteHandlerArguments] 在生成 handler 调用参数时校验。
+     *
+     * @param callDesc 被替换调用点的方法描述符
+     * @throws IllegalStateException handler 返回值不能替代原调用结果时抛出
+     */
     private fun validateReplaceSignature(callDesc: String) {
         val originalReturnType = Type.getReturnType(callDesc)
         val asmReturnType = Type.getReturnType(asmMethod)
@@ -802,6 +876,18 @@ class InvokeInjector(
         }
     }
 
+    /**
+     * 在需要时创建并暂存 [CallbackInfo]。
+     *
+     * callback 槽位会避开目标方法已有局部变量以及已经暂存的调用点参数和 receiver。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param targetMethod 目标方法
+     * @param savedParamTypes 已暂存值类型
+     * @param savedParamIndexes 已暂存值槽位
+     * @param savedInstanceIndex 已暂存 receiver 槽位；静态或 `invokedynamic` 调用为 `null`
+     * @return callback 暂存槽位；handler 不需要 callback 时返回 `null`
+     */
     private fun createCallbackInfoIfNeeded(
         il: InsnList,
         targetMethod: MethodNode,
@@ -819,6 +905,17 @@ class InvokeInjector(
         return callbackVarIndex
     }
 
+    /**
+     * 计算位于已暂存调用状态之后的临时变量槽位。
+     *
+     * 用于为返回值或 [CallbackInfo] 分配不会覆盖原调用参数、receiver 的槽位。
+     *
+     * @param targetMethod 目标方法
+     * @param savedParamTypes 已暂存值类型
+     * @param savedParamIndexes 已暂存值槽位
+     * @param savedInstanceIndex 已暂存 receiver 槽位；没有 receiver 时为 `null`
+     * @return 可用于额外临时值的槽位
+     */
     private fun allocateVariableAfterSavedCallState(
         targetMethod: MethodNode,
         savedParamTypes: Array<Type>,
@@ -839,6 +936,14 @@ class InvokeInjector(
         return nextIndex
     }
 
+    /**
+     * 计算目标方法当前局部变量使用范围的末尾槽位。
+     *
+     * 结果会覆盖方法参数、调试局部变量表和现有局部变量读写指令已使用的最高槽位。
+     *
+     * @param targetMethod 目标方法
+     * @return 下一个可用局部变量槽位
+     */
     private fun findLocalEnd(targetMethod: MethodNode): Int {
         val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0
         var maxIndex = if (isStatic) 0 else 1
@@ -867,6 +972,16 @@ class InvokeInjector(
         return maxIndex
     }
 
+    /**
+     * 判断 REPLACE handler 返回值是否能替代原调用返回值。
+     *
+     * 原调用返回 `void` 时允许 handler 返回任意值并在替换后弹出；非 `void` 基本类型要求完全一致，
+     * 引用类型允许后续通过 `CHECKCAST` 转回原返回类型。
+     *
+     * @param original 原调用返回类型
+     * @param replacement handler 返回类型
+     * @return handler 返回值可替代原调用结果时返回 `true`
+     */
     private fun isReplaceReturnCompatible(
         original: Type,
         replacement: Type,
