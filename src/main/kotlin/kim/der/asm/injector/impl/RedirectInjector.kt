@@ -1480,6 +1480,16 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 用 handler 调用替换字段读取指令。
+     *
+     * handler 返回值会作为原字段读取结果留在栈顶；引用字段类型不完全一致时会补充 `CHECKCAST`。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的字段读取指令
+     * @throws IllegalArgumentException handler 签名与字段读取或目标方法参数不兼容时抛出
+     */
     private fun replaceFieldRead(
         target: MethodNode,
         instructions: InsnList,
@@ -1505,6 +1515,16 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换字段写入指令。
+     *
+     * handler 返回值会替代原字段待写入值，字段 owner 与目标方法参数会按签名追加传入。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的字段写入指令
+     * @throws IllegalArgumentException handler 签名与字段写入或目标方法参数不兼容时抛出
+     */
     private fun replaceFieldAssign(
         target: MethodNode,
         instructions: InsnList,
@@ -1524,6 +1544,18 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换数组元素访问或数组长度读取指令。
+     *
+     * 数组读取会在引用元素类型不完全一致时补充 `CHECKCAST`；写入和长度模式由 handler 返回值直接供原位置消费。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param arrayInsn 被替换的数组访问或数组长度指令
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param mode 数组访问模式
+     * @throws IllegalArgumentException handler 签名与数组访问或目标方法参数不兼容时抛出
+     */
     private fun replaceArrayAccess(
         target: MethodNode,
         instructions: InsnList,
@@ -1553,6 +1585,16 @@ class RedirectInjector(
         instructions.remove(arrayInsn)
     }
 
+    /**
+     * 用 handler 调用替换 `CHECKCAST` 指令。
+     *
+     * handler 接收原待转换引用并返回替代引用值，必要时再执行到原目标类型的 `CHECKCAST`。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的 `CHECKCAST` 指令
+     * @throws IllegalArgumentException handler 签名与转换结果或目标方法参数不兼容时抛出
+     */
     private fun replaceCast(
         target: MethodNode,
         instructions: InsnList,
@@ -1578,6 +1620,16 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换 `INSTANCEOF` 指令。
+     *
+     * handler 接收原待判断引用并返回替代 boolean 判断结果。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的 `INSTANCEOF` 指令
+     * @throws IllegalArgumentException handler 签名与类型判断或目标方法参数不兼容时抛出
+     */
     private fun replaceInstanceof(
         target: MethodNode,
         instructions: InsnList,
@@ -1597,6 +1649,17 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 用 handler 调用替换条件跳转指令。
+     *
+     * 序列会先计算原跳转条件的 boolean 结果，再让 handler 返回新的跳转决策；
+     * handler 返回 `true` 时跳向原标签，返回 `false` 时继续落到下一条指令。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被替换的条件跳转指令
+     * @throws IllegalArgumentException handler 签名与跳转结果或目标方法参数不兼容时抛出
+     */
     private fun replaceJump(
         target: MethodNode,
         instructions: InsnList,
@@ -1626,6 +1689,16 @@ class RedirectInjector(
         instructions.remove(originalInsn)
     }
 
+    /**
+     * 在 switch 指令前插入 selector 重定向调用。
+     *
+     * handler 接收原 `Int` selector 并返回新的 selector，原 `tableswitch` 或 `lookupswitch` 继续消费返回值。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被重定向的 switch 指令
+     * @throws IllegalArgumentException handler 签名与 switch selector 或目标方法参数不兼容时抛出
+     */
     private fun replaceSwitch(
         target: MethodNode,
         instructions: InsnList,
@@ -1644,6 +1717,16 @@ class RedirectInjector(
         instructions.insertBefore(originalInsn, il)
     }
 
+    /**
+     * 在 `ATHROW` 前插入异常对象重定向调用。
+     *
+     * 原异常对象会先暂存，handler 返回的新异常对象会被原 `ATHROW` 继续抛出。
+     *
+     * @param target 目标方法
+     * @param instructions 目标方法指令列表
+     * @param originalInsn 被重定向的 `ATHROW` 指令
+     * @throws IllegalArgumentException handler 签名与异常对象或目标方法参数不兼容时抛出
+     */
     private fun replaceThrow(
         target: MethodNode,
         instructions: InsnList,
@@ -1672,6 +1755,16 @@ class RedirectInjector(
         instructions.insertBefore(originalInsn, il)
     }
 
+    /**
+     * 为实例 handler 构造字段读取重定向参数并追加调用。
+     *
+     * 实例字段读取会先暂存字段 owner；静态字段读取直接压入 handler owner 与追加目标方法参数。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被替换的字段读取指令
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectFieldReadHandlerCall(
         target: MethodNode,
         originalInsn: FieldInsnNode,
@@ -1707,6 +1800,16 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造字段写入重定向参数并追加调用。
+     *
+     * 待写入值会先暂存，实例字段写入还会暂存字段 owner，再按 handler 签名顺序重新压栈。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被替换的字段写入指令
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectFieldAssignHandlerCall(
         target: MethodNode,
         originalInsn: FieldInsnNode,
@@ -1747,6 +1850,17 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造数组访问重定向参数并追加调用。
+     *
+     * 该方法按访问模式暂存数组、索引与待写入元素值，再压入 handler owner、数组访问参数与目标方法参数。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param mode 数组访问模式
+     */
     private fun addObjectArrayAccessHandlerCall(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
@@ -1801,6 +1915,15 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造引用值重定向参数并追加调用。
+     *
+     * `CHECKCAST` 与 `INSTANCEOF` 共用该 helper：原引用值会先暂存，再作为 handler 首参重新压栈。
+     *
+     * @param target 目标方法
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectInstanceofHandlerCall(
         target: MethodNode,
         il: InsnList,
@@ -1825,6 +1948,15 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造条件跳转重定向参数并追加调用。
+     *
+     * 原条件结果会暂存为 boolean，再作为 handler 首参传入。
+     *
+     * @param target 目标方法
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectJumpHandlerCall(
         target: MethodNode,
         il: InsnList,
@@ -1849,6 +1981,15 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 为实例 handler 构造 switch selector 重定向参数并追加调用。
+     *
+     * 原 selector 会暂存为 `Int`，再作为 handler 首参传入。
+     *
+     * @param target 目标方法
+     * @param il 正在构造的替换指令列表
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     */
     private fun addObjectSwitchHandlerCall(
         target: MethodNode,
         il: InsnList,
@@ -1873,6 +2014,13 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 向指令列表追加实例 handler 虚调用。
+     *
+     * 调用前应已压入 handler owner 与所有 handler 参数。
+     *
+     * @param il 正在构造的替换指令列表
+     */
     private fun addVirtualHandlerCall(il: InsnList) {
         val instanceType = Type.getType(asmInfo.asmClass)
         il.add(
