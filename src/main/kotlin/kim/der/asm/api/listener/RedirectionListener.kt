@@ -35,11 +35,23 @@ fun interface RedirectionListener {
     companion object {
         /**
          * 监听器桥接方法名。
+         *
+         * 转换器生成字节码时会按该名称调用监听器入口。该常量属于运行期 ABI，
+         * 修改时必须同步更新所有生成调用点的注入器实现。
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
          */
         const val METHOD_NAME = "invoke"
 
         /**
          * 监听器桥接方法描述符。
+         *
+         * 该描述符必须与 [RedirectionListener.invoke] 的 JVM 签名保持一致。
+         * 生成字节码依赖该值定位桥接方法，不能作为普通展示文本随意调整。
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
          */
         const val METHOD_DESC = "(Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)V"
     }

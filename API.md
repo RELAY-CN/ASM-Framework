@@ -285,14 +285,14 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 - `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行替换调用
 - `RedirectionReplace.of(value: Any?): RedirectionReplace` - 创建固定返回值替换器
 
-转换器会把原调用点的对象、描述符、返回类型与参数数组传给替换器，并使用返回值替代原调用返回值。实现方需要保证返回值能赋给 `type` 对应的目标类型；`void` 调用可返回 `null`。
+转换器会把原调用点的对象、描述符、返回类型与参数数组传给替换器，并使用返回值替代原调用返回值。`desc` 使用框架内部调用点描述符，普通调用通常形如 `Lowner;name(desc)return`；`type` 是原调用返回类型，基础类型会以对应 Java primitive `Class` 传入；`args` 按原调用参数顺序传入，不包含实例方法 receiver。实现方需要保证返回值能赋给 `type` 对应的目标类型；`void` 调用可返回 `null`。替换实现抛出的异常会沿目标方法调用链向外传播，不会被框架吞掉。
 
 **常量：**
 
-- `CAST_PREFIX = "<cast> "` - 类型转换重定向描述符前缀
-- `METHOD_NAME = "invoke"` - 替换器桥接方法名
-- `METHOD_SPACE_NAME = "invokeIgnore"` - 忽略模式替换器桥接方法名
-- `METHOD_DESC = "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;[Ljava/lang/Object;)Ljava/lang/Object;"` - 替换器桥接方法描述符
+- `CAST_PREFIX = "<cast> "` - 类型转换重定向描述符前缀；默认管理器会把该前缀视为 cast fallback
+- `METHOD_NAME = "invoke"` - 替换器桥接方法名；转换器生成普通替换调用时使用
+- `METHOD_SPACE_NAME = "invokeIgnore"` - 忽略模式替换器桥接方法名；转换器生成忽略模式调用时使用
+- `METHOD_DESC = "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;[Ljava/lang/Object;)Ljava/lang/Object;"` - 替换器桥接方法描述符，属于运行期 ABI
 
 ### AsmReplace
 
@@ -317,7 +317,7 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 
 - `invoke(desc: String, type: Class<*>, obj: Any, fallback: Supplier<RedirectionReplace>, vararg args: Any?): Any?` - 按调用点描述符执行替换
 
-`fallback` 是未命中显式替换器时使用的延迟默认实现。替换逻辑或默认实现抛出的异常会透出给调用方。
+`fallback` 是未命中显式替换器时使用的延迟默认实现，只有确实需要默认替换时才应调用。管理器会被转换后字节码的运行期入口调用，因此实现必须避免依赖转换期状态；若实现内部维护可变注册表，需要自行保证类加载器隔离与线程安全。默认实现保持无注册表状态，直接使用调用方传入的 fallback。替换逻辑或默认实现抛出的异常会透出给调用方。
 
 ### RedirectionReplaceApi
 
@@ -330,7 +330,7 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 - `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行普通重定向替换，由 `@Redirect` 注入点调用
 - `invokeIgnore(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行忽略模式替换，由全方法替换链路调用
 
-`desc` 使用 `Lowner;name(desc)return` 格式描述调用点，`type` 是原调用返回类型，`args` 按原调用参数顺序传入。当前实现不使用 `ServiceLoader` 自动发现 manager，避免模块化环境或多 ClassLoader 场景下出现加载与隔离问题。
+`desc` 使用 `Lowner;name(desc)return` 格式描述调用点，`type` 是原调用返回类型，`args` 按原调用参数顺序传入。`invoke` 使用默认重定向管理器；`invokeIgnore` 使用忽略管理器，不进行用户替换分派，只走默认替换路径，主要用于全方法替换链路中保留调用形态但跳过额外重定向副作用。当前实现不使用 `ServiceLoader` 自动发现 manager，避免模块化环境或多 ClassLoader 场景下出现加载与隔离问题。`invoke` / `invokeIgnore` 的方法名、参数顺序、返回类型和 JVM 描述符都是运行期 ABI，修改时必须同步更新所有注入器和桥接常量。
 
 ## 注解 API
 
