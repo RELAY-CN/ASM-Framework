@@ -321,6 +321,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun callbackInfoReturnableSupportsTypedSetAndPrimitiveGetters() {
+        val callback = CallbackInfoReturnable(41, cancellable = true)
+
+        callback.setTypedReturnValue(callback.getReturnValueI() + 1)
+
+        assertEquals(42, callback.getTypedReturnValue())
+        assertEquals(42, callback.getReturnValueI())
+        assertEquals(42L, callback.getReturnValueJ())
+        assertEquals(42.toChar(), callback.getReturnValueC())
+        assertEquals(true, callback.isCancelled())
+    }
+
+    @Test
     fun kotlinObjectInlineInstanceTargetPreservesObjectReceiverForHelperCall() {
         AsmRegistry.register(ObjectInstanceInlineMixin::class.java)
 
@@ -1323,6 +1336,18 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("hello iterated", result)
+    }
+
+    @Test
+    fun modifyArgsSupportsIterableExtensions() {
+        AsmRegistry.register(ModifyArgsIterableExtensionMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("hello joined", result)
     }
 
     @Test
@@ -9037,6 +9062,23 @@ class FrameworkReliabilityTest {
             }
             args[0] = values[0].replace("missing", "raw")
             args[1] = "iterated"
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsIterableExtensionMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            val joined = args.joinToString(separator = "|")
+            args[0] = joined.substringBefore('|').replace("missing", "raw")
+            args[1] = "joined"
         }
     }
 

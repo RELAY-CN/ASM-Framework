@@ -44,4 +44,97 @@ class CallbackInfoReturnable<T>
          * @date 2026-05-31
          */
         fun getTypedReturnValue(): T? = getReturnValue()
+
+        /**
+         * 设置带类级泛型标注的返回值。
+         *
+         * 该方法等价于 [setReturnValue]，但参数类型为 [T]，可让 Kotlin handler 在迁移 Mixin
+         * `CallbackInfoReturnable<T>` 写法时获得更直接的类型提示。
+         *
+         * @param value 新返回值；可以为 `null`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun setTypedReturnValue(value: T?) {
+            setReturnValue(value)
+        }
+
+        /**
+         * 按 `Boolean` 读取返回值。
+         *
+         * @return 当前返回值为 [Boolean] 时返回该值，否则返回 `false`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueZ(): Boolean = getTypedReturnValue() as? Boolean ?: false
+
+        /**
+         * 按 `Byte` 读取返回值。
+         *
+         * @return 当前返回值为 [Number] 时返回其 [Number.toByte]，否则返回 `0`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueB(): Byte = (getTypedReturnValue() as? Number)?.toByte() ?: 0
+
+        /**
+         * 按 `Char` 读取返回值。
+         *
+         * @return 当前返回值为 [Char] 时返回该值；为 [Number] 时返回数值对应字符，否则返回 `\u0000`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueC(): Char {
+            val value = getTypedReturnValue()
+            return when (value) {
+                is Char -> value
+                is Number -> value.toInt().toChar()
+                else -> 0.toChar()
+            }
+        }
+
+        /**
+         * 按 `Double` 读取返回值。
+         *
+         * @return 当前返回值为 [Number] 时返回其 [Number.toDouble]，否则返回 `0.0`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueD(): Double = (getTypedReturnValue() as? Number)?.toDouble() ?: 0.0
+
+        /**
+         * 按 `Float` 读取返回值。
+         *
+         * @return 当前返回值为 [Number] 时返回其 [Number.toFloat]，否则返回 `0.0f`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueF(): Float = (getTypedReturnValue() as? Number)?.toFloat() ?: 0.0f
+
+        /**
+         * 按 `Int` 读取返回值。
+         *
+         * @return 当前返回值为 [Number] 时返回其 [Number.toInt]，否则返回 `0`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueI(): Int = (getTypedReturnValue() as? Number)?.toInt() ?: 0
+
+        /**
+         * 按 `Long` 读取返回值。
+         *
+         * @return 当前返回值为 [Number] 时返回其 [Number.toLong]，否则返回 `0L`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueJ(): Long = (getTypedReturnValue() as? Number)?.toLong() ?: 0L
+
+        /**
+         * 按 `Short` 读取返回值。
+         *
+         * @return 当前返回值为 [Number] 时返回其 [Number.toShort]，否则返回 `0`
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun getReturnValueS(): Short = (getTypedReturnValue() as? Number)?.toShort() ?: 0
     }

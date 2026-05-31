@@ -10,7 +10,7 @@ package kim.der.asm.api.annotation
  * [ModifyArgs] handler 会接收该容器，用于读取和改写匹配方法调用的整组参数。索引按目标调用
  * 的方法描述符声明顺序计算，不包含实例方法调用的 receiver。
  * Kotlin handler 可用 [get] / [set]，也可用等价的下标语法 `args[index]` 与 `args[index] = value`。
- * 也可以通过 [size] 属性或 `for (value in args)` 读取参数数量和遍历当前参数快照。
+ * 也可以通过 [size] 属性、`for (value in args)` 或 `joinToString` / `map` 等 [Iterable] 扩展读取参数。
  *
  * ## 类型约束
  *
@@ -23,7 +23,7 @@ package kim.der.asm.api.annotation
  */
 class Args(
     private val values: Array<Any?>,
-) {
+) : Iterable<Any?> {
     /**
      * 当前参数数量。
      *
@@ -97,5 +97,5 @@ class Args(
      * @author Dr (dr@der.kim)
      * @date 2026-05-31
      */
-    operator fun iterator(): Iterator<Any?> = values.iterator()
+    override fun iterator(): Iterator<Any?> = values.iterator()
 }
