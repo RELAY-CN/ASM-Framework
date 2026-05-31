@@ -1162,6 +1162,14 @@ class WrapWithConditionInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 构造普通方法调用 handler 必须接收的前缀参数类型。
+     *
+     * 实例调用会把调用 owner 作为首参，静态调用只保留原调用参数。
+     *
+     * @param callInsn 被条件包裹的普通方法调用指令
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedHandlerParams(callInsn: MethodInsnNode): Array<Type> {
         val callParams = Type.getArgumentTypes(callInsn.desc).toList()
         return if (callInsn.opcode == Opcodes.INVOKESTATIC) {
@@ -1171,6 +1179,14 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 构造字段写入 handler 必须接收的前缀参数类型。
+     *
+     * 静态字段写入只需要待写入值，实例字段写入需要字段 owner 与待写入值。
+     *
+     * @param fieldInsn 被条件包裹的字段写入指令
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedFieldAssignHandlerParams(fieldInsn: FieldInsnNode): Array<Type> {
         val fieldType = Type.getType(fieldInsn.desc)
         return if (fieldInsn.opcode == Opcodes.PUTSTATIC) {
@@ -1180,11 +1196,30 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 构造数组元素写入 handler 必须接收的前缀参数类型。
+     *
+     * 当前数组写入模式基于字段读取产生数组引用，因此参数固定为数组引用、索引与元素值。
+     *
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedArrayAssignHandlerParams(fieldInsn: FieldInsnNode): Array<Type> {
         val arrayType = Type.getType(fieldInsn.desc)
         return arrayOf(arrayType, Type.INT_TYPE, arrayType.elementType)
     }
 
+    /**
+     * 从数组写入指令向前查找产生数组引用的字段读取指令。
+     *
+     * 只接受直接邻近且匹配目标字段的字段读取；遇到其他字段指令、方法调用或数组写入时停止，
+     * 避免跨过会改变栈结构的复杂表达式。
+     *
+     * @param arrayInsn 数组元素写入指令
+     * @param target 字段目标约束
+     * @return 匹配的数组字段读取指令；无法确认简单字段数组写入时返回 `null`
+     * @throws IllegalArgumentException 匹配字段不是数组类型时抛出
+     */
     private fun findArrayFieldProducer(
         arrayInsn: AbstractInsnNode,
         target: FieldTarget,
@@ -1212,6 +1247,14 @@ class WrapWithConditionInjector(
         return null
     }
 
+    /**
+     * 推断 `ATHROW` 直接抛出的异常内部名。
+     *
+     * 当前只识别紧邻真实前序指令为异常构造器 `<init>` 调用的简单 `new ...; <init>; athrow` 形态。
+     *
+     * @param throwInsn `ATHROW` 指令
+     * @return 直接构造异常的内部名；无法确认时返回 `null`
+     */
     private fun directThrownTypeInternalName(throwInsn: AbstractInsnNode): String? {
         val previous = previousRealInstruction(throwInsn)
         if (previous is MethodInsnNode &&
@@ -1223,6 +1266,14 @@ class WrapWithConditionInjector(
         return null
     }
 
+    /**
+     * 查找指定指令前一条真实 JVM 指令。
+     *
+     * 标签、行号与 frame 等伪指令会被跳过。
+     *
+     * @param insn 起始指令
+     * @return 前一条 opcode 非负的真实指令；不存在时返回 `null`
+     */
     private fun previousRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
         var current = insn.previous
         while (current != null && current.opcode < 0) {
@@ -1231,6 +1282,15 @@ class WrapWithConditionInjector(
         return current
     }
 
+    /**
+     * 解析条件跳转定位目标。
+     *
+     * 空字符串表示不限制跳转 opcode；非空目标可使用 opcode 数值或 [JUMP_OPCODE_NAMES] 中的助记名。
+     *
+     * @param target `At.target` 中声明的跳转目标
+     * @return 需要匹配的跳转 opcode；未声明时返回 `null`
+     * @throws IllegalArgumentException 声明的目标不是受支持的 JVM 条件跳转 opcode 时抛出
+     */
     private fun parseJumpOpcodeTarget(target: String): Int? {
         if (target.isEmpty()) {
             return null
@@ -1250,6 +1310,16 @@ class WrapWithConditionInjector(
             )
     }
 
+    /**
+     * 判断 handler 参数类型是否能接收期望值。
+     *
+     * 基础类型必须完全一致；引用类型允许 handler 使用相同类型、父类型、`Object` 或 `kotlin.Any`。
+     * 类加载失败时按不兼容处理。
+     *
+     * @param expected 注入点会压入 handler 的实际值类型
+     * @param actual handler 声明的参数类型
+     * @return `actual` 能接收 `expected` 时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -1271,8 +1341,22 @@ class WrapWithConditionInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否为引用类型。
+     *
+     * @return 类型为对象或数组时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 使用 Mixin 类加载器加载 ASM 引用类型。
+     *
+     * 数组类型会使用描述符形式加载，对象类型使用 Java 类名加载。
+     *
+     * @param type ASM 引用类型
+     * @return 已加载的 Java class
+     * @throws ClassNotFoundException 目标引用类型无法由当前类加载器解析时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -1284,6 +1368,15 @@ class WrapWithConditionInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 把目标方法开头的参数加载到 handler 调用栈。
+     *
+     * 实例方法会跳过 `this` 槽位，宽类型参数按两个 JVM 槽位推进。
+     *
+     * @param il 正在构造的指令列表
+     * @param target 目标方法
+     * @param requestedTargetParamCount 需要追加传给 handler 的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -1302,6 +1395,13 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 按类型从局部变量槽位加载值。
+     *
+     * @param il 正在构造的指令列表
+     * @param paramType 需要加载的值类型
+     * @param varIndex JVM 局部变量槽位
+     */
     private fun loadFromVariable(
         il: InsnList,
         paramType: Type,
@@ -1310,6 +1410,13 @@ class WrapWithConditionInjector(
         InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
     }
 
+    /**
+     * 按类型把栈顶值暂存到局部变量槽位。
+     *
+     * @param il 正在构造的指令列表
+     * @param paramType 栈顶值类型
+     * @param varIndex JVM 局部变量槽位
+     */
     private fun storeStackValue(
         il: InsnList,
         paramType: Type,
@@ -1324,6 +1431,14 @@ class WrapWithConditionInjector(
         }
     }
 
+    /**
+     * 为实例 handler 准备调用 owner。
+     *
+     * 静态 handler 不需要 owner；Kotlin `object` 会读取 `INSTANCE`，
+     * 普通类会生成无参构造的新实例作为调用目标。
+     *
+     * @param il 正在构造的指令列表
+     */
     private fun addHandlerOwner(il: InsnList) {
         if (isHandlerStatic()) {
             return
@@ -1347,6 +1462,11 @@ class WrapWithConditionInjector(
         il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, ownerType.internalName, "<init>", "()V", false))
     }
 
+    /**
+     * 选择 handler 调用 opcode。
+     *
+     * @return 静态 handler 使用 `INVOKESTATIC`，实例 handler 使用 `INVOKEVIRTUAL`
+     */
     private fun handlerOpcode(): Int =
         if (isHandlerStatic()) {
             Opcodes.INVOKESTATIC
