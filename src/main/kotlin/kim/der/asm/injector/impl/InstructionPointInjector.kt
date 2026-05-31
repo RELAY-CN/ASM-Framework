@@ -71,6 +71,16 @@ class InstructionPointInjector(
      */
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
+    /**
+     * 在目标方法中执行指令点注入并返回命中数量。
+     *
+     * 会先构造当前 [point] 对应的指令匹配器，再按 `Slice`、`ordinal`、`Shift` 与 `At.by` 计算实际插入位置。
+     * `CONSTANT + Shift.REPLACE` 是唯一替换原指令的普通 `@AsmInject` 模式，其余模式只插入 handler 调用。
+     *
+     * @param target 目标方法
+     * @return 实际插入或替换的指令点数量
+     * @throws IllegalStateException shift、`At.by`、slice 或 handler 参数不满足当前注入点约束时抛出
+     */
     override fun injectCount(target: MethodNode): Int {
         val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
         requireSupportedShift(injectAnnotation.at.shift, injectAnnotation.at.by)
@@ -124,6 +134,11 @@ class InstructionPointInjector(
         return injectionCount
     }
 
+    /**
+     * 判断当前指令点是否支持 `Slice` 范围限制。
+     *
+     * @return 当前 [point] 会在候选指令扫描前解析 `Slice` 时返回 `true`
+     */
     private fun usesSliceRange(): Boolean =
         point == InjectionPoint.LOAD ||
             point == InjectionPoint.STORE ||
@@ -137,11 +152,29 @@ class InstructionPointInjector(
             point == InjectionPoint.CONSTANT ||
             point == InjectionPoint.THROW
 
+    /**
+     * 判断当前匹配序号是否满足 `ordinal` 过滤。
+     *
+     * 负数表示不限制序号，否则只允许指定的第 N 个候选命中。
+     *
+     * @param currentOrdinal 当前候选在匹配集合中的序号
+     * @param requestedOrdinal 注解声明的目标序号
+     * @return 当前候选应被注入时返回 `true`
+     */
     private fun matchesOrdinal(
         currentOrdinal: Int,
         requestedOrdinal: Int,
     ): Boolean = requestedOrdinal < 0 || currentOrdinal == requestedOrdinal
 
+    /**
+     * 校验当前指令点是否支持声明的 `Shift` 与 `At.by`。
+     *
+     * `NEW` 指令附近存在未初始化对象引用，不能向后插入，也不能通过 `At.by` 移动锚点。
+     *
+     * @param shift 注解声明的插入方向
+     * @param by 相对匹配指令移动的真实指令数
+     * @throws IllegalStateException 当前指令点不支持该组合时抛出
+     */
     private fun requireSupportedShift(
         shift: Shift,
         by: Int,
@@ -160,6 +193,18 @@ class InstructionPointInjector(
         }
     }
 
+    /**
+     * 根据 `At.by` 解析最终插入锚点。
+     *
+     * 移动时只统计真实字节码指令，跳过 label、line number、frame 等伪节点。
+     *
+     * @param insns 目标方法指令快照
+     * @param index 原始匹配指令下标
+     * @param by 相对移动步数；正数向后，负数向前
+     * @return 移动后的锚点指令
+     * @throws IllegalArgumentException `by` 为 [Int.MIN_VALUE] 时无法取反
+     * @throws IllegalStateException 移动结果越出方法指令范围时抛出
+     */
     private fun resolveByAnchor(
         insns: Array<AbstractInsnNode>,
         index: Int,
@@ -190,6 +235,14 @@ class InstructionPointInjector(
         return insns[currentIndex]
     }
 
+    /**
+     * 查找指定方向上的下一条真实指令下标。
+     *
+     * @param insns 目标方法指令快照
+     * @param index 起始指令下标
+     * @param direction 搜索方向，`1` 向后，`-1` 向前
+     * @return 找到的真实指令下标；越界前未找到时返回 `null`
+     */
     private fun nextRealInstructionIndex(
         insns: Array<AbstractInsnNode>,
         index: Int,
@@ -205,6 +258,16 @@ class InstructionPointInjector(
         return null
     }
 
+    /**
+     * 解析当前注入的候选扫描范围。
+     *
+     * `from` 边界命中后从下一条指令开始扫描，`to` 边界命中前结束扫描；
+     * 任一边界找不到时返回空范围。
+     *
+     * @param insns 目标方法指令快照
+     * @param slice 注解声明的切片范围
+     * @return 左闭右开的候选扫描下标范围
+     */
     private fun resolveSliceRange(
         insns: Array<AbstractInsnNode>,
         slice: Slice,
@@ -226,10 +289,33 @@ class InstructionPointInjector(
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
+    /**
+     * 判断切片边界是否声明了可匹配目标。
+     *
+     * @param at 切片边界注入点
+     * @return 边界 `target` 非空时返回 `true`
+     */
     private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
 
+    /**
+     * 构造空切片范围。
+     *
+     * @param insns 目标方法指令快照
+     * @return 位于指令末尾的空范围
+     */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 
+    /**
+     * 查找 `Slice` 边界方法调用下标。
+     *
+     * 当前普通指令点只支持以 [InjectionPoint.INVOKE] 作为切片边界，边界可匹配普通方法调用或 `invokedynamic`。
+     *
+     * @param insns 目标方法指令快照
+     * @param at 切片边界声明
+     * @param startIndex 起始扫描下标
+     * @return 边界命中的指令下标；未找到时返回 `null`
+     * @throws IllegalArgumentException 边界不是 `INVOKE` 或目标签名不完整时抛出
+     */
     private fun findSliceBoundaryIndex(
         insns: Array<AbstractInsnNode>,
         at: At,
@@ -263,6 +349,15 @@ class InstructionPointInjector(
         return null
     }
 
+    /**
+     * 解析 `LOAD` / `STORE` 指令点的局部变量槽位过滤条件。
+     *
+     * 支持在 `At.args` 中使用 `index=<n>` 或 `var=<n>`，其他注入点会忽略该过滤。
+     *
+     * @param args 注解声明的 `At.args`
+     * @return 指定的局部变量槽位；未声明或当前不是局部变量指令点时返回 `null`
+     * @throws IllegalArgumentException 槽位不是整数、为负数或重复声明时抛出
+     */
     private fun parseLocalVariableIndex(args: Array<String>): Int? {
         if (point != InjectionPoint.LOAD && point != InjectionPoint.STORE) {
             return null
