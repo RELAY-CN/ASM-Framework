@@ -2,7 +2,7 @@
  * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
-package kim.der.asm.redirections.replace.def
+package kim.der.asm.injector.impl.replace.defaults
 
 import kim.der.asm.api.replace.RedirectionReplace
 

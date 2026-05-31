@@ -4,8 +4,8 @@
 
 package kim.der.asm.api.replace
 
-import kim.der.asm.manager.replace.RedirectionIgnoreManagerImpl
-import kim.der.asm.manager.replace.RedirectionManagerImpl
+import kim.der.asm.injector.impl.replace.RedirectionIgnoreManagerImpl
+import kim.der.asm.injector.impl.replace.RedirectionManagerImpl
 
 /**
  * 方法重定向替换入口。
