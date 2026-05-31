@@ -337,6 +337,18 @@ class ModifyArgInjector(
         return null
     }
 
+    /**
+     * 构造调用点参数改写指令。
+     *
+     * 会先把原调用点参数和可选 receiver 全部暂存到局部变量，调用 handler 得到新参数值后写回被选中的参数槽位，
+     * 最后按原顺序恢复 receiver 与全部调用参数，供原调用点继续消费。
+     *
+     * @param target 目标方法
+     * @param hasReceiver 调用点栈上是否包含实例 receiver
+     * @param callParamTypes 调用点参数类型列表
+     * @param selectedArgument 被改写的调用点参数信息
+     * @return 可插入到原调用点前的参数改写指令列表
+     */
     private fun buildCallArgumentModification(
         target: MethodNode,
         hasReceiver: Boolean,
@@ -540,6 +552,15 @@ class ModifyArgInjector(
         InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
     }
 
+    /**
+     * 按类型把栈顶值暂存到局部变量槽位。
+     *
+     * 根据 ASM 类型选择 `ISTORE`、`LSTORE`、`FSTORE`、`DSTORE` 或 `ASTORE`。
+     *
+     * @param il 正在构造的指令列表
+     * @param paramType 栈顶值类型
+     * @param varIndex 局部变量槽位
+     */
     private fun storeStackValue(
         il: InsnList,
         paramType: Type,
@@ -564,6 +585,16 @@ class ModifyArgInjector(
         }
     }
 
+    /**
+     * 校验 handler 是否能改写指定参数类型。
+     *
+     * handler 首参接收原参数值，返回值需要能替代原参数值；后续参数按顺序映射到目标方法开头参数。
+     *
+     * @param target 目标方法
+     * @param paramType 被改写参数类型
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 首参、返回值或追加目标方法参数不兼容时抛出
+     */
     private fun validateHandlerSignature(
         target: MethodNode,
         paramType: Type,
@@ -605,11 +636,30 @@ class ModifyArgInjector(
         return requestedTargetParamCount
     }
 
+    /**
+     * 尝试校验推断模式下的 handler 签名。
+     *
+     * 该方法吞掉不兼容异常，用于筛选候选调用点参数。
+     *
+     * @param target 目标方法
+     * @param paramType 候选调用点参数类型
+     * @return handler 追加接收的目标方法参数数量；不兼容时返回 `null`
+     */
     private fun validateInferredHandlerSignature(
         target: MethodNode,
         paramType: Type,
     ): Int? = runCatching { validateHandlerSignature(target, paramType) }.getOrNull()
 
+    /**
+     * 判断 handler 参数类型是否能接收原值类型。
+     *
+     * 基本类型要求完全一致；引用类型允许 handler 声明为更宽的父类型，
+     * 其中 `java.lang.Object` 与 `kotlin.Any` 作为通用引用参数特殊放行。
+     *
+     * @param expected 原值类型
+     * @param actual handler 声明的参数类型
+     * @return handler 参数可安全接收原值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -631,6 +681,15 @@ class ModifyArgInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 handler 返回值是否能替代目标参数类型。
+     *
+     * 基本类型要求完全一致；引用类型允许返回子类型或通用对象类型，必要时后续会补充 `CHECKCAST`。
+     *
+     * @param targetParamType 被改写参数类型
+     * @param handlerReturnType handler 返回类型
+     * @return handler 返回值可写回目标参数槽位时返回 `true`
+     */
     private fun isHandlerReturnCompatible(
         targetParamType: Type,
         handlerReturnType: Type,
@@ -655,8 +714,21 @@ class ModifyArgInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 ASM 类型是否为 JVM 引用类型。
+     *
+     * @return 当前类型是对象或数组类型时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 必要时把 handler 返回值转回被改写参数类型。
+     *
+     * 仅引用类型需要补充 `CHECKCAST`，基本类型已经在签名校验阶段要求精确匹配。
+     *
+     * @param il 正在构造的指令列表
+     * @param paramType 被改写参数类型
+     */
     private fun addArgumentCastIfNeeded(
         il: InsnList,
         paramType: Type,
@@ -667,6 +739,16 @@ class ModifyArgInjector(
         }
     }
 
+    /**
+     * 按 ASM 引用类型加载对应的运行时 [Class]。
+     *
+     * 数组类型使用 descriptor 转 Java 类名，对象类型使用 [Type.getClassName]；
+     * 类加载器优先取当前 Mixin 类加载器。
+     *
+     * @param type 待加载的对象或数组类型
+     * @return 对应的运行时类
+     * @throws ClassNotFoundException 类型无法由当前类加载器解析时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -678,6 +760,15 @@ class ModifyArgInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 将 handler 额外声明的目标方法参数前缀压入栈。
+     *
+     * 只加载从目标方法参数列表开头起请求的参数数量，并正确处理实例方法的 `this` 槽位与宽类型槽位。
+     *
+     * @param il 正在构造的指令列表
+     * @param target 目标方法
+     * @param requestedTargetParamCount handler 额外请求的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -696,6 +787,13 @@ class ModifyArgInjector(
         }
     }
 
+    /**
+     * 为实例 handler 调用压入 owner。
+     *
+     * Kotlin `object` handler 读取 `INSTANCE`；普通类 handler 会创建新的 handler 实例。
+     *
+     * @param il 正在构造的指令列表
+     */
     private fun addHandlerOwner(il: InsnList) {
         if (isHandlerStatic()) {
             return
@@ -719,6 +817,11 @@ class ModifyArgInjector(
         il.add(MethodInsnNode(Opcodes.INVOKESPECIAL, instanceType.internalName, "<init>", "()V", false))
     }
 
+    /**
+     * 解析 handler 调用 opcode。
+     *
+     * @return 静态 handler 返回 [Opcodes.INVOKESTATIC]，实例 handler 返回 [Opcodes.INVOKEVIRTUAL]
+     */
     private fun handlerOpcode(): Int =
         if (isHandlerStatic()) {
             Opcodes.INVOKESTATIC
@@ -726,8 +829,21 @@ class ModifyArgInjector(
             Opcodes.INVOKEVIRTUAL
         }
 
+    /**
+     * 判断当前 handler 是否为 JVM 静态方法。
+     *
+     * @return handler 带有 `static` 修饰符时返回 `true`
+     */
     private fun isHandlerStatic(): Boolean = (asmMethod.modifiers and Modifier.STATIC) != 0
 
+    /**
+     * 解析方法调用目标签名。
+     *
+     * 支持 owner 使用 slash 或 dot，也支持只声明方法名或方法名加描述符。
+     *
+     * @param signature `At.target` 或 `Slice` 边界中声明的方法目标
+     * @return owner、方法名与描述符；未声明的部分返回 `null`
+     */
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
             return Triple(null, null, null)
@@ -755,6 +871,15 @@ class ModifyArgInjector(
         }
     }
 
+    /**
+     * 判断普通方法调用是否匹配目标方法约束。
+     *
+     * @param insn 候选普通方法调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名
+     * @param targetDesc 目标方法描述符；为 `null` 时不限制描述符
+     * @return 候选调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -770,6 +895,17 @@ class ModifyArgInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 将候选指令描述为显式目标命中的调用点。
+     *
+     * 普通方法调用会保留 receiver 信息，`invokedynamic` 永远不携带 receiver。
+     *
+     * @param insn 候选指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名或动态调用名
+     * @param targetDesc 目标方法描述符；为 `null` 时不限制描述符
+     * @return 匹配的调用点描述；不匹配时返回 `null`
+     */
     private fun describeMatchedCallSite(
         insn: AbstractInsnNode,
         targetOwner: String?,
@@ -795,6 +931,12 @@ class ModifyArgInjector(
             else -> null
         }
 
+    /**
+     * 将任意候选指令描述为可推断的调用点。
+     *
+     * @param insn 候选指令
+     * @return 普通方法调用或 `invokedynamic` 的调用点描述；其他指令返回 `null`
+     */
     private fun describeAnyCallSite(insn: AbstractInsnNode): CallSite? =
         when (insn) {
             is MethodInsnNode ->
@@ -806,6 +948,17 @@ class ModifyArgInjector(
             else -> null
         }
 
+    /**
+     * 判断 `invokedynamic` 调用是否匹配目标方法约束。
+     *
+     * owner 约束会匹配 bootstrap method owner，名称约束可匹配动态调用名或 bootstrap method 名。
+     *
+     * @param insn 候选 `invokedynamic` 调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 bootstrap owner
+     * @param targetName 目标动态调用名或 bootstrap method 名
+     * @param targetDesc 目标动态调用描述符；为 `null` 时不限制描述符
+     * @return 候选动态调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetInvokeDynamic(
         insn: InvokeDynamicInsnNode,
         targetOwner: String?,
@@ -821,6 +974,14 @@ class ModifyArgInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 计算可用于临时值的下一个局部变量槽位。
+     *
+     * 结果会覆盖方法参数、调试局部变量表和现有局部变量读写指令已使用的最高槽位。
+     *
+     * @param target 目标方法
+     * @return 可安全分配给临时值的起始槽位
+     */
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
@@ -926,6 +1087,12 @@ class ModifyArgInjector(
      */
     private fun needsDoubleSlot(desc: String): Boolean = desc == "J" || desc == "D"
 
+    /**
+     * 可被 `@ModifyArg` 处理的调用点描述。
+     *
+     * @property desc 调用点方法描述符
+     * @property hasReceiver 调用栈中是否包含实例 receiver
+     */
     private data class CallSite(
         val desc: String,
         val hasReceiver: Boolean,
