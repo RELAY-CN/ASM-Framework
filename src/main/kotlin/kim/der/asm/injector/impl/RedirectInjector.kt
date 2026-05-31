@@ -1518,7 +1518,7 @@ class RedirectInjector(
     /**
      * 用 handler 调用替换字段写入指令。
      *
-     * handler 返回值会替代原字段待写入值，字段 owner 与目标方法参数会按签名追加传入。
+     * handler 会接管原字段写入动作，并按签名接收字段 owner、待写入值与目标方法参数；原 `PUTFIELD` 或 `PUTSTATIC` 会被移除。
      *
      * @param target 目标方法
      * @param instructions 目标方法指令列表
@@ -2307,6 +2307,17 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验字段写入重定向的 handler 签名。
+     *
+     * handler 前缀参数需要兼容字段 owner 与待写入值，返回值必须为 `void`；
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param originalInsn 被重定向的字段写入指令
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateFieldAssignHandlerSignature(
         target: MethodNode,
         originalInsn: FieldInsnNode,
@@ -2344,6 +2355,17 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 `CHECKCAST` 重定向的 handler 签名。
+     *
+     * handler 首参接收原待转换引用，返回值需要能替代原转换结果；
+     * 额外参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param castType 原 `CHECKCAST` 目标类型
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateCastHandlerSignature(
         target: MethodNode,
         castType: Type,
@@ -2379,6 +2401,15 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 `INSTANCEOF` 重定向的 handler 签名。
+     *
+     * handler 首参接收原待判断引用，并必须返回 `boolean` 作为替代判断结果。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateInstanceofHandlerSignature(target: MethodNode): Int {
         if (!isHandlerStatic() && !isKotlinObject()) {
             throw IllegalStateException(
@@ -2411,6 +2442,15 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验条件跳转重定向的 handler 签名。
+     *
+     * handler 首参接收原跳转条件结果，并必须返回 `boolean` 作为新的跳转决策。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateJumpHandlerSignature(target: MethodNode): Int {
         if (!isHandlerStatic() && !isKotlinObject()) {
             throw IllegalStateException(
@@ -2443,6 +2483,15 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验 switch selector 重定向的 handler 签名。
+     *
+     * handler 首参接收原 `Int` selector，并必须返回新的 `Int` selector。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateSwitchHandlerSignature(target: MethodNode): Int {
         if (!isHandlerStatic() && !isKotlinObject()) {
             throw IllegalStateException(
@@ -2475,6 +2524,15 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验异常对象重定向的 handler 签名。
+     *
+     * handler 首参接收原异常对象，返回值需要能替代 [Throwable] 供原 `ATHROW` 继续抛出。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateThrowHandlerSignature(target: MethodNode): Int {
         if (!isHandlerStatic() && !isKotlinObject()) {
             throw IllegalStateException(
@@ -2508,6 +2566,17 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验局部变量值或常量值重定向的 handler 签名。
+     *
+     * handler 首参接收原值，返回值需要能替代该原值；[pointName] 用于区分错误信息中的 LOAD、STORE 或 CONSTANT 场景。
+     *
+     * @param target 目标方法
+     * @param valueType 原局部变量值或常量值类型
+     * @param pointName 当前重定向点名称
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateLocalHandlerSignature(
         target: MethodNode,
         valueType: Type,
@@ -2544,6 +2613,18 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 校验数组访问重定向的 handler 签名。
+     *
+     * handler 前缀参数按访问模式接收数组、索引与待写入值；读取模式返回元素值，
+     * 长度模式返回 `int`，写入模式返回 `void`。
+     *
+     * @param target 目标方法
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param mode 数组访问模式
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
     private fun validateArrayAccessHandlerSignature(
         target: MethodNode,
         fieldInsn: FieldInsnNode,
