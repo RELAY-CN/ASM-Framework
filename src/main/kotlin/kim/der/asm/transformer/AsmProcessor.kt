@@ -22,7 +22,14 @@ import org.objectweb.asm.tree.ClassNode
  * @date 2025-11-24
  */
 class AsmTransformException(
+    /**
+     * 正在转换的目标类 internal name。
+     */
     val className: String,
+
+    /**
+     * 失败的 ASM 类名。
+     */
     val asmClassName: String,
     cause: Throwable,
 ) : RuntimeException("Failed to apply asm $asmClassName to $className", cause)

@@ -26,21 +26,78 @@ import kim.der.asm.api.replace.RedirectionReplace
  * @date 2025-11-24
  */
 class MethodTypeInfoValue {
+    /**
+     * 目标类 internal name。
+     *
+     * 不包含前导 `L` 与结尾 `;`，例如 `java/lang/String`。
+     */
     val classPath: String
+
+    /**
+     * 目标方法名。
+     *
+     * 构造方法使用 JVM 名称 `<init>`。
+     */
     val methodName: String
+
+    /**
+     * 目标方法描述符。
+     *
+     * 示例：`(Ljava/lang/String;)V`。
+     */
     val methodParamsInfo: String
 
+    /**
+     * 当前条目是否表示监听器。
+     *
+     * `true` 表示使用 [listenerClass] 与 [listenerBefore]；`false` 表示使用 [replaceClass]。
+     */
     var listenerOrReplace: Boolean = false
 
+    /**
+     * 替换实现类。
+     *
+     * 仅替换条目使用；监听条目为 `null`。
+     */
     var replaceClass: Class<out RedirectionReplace>?
         internal set
 
+    /**
+     * 监听器是否在原调用前执行。
+     *
+     * 仅监听条目有语义。
+     */
     val listenerBefore: Boolean
+
+    /**
+     * 监听实现类。
+     *
+     * 仅监听条目使用；替换条目为 `null`。
+     */
     val listenerClass: Class<out RedirectionListener>?
 
+    /**
+     * 统一调用点描述符。
+     *
+     * 格式为 `L<classPath>;<methodName><methodParamsInfo>`。
+     */
     val desc: String get() = "L$classPath;${methodName}$methodParamsInfo"
 
-    constructor(classPath: String, methodName: String, methodParamsInfo: String) {
+    /**
+     * 创建未绑定替换器或监听器的目标方法描述。
+     *
+     * @param classPath 目标类 internal name
+     * @param methodName 目标方法名
+     * @param methodParamsInfo 目标方法描述符
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    constructor(
+        classPath: String,
+        methodName: String,
+        methodParamsInfo: String,
+    ) {
         this.classPath = classPath
         this.methodName = methodName
         this.methodParamsInfo = methodParamsInfo
@@ -49,7 +106,23 @@ class MethodTypeInfoValue {
         this.listenerClass = null
     }
 
-    constructor(classPath: String, methodName: String, methodParamsInfo: String, replaceClass: Class<out RedirectionReplace>? = null) {
+    /**
+     * 创建替换型目标方法描述。
+     *
+     * @param classPath 目标类 internal name
+     * @param methodName 目标方法名
+     * @param methodParamsInfo 目标方法描述符
+     * @param replaceClass 替换实现类；为 `null` 时仅描述调用点本身
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    constructor(
+        classPath: String,
+        methodName: String,
+        methodParamsInfo: String,
+        replaceClass: Class<out RedirectionReplace>? = null,
+    ) {
         this.classPath = classPath
         this.methodName = methodName
         this.methodParamsInfo = methodParamsInfo
@@ -59,7 +132,25 @@ class MethodTypeInfoValue {
         this.listenerClass = null
     }
 
-    constructor(classPath: String, methodName: String, methodParamsInfo: String, before: Boolean, listenerClass: Class<out RedirectionListener>? = null) {
+    /**
+     * 创建监听型目标方法描述。
+     *
+     * @param classPath 目标类 internal name
+     * @param methodName 目标方法名
+     * @param methodParamsInfo 目标方法描述符
+     * @param before 是否在原调用前执行监听器
+     * @param listenerClass 监听实现类；为 `null` 时仅描述调用点本身
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
+     */
+    constructor(
+        classPath: String,
+        methodName: String,
+        methodParamsInfo: String,
+        before: Boolean,
+        listenerClass: Class<out RedirectionListener>? = null,
+    ) {
         this.classPath = classPath
         this.methodName = methodName
         this.methodParamsInfo = methodParamsInfo

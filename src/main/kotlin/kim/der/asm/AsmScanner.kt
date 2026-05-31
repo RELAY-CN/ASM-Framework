@@ -24,8 +24,25 @@ import java.util.jar.JarFile
  * @date 2025-11-24
  */
 data class AsmScanResult(
+    /**
+     * 成功注册到 [AsmRegistry] 的类名。
+     *
+     * 类名使用 Java binary name，例如 `com.example.MyMixin`。
+     */
     val registeredClasses: List<String> = emptyList(),
+
+    /**
+     * 成功加载但未标注 [AsmMixin] 的类名。
+     *
+     * 调用方可用该列表诊断扫描范围是否过宽。
+     */
     val skippedClasses: List<String> = emptyList(),
+
+    /**
+     * 扫描或类加载失败的条目。
+     *
+     * 失败不会中断整批扫描，而是收集到该列表中交给调用方处理。
+     */
     val failures: List<AsmScanFailure> = emptyList(),
 ) {
     /**
@@ -57,7 +74,18 @@ data class AsmScanResult(
  * @date 2025-11-24
  */
 data class AsmScanFailure(
+    /**
+     * 失败的类名、包名或 JAR 路径。
+     *
+     * 具体取值取决于失败发生在单类加载、包资源枚举还是 JAR 扫描阶段。
+     */
     val className: String,
+
+    /**
+     * 失败原因摘要。
+     *
+     * 优先使用异常消息；异常没有消息时使用异常类名。
+     */
     val reason: String,
 )
 

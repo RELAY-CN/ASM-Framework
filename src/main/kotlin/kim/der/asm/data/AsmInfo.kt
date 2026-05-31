@@ -20,7 +20,24 @@ import kim.der.asm.func.Find
  * @date 2025-11-24
  */
 data class AsmInfo(
+    /**
+     * ASM 类。
+     *
+     * 通常是带 [kim.der.asm.api.annotation.AsmMixin] 的 Kotlin `object` 或 class。
+     */
     val asmClass: Class<*>,
+
+    /**
+     * 精确匹配的目标类 internal name 列表。
+     *
+     * 路径匹配注册会保持该列表为空。
+     */
     val targets: List<String>,
+
+    /**
+     * 路径匹配器。
+     *
+     * 返回 `true` 表示该 ASM 应用于给定目标类；精确目标注册时为 `null`。
+     */
     val pathMatcher: Find<String, Boolean>? = null,
 )
