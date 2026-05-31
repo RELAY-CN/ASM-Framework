@@ -21,6 +21,7 @@ import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
@@ -55,9 +56,11 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.CAST] 匹配 `CHECKCAST` 完成后的对象值；未指定类型目标时，会按 handler 首参与返回类型筛选兼容的
  * `CHECKCAST` 候选；不兼容的调用返回、字段读取、字段写入、数组写入、`NEW` / `CHECKCAST` 候选不计入 [ModifyExpressionValue.ordinal] 或命中数。
  * [InjectionPoint.INSTANCEOF] 匹配类型判断后的 boolean 结果，
- * [InjectionPoint.LOAD] 匹配 `xLOAD` 读取出的栈顶表达式值，可用 [At.args] 中的 `index=N` 或 `var=N` 按 JVM 局部变量槽位过滤；
+ * [InjectionPoint.LOAD] 匹配 `xLOAD` 读取出的栈顶表达式值，可用 [At.args] 中的 `index=N`、`var=N`
+ * 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；
  * handler 返回的新值只替换这一次读取表达式，不写回原局部变量槽位，
- * [InjectionPoint.STORE] 匹配 `xSTORE` 消费前的待写入表达式值，可用 [At.args] 中的 `index=N` 或 `var=N` 按 JVM 局部变量槽位过滤；
+ * [InjectionPoint.STORE] 匹配 `xSTORE` 消费前的待写入表达式值，可用 [At.args] 中的 `index=N`、`var=N`
+ * 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；
  * handler 返回的新值交给原 `xSTORE` 继续写入槽位，
  * [InjectionPoint.JUMP] 匹配条件跳转的原始分支结果，handler 接收 `Boolean` 并返回新的分支结果；`GOTO` 与 `JSR` 不支持表达式改写，
  * [InjectionPoint.SWITCH] 匹配 `tableswitch` 或 `lookupswitch` 消费前的 `Int` selector，handler 返回的新 selector 会继续交给原 switch 指令分派，
@@ -566,7 +569,8 @@ class ModifyExpressionValueInjector(
     /**
      * 改写局部变量读取指令产生的表达式值。
      *
-     * `LOAD` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * `LOAD` 不使用 `at.target`，可通过 `At.args` 的 `index=N`、`var=N` 或 `name=localName`
+     * 限定 JVM 局部变量槽位或 LocalVariableTable 变量名。
      * 注入逻辑插入在读取指令之后，只替换本次读取压入栈顶的值，不回写局部变量槽位。
      *
      * @param target 目标方法
@@ -575,9 +579,9 @@ class ModifyExpressionValueInjector(
      */
     private fun injectLoad(target: MethodNode): Int {
         require(at.target.isEmpty()) {
-            "@ModifyExpressionValue LOAD uses At.args index=N or var=N for local variable slot filtering, not At.target"
+            "@ModifyExpressionValue LOAD uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
         }
-        val localVariableIndex = parseLocalVariableIndex("LOAD")
+        val localVariableFilter = parseLocalVariableFilter("LOAD")
         val handlerExpressionType = requireHandlerExpressionArgumentType()
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -590,7 +594,7 @@ class ModifyExpressionValueInjector(
             if (insn !is VarInsnNode || insn.opcode !in LOAD_OPS) {
                 continue
             }
-            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
                 continue
             }
             if (!isLoadCompatibleWithHandler(insn.opcode, handlerExpressionType)) {
@@ -598,11 +602,11 @@ class ModifyExpressionValueInjector(
             }
 
             val resolvedExpressionType = resolveIndexedLocalExpressionType(target, insn.`var`, handlerExpressionType)
-            if (localVariableIndex == null && handlerExpressionType.isReferenceType() && resolvedExpressionType == null) {
+            if (localVariableFilter.index == null && handlerExpressionType.isReferenceType() && resolvedExpressionType == null) {
                 continue
             }
             val expressionType = resolvedExpressionType ?: handlerExpressionType
-            if (localVariableIndex == null && !isHandlerCompatible(expressionType, allowThrowableSubtypeReturn = false)) {
+            if (localVariableFilter.index == null && !isHandlerCompatible(expressionType, allowThrowableSubtypeReturn = false)) {
                 continue
             }
             val currentOrdinal = matchedOrdinal++
@@ -622,7 +626,8 @@ class ModifyExpressionValueInjector(
     /**
      * 改写局部变量写入指令即将消费的表达式值。
      *
-     * `STORE` 不使用 `at.target`，可通过 `At.args` 的 `index=N` 或 `var=N` 限定 JVM 局部变量槽位。
+     * `STORE` 不使用 `at.target`，可通过 `At.args` 的 `index=N`、`var=N` 或 `name=localName`
+     * 限定 JVM 局部变量槽位或 LocalVariableTable 变量名。
      * 注入逻辑插入在写入指令之前，让原 `xSTORE` 继续把 handler 返回的新值写入局部变量槽位。
      *
      * @param target 目标方法
@@ -631,9 +636,9 @@ class ModifyExpressionValueInjector(
      */
     private fun injectStore(target: MethodNode): Int {
         require(at.target.isEmpty()) {
-            "@ModifyExpressionValue STORE uses At.args index=N or var=N for local variable slot filtering, not At.target"
+            "@ModifyExpressionValue STORE uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
         }
-        val localVariableIndex = parseLocalVariableIndex("STORE")
+        val localVariableFilter = parseLocalVariableFilter("STORE")
         val handlerExpressionType = requireHandlerExpressionArgumentType()
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -646,7 +651,7 @@ class ModifyExpressionValueInjector(
             if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
                 continue
             }
-            if (localVariableIndex != null && insn.`var` != localVariableIndex) {
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
                 continue
             }
             if (!isStoreCompatibleWithHandler(insn.opcode, handlerExpressionType)) {
@@ -654,11 +659,11 @@ class ModifyExpressionValueInjector(
             }
 
             val resolvedExpressionType = resolveIndexedLocalExpressionType(target, insn.`var`, handlerExpressionType)
-            if (localVariableIndex == null && handlerExpressionType.isReferenceType() && resolvedExpressionType == null) {
+            if (localVariableFilter.index == null && handlerExpressionType.isReferenceType() && resolvedExpressionType == null) {
                 continue
             }
             val expressionType = resolvedExpressionType ?: handlerExpressionType
-            if (localVariableIndex == null && !isHandlerCompatible(expressionType, allowThrowableSubtypeReturn = false)) {
+            if (localVariableFilter.index == null && !isHandlerCompatible(expressionType, allowThrowableSubtypeReturn = false)) {
                 continue
             }
             val currentOrdinal = matchedOrdinal++
@@ -696,16 +701,19 @@ class ModifyExpressionValueInjector(
     }
 
     /**
-     * 从 `At.args` 解析局部变量槽位过滤条件。
+     * 从 `At.args` 解析局部变量过滤条件。
      *
-     * 支持 `index=N` 与 `var=N` 两种写法；未声明时返回 `null`，表示不按槽位过滤。
+     * 支持 `index=N` 与 `var=N` 按槽位过滤，也支持 `name=localName` 按 LocalVariableTable 变量名过滤。
      *
      * @param pointName 当前定位点名称，用于错误提示
-     * @return 指定的 JVM 局部变量槽位；未指定时返回 `null`
-     * @throws IllegalArgumentException 声明多个过滤条件、非整数或负数槽位时抛出
+     * @return 局部变量过滤条件；未指定时返回空过滤
+     * @throws IllegalArgumentException 声明多个同类过滤条件、非整数、负数槽位或空变量名时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
      */
-    private fun parseLocalVariableIndex(pointName: String): Int? {
-        val values =
+    private fun parseLocalVariableFilter(pointName: String): LocalVariableFilter {
+        val slotValues =
             at.args.mapNotNull { arg ->
                 val trimmed = arg.trim()
                 when {
@@ -714,23 +722,162 @@ class ModifyExpressionValueInjector(
                     else -> null
                 }
             }
+        val nameValues =
+            at.args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                if (trimmed.startsWith("name=")) {
+                    trimmed.substringAfter("name=")
+                } else {
+                    null
+                }
+            }
 
-        if (values.isEmpty()) {
-            return null
-        }
-        require(values.size == 1) {
+        require(slotValues.size <= 1) {
             "@ModifyExpressionValue $pointName supports only one local variable slot filter in At.args"
+        }
+        require(nameValues.size <= 1) {
+            "@ModifyExpressionValue $pointName supports only one local variable name filter in At.args"
         }
 
         val index =
-            values.single().toIntOrNull()
-                ?: throw IllegalArgumentException(
-                    "@ModifyExpressionValue $pointName local variable slot filter must be an integer: ${values.single()}",
-                )
-        require(index >= 0) {
-            "@ModifyExpressionValue $pointName local variable slot filter must be non-negative: $index"
+            slotValues.singleOrNull()?.let { value ->
+                val parsed =
+                    value.toIntOrNull()
+                        ?: throw IllegalArgumentException(
+                            "@ModifyExpressionValue $pointName local variable slot filter must be an integer: $value",
+                        )
+                require(parsed >= 0) {
+                    "@ModifyExpressionValue $pointName local variable slot filter must be non-negative: $parsed"
+                }
+                parsed
+            }
+        val name =
+            nameValues.singleOrNull()?.trim()?.also { value ->
+                require(value.isNotEmpty()) {
+                    "@ModifyExpressionValue $pointName local variable name filter must not be blank"
+                }
+            }
+
+        return LocalVariableFilter(index, name)
+    }
+
+    /**
+     * 局部变量读写过滤条件。
+     *
+     * @property index JVM 局部变量槽位；为 `null` 时不按槽位过滤
+     * @property name LocalVariableTable 中的变量名；为 `null` 时不按名称过滤
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private data class LocalVariableFilter(
+        val index: Int? = null,
+        val name: String? = null,
+    ) {
+        /**
+         * 当前过滤条件是否为空。
+         *
+         * @return 未声明槽位和名称过滤时返回 `true`
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun isEmpty(): Boolean = index == null && name == null
+    }
+
+    /**
+     * 判断局部变量指令是否满足槽位和名称过滤条件。
+     *
+     * @param target 目标方法
+     * @param insn 候选局部变量读写指令
+     * @param filter 注解声明的局部变量过滤条件
+     * @return 候选指令满足过滤条件时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun matchesLocalVariableFilter(
+        target: MethodNode,
+        insn: VarInsnNode,
+        filter: LocalVariableFilter,
+    ): Boolean {
+        if (filter.isEmpty()) {
+            return true
         }
-        return index
+        if (filter.index != null && insn.`var` != filter.index) {
+            return false
+        }
+        if (filter.name == null) {
+            return true
+        }
+        return localVariableAt(target, localVariableAnchor(insn), insn.`var`)?.name == filter.name
+    }
+
+    /**
+     * 选择局部变量名称过滤使用的锚点。
+     *
+     * STORE 指令可能位于变量作用域起点标签之前，因此优先使用写入后的下一条真实指令判断变量名范围。
+     *
+     * @param insn 候选局部变量读写指令
+     * @return 用于 LocalVariableTable 范围判断的锚点
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAnchor(insn: VarInsnNode): AbstractInsnNode =
+        if (at.value == InjectionPoint.STORE) {
+            nextRealInstruction(insn) ?: insn
+        } else {
+            insn
+        }
+
+    /**
+     * 查找锚点处覆盖指定槽位的局部变量表记录。
+     *
+     * @param target 目标方法
+     * @param anchor 待匹配的锚点指令
+     * @param index JVM 局部变量槽位
+     * @return 覆盖锚点的局部变量记录；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAt(
+        target: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): LocalVariableNode? {
+        val insns = target.instructions.toArray()
+        val anchorIndex = insns.indexOf(anchor)
+        if (anchorIndex < 0) {
+            return null
+        }
+
+        return target.localVariables.firstOrNull { local ->
+            local.index == index && local.containsInstruction(insns, anchorIndex)
+        }
+    }
+
+    /**
+     * 判断局部变量表记录是否覆盖给定指令下标。
+     *
+     * @param insns 目标方法指令数组
+     * @param instructionIndex 待判断的指令下标
+     * @return 指令下标处于该局部变量生命周期内时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun LocalVariableNode.containsInstruction(
+        insns: Array<AbstractInsnNode>,
+        instructionIndex: Int,
+    ): Boolean {
+        val startIndex = insns.indexOf(start)
+        val endIndex = insns.indexOf(end)
+        return startIndex >= 0 &&
+            endIndex >= 0 &&
+            instructionIndex >= startIndex &&
+            instructionIndex < endIndex
     }
 
     /**

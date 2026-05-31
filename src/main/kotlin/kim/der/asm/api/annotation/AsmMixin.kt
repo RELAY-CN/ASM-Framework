@@ -940,8 +940,10 @@ annotation class WrapWithCondition(
  * - [InjectionPoint.NEW] 的 [At.target] 为类型 internal name 或 binary name；handler 接收已初始化对象；省略 [At.target] 时按 handler 首参与返回类型筛选兼容 `NEW`
  * - [InjectionPoint.CAST] 的 [At.target] 为类型 internal name 或 binary name；handler 接收转换完成后的同类型对象；省略 [At.target] 时按 handler 首参与返回类型筛选兼容 `CHECKCAST`
  * - [InjectionPoint.CONSTANT] 的 [At.target] 为常量文本；省略时按 handler 首参与返回类型筛选兼容常量表达式，不兼容候选不计入 [ordinal] 或命中数
- * - [InjectionPoint.LOAD] 通过 [At.args] 中的 `index=N` 或 `var=N` 按 JVM 局部变量槽位过滤；handler 接收 `xLOAD` 读取出的栈顶表达式值，返回值只替换这一次读取结果，不写回原槽位
- * - [InjectionPoint.STORE] 通过 [At.args] 中的 `index=N` 或 `var=N` 按 JVM 局部变量槽位过滤；handler 接收 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位
+ * - [InjectionPoint.LOAD] 通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
+ *   按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；handler 接收 `xLOAD` 读取出的栈顶表达式值，返回值只替换这一次读取结果，不写回原槽位
+ * - [InjectionPoint.STORE] 通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
+ *   按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；handler 接收 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位
  * - 未指定调用、字段读取、字段写入、数组写入、[InjectionPoint.NEW]、[InjectionPoint.CAST] 或 [InjectionPoint.CONSTANT] 目标时，不兼容候选不计入 [ordinal] 或命中数
  * - [InjectionPoint.INSTANCEOF] 的 [At.target] 为类型 internal name 或 binary name；handler 接收 `Boolean` 判断结果
  * - [InjectionPoint.JUMP] 的 [At.target] 为条件跳转操作码名或数字；handler 接收原始分支结果 `Boolean`，返回新的分支结果；`GOTO` 与 `JSR` 不支持表达式改写

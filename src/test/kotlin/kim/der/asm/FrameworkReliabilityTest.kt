@@ -2246,6 +2246,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun modifyExpressionValueAtLoadArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(ModifyExpressionValueLoadNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedLoadVariableTarget", namedLoadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:expr-second", result)
+    }
+
+    @Test
+    fun modifyExpressionValueAtStoreArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(ModifyExpressionValueStoreNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedStoreVariableTarget", namedStoreVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedStoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("first:store-second", result)
+    }
+
+    @Test
     fun redirectAtLoadRewritesSingleReadWithoutWritingBackSlot() {
         AsmRegistry.register(RedirectLoadMixin::class.java)
 
@@ -10263,6 +10289,30 @@ class FrameworkReliabilityTest {
             method = "value()Ljava/lang/String;",
             at = At(value = InjectionPoint.STORE, args = ["index=1"]),
             ordinal = 0,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "store-$original"
+    }
+
+    @AsmMixin("NamedLoadVariableTarget")
+    object ModifyExpressionValueLoadNameMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expr-$original"
+    }
+
+    @AsmMixin("NamedStoreVariableTarget")
+    object ModifyExpressionValueStoreNameMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=target"]),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun modify(original: String): String = "store-$original"

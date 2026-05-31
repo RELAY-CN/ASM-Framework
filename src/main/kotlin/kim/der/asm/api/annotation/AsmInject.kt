@@ -249,8 +249,10 @@ enum class InjectionPoint {
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [InjectionPoint.FIELD_ASSIGN] 改写字段待写入值；
  *   也可通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式，
  *   通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set` 把数组字段目标解释为数组元素写入前的待写入元素值；
- *   通过 [InjectionPoint.LOAD] 与 `index=N` 或 `var=N` 改写指定 JVM 局部变量槽位的本次读取表达式值，不写回槽位；
- *   通过 [InjectionPoint.STORE] 与 `index=N` 或 `var=N` 改写指定 JVM 局部变量槽位的本次待写入表达式值，返回值交给原 `xSTORE` 继续写入。
+ *   通过 [InjectionPoint.LOAD] 与 `index=N`、`var=N` 或 `name=localName` 改写指定 JVM 局部变量槽位
+ *   或 LocalVariableTable 变量名的本次读取表达式值，不写回槽位；
+ *   通过 [InjectionPoint.STORE] 与 `index=N`、`var=N` 或 `name=localName` 改写指定 JVM 局部变量槽位
+ *   或 LocalVariableTable 变量名的本次待写入表达式值，返回值交给原 `xSTORE` 继续写入。
  * - 普通 [AsmInject] 的 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可通过 [args] 中的
  *   `index=N` 或 `var=N` 只匹配指定 JVM 局部变量槽位的读写指令，也可用 `name=localName`
  *   只匹配 LocalVariableTable 作用域内同名变量；缺少调试变量表时名称过滤不会命中。
@@ -266,7 +268,8 @@ enum class InjectionPoint {
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set`、`array=length`，以及
  * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，
  * [WrapOperation] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，[WrapWithCondition] 支持 `array=set`，
- * [ModifyExpressionValue] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N` 与 `var=N` 槽位过滤，
+ * [ModifyExpressionValue] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] /
+ * [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
  * 其中 `array=set` 需配合 [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
