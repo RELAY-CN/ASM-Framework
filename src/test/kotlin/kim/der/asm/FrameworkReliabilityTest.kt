@@ -334,6 +334,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun callbackInfoExposesCancellableState() {
+        val cancellable = CallbackInfo(cancellable = true)
+        val nonCancellable = CallbackInfo()
+
+        assertEquals(true, cancellable.isCancellable())
+        assertEquals(false, nonCancellable.isCancellable())
+    }
+
+    @Test
     fun argsSetAllRejectsMismatchedValueCountWithoutPartialWrite() {
         val args = Args(arrayOf("old", "value"))
 

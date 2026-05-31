@@ -178,7 +178,8 @@ object LoggingMixin {
 只有声明 `cancellable = true` 的可取消回调才能调用 `CallbackInfo.cancel()`；当前 `HEAD` 注入会在取消后提前返回。
 如果目标方法有返回值，可取消回调调用 `CallbackInfo.setReturnValue(...)` 也会自动标记取消并返回该值。
 普通 `RETURN` 注入会把原始返回值预置到 `CallbackInfo`，handler 可调用 `setReturnValue(null)` 把引用类型返回值明确替换为 `null`。
-`CallbackInfoReturnable<T>` 继承自 `CallbackInfo`，可直接使用同一组 `cancel()`、`getReturnValue()` 与 `setReturnValue(...)`
+handler 可用 `callback.isCancellable()` 判断当前回调是否允许取消，用 `callback.isCancelled()` 判断是否已经请求取消。
+`CallbackInfoReturnable<T>` 继承自 `CallbackInfo`，可直接使用同一组 `cancel()`、`isCancellable()`、`isCancelled()`、`getReturnValue()` 与 `setReturnValue(...)`
 方法，也可使用 `setTypedReturnValue(value)`、`getTypedReturnValue()` 以及 `getReturnValueI()` 等 primitive getter，
 适合让 handler 签名直接表达目标返回值类型并迁移 Mixin 风格代码。
 
@@ -1239,7 +1240,7 @@ object ConditionalMixin {
 }
 ```
 
-`CallbackInfo.cancel()` 需要 `@AsmInject(cancellable = true)`；漏写时会在 handler 调用期间抛出异常，避免补丁静默失效。
+`CallbackInfo.cancel()` 需要 `@AsmInject(cancellable = true)`；漏写时会在 handler 调用期间抛出异常，避免补丁静默失效。需要兼容可取消与不可取消 handler 时，可先检查 `callback.isCancellable()`。
 非 `void` 目标方法可直接在可取消 HEAD 注入中调用 `callback.setReturnValue(value)`，该调用会同时取消原方法体。
 
 `@WrapWithCondition` 可用于按条件跳过 `void` 调用、返回 `void` 的 `invokedynamic` 调用、字段写入、数组元素写入、条件跳转或即将抛出的异常。字段写入模式使用

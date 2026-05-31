@@ -1134,6 +1134,22 @@ if (callback.isCancelled()) {
 }
 ```
 
+##### `isCancellable(): Boolean`
+
+检查当前回调是否允许取消。该方法只反映注入点声明的可取消能力，不表示 handler 已经请求取消；判断是否已请求取消应使用 `isCancelled()`。
+
+**返回：**
+
+- `Boolean`: 是否允许调用 `cancel()` 或通过 `setReturnValue(...)` 触发提前返回
+
+**示例：**
+
+```kotlin
+if (callback.isCancellable()) {
+    callback.cancel()
+}
+```
+
 ##### `getReturnValue<T>(): T?`
 
 获取返回值。
@@ -1205,7 +1221,7 @@ val callback = CallbackInfo.returnable("value")
 ### CallbackInfoReturnable<T>
 
 带目标返回值类型的回调信息类，用于在非 `void` 目标方法的 `@AsmInject` handler 中读取或替换返回值。
-它继承自 `CallbackInfo`，因此可直接使用 `cancel()`、`isCancelled()`、`getReturnValue()` 与 `setReturnValue(...)`。
+它继承自 `CallbackInfo`，因此可直接使用 `cancel()`、`isCancelled()`、`isCancellable()`、`getReturnValue()` 与 `setReturnValue(...)`。
 
 #### 构造函数
 

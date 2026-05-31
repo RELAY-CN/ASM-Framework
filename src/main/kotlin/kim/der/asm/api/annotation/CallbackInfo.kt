@@ -64,6 +64,18 @@ open class CallbackInfo
         fun isCancelled(): Boolean = cancelled
 
         /**
+         * 当前回调是否允许取消。
+         *
+         * 该方法只暴露注入点声明的可取消能力，不表示 handler 已经调用 [cancel]。
+         * 若需要判断当前是否已请求取消，应使用 [isCancelled]。
+         *
+         * @return `true` 表示当前回调允许调用 [cancel] 或通过 [setReturnValue] 触发提前返回
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun isCancellable(): Boolean = cancellable
+
+        /**
          * 获取返回值。
          *
          * 该方法会尝试将内部保存的值转换为目标类型；类型不匹配时返回 `null`。
