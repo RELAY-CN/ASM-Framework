@@ -3222,6 +3222,16 @@ class RedirectInjector(
         return cursor
     }
 
+    /**
+     * 判断 handler 参数类型是否能接收原栈值类型。
+     *
+     * 基本类型要求完全一致；引用类型允许 handler 声明为更宽的父类型，
+     * 其中 `java.lang.Object` 与 `kotlin.Any` 作为通用引用参数特殊放行。
+     *
+     * @param expected 原栈值类型
+     * @param actual handler 声明的参数类型
+     * @return handler 参数可安全接收原值时返回 `true`
+     */
     private fun isHandlerParameterCompatible(
         expected: Type,
         actual: Type,
@@ -3241,6 +3251,16 @@ class RedirectInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 判断 handler 返回值是否能替代原位置期望类型。
+     *
+     * `void` 只能替代 `void`；基本类型要求完全一致；引用类型允许 handler 返回原类型的子类型，
+     * 并兼容 `java.lang.Object` 与 `kotlin.Any` 这类需要后续 `CHECKCAST` 的宽返回类型。
+     *
+     * @param original 原位置期望的返回或表达式类型
+     * @param handler handler 实际返回类型
+     * @return handler 返回值可作为原结果使用时返回 `true`
+     */
     private fun isReturnCompatible(
         original: Type,
         handler: Type,
@@ -3262,6 +3282,14 @@ class RedirectInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 必要时把局部值重定向 handler 的返回值转回原引用类型。
+     *
+     * 仅引用类型需要补充 `CHECKCAST`，基本类型已经在签名校验阶段要求精确匹配。
+     *
+     * @param il 正在构造的替换指令列表
+     * @param valueType 原局部变量值或常量值类型
+     */
     private fun addLocalValueCastIfNeeded(
         il: InsnList,
         valueType: Type,
@@ -3272,8 +3300,22 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 判断 ASM 类型是否为 JVM 引用类型。
+     *
+     * @return 当前类型是对象或数组类型时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 判断局部变量读取指令是否与 handler 首参类型兼容。
+     *
+     * 该检查基于 load opcode 的栈类型类别，引用读取只要求 handler 首参为对象或数组。
+     *
+     * @param opcode 候选局部变量读取指令 opcode
+     * @param handlerType handler 首参类型
+     * @return handler 首参可接收该读取值类别时返回 `true`
+     */
     private fun isLoadCompatibleWithHandler(
         opcode: Int,
         handlerType: Type,
@@ -3287,6 +3329,15 @@ class RedirectInjector(
             else -> false
         }
 
+    /**
+     * 判断局部变量写入指令是否与 handler 首参类型兼容。
+     *
+     * 该检查基于 store opcode 的栈类型类别，引用写入只要求 handler 首参为对象或数组。
+     *
+     * @param opcode 候选局部变量写入指令 opcode
+     * @param handlerType handler 首参类型
+     * @return handler 首参可接收该待写入值类别时返回 `true`
+     */
     private fun isStoreCompatibleWithHandler(
         opcode: Int,
         handlerType: Type,
@@ -3300,6 +3351,16 @@ class RedirectInjector(
             else -> false
         }
 
+    /**
+     * 按 ASM 引用类型加载对应的运行时 [Class]。
+     *
+     * 数组类型使用 descriptor 转 Java 类名，对象类型使用 [Type.getClassName]；
+     * 类加载器优先取当前 Mixin 类加载器。
+     *
+     * @param type 待加载的对象或数组类型
+     * @return 对应的运行时类
+     * @throws ClassNotFoundException 类型无法由当前类加载器解析时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -3311,6 +3372,15 @@ class RedirectInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 判断构造器重定向 handler 返回值是否能替代构造结果。
+     *
+     * 当前实现复用普通返回值兼容规则，保留独立入口便于构造器语义后续扩展。
+     *
+     * @param constructedType 原构造表达式产生的对象类型
+     * @param handler handler 实际返回类型
+     * @return handler 返回值可作为构造结果使用时返回 `true`
+     */
     private fun isConstructorReturnCompatible(
         constructedType: Type,
         handler: Type,
@@ -3318,6 +3388,13 @@ class RedirectInjector(
         return isReturnCompatible(constructedType, handler)
     }
 
+    /**
+     * 为实例 handler 调用压入 Mixin object 实例。
+     *
+     * 静态 handler 不需要 owner；实例 handler 当前只支持 Kotlin `object`，因此通过 `INSTANCE` 字段取单例。
+     *
+     * @param il 正在构造的替换指令列表
+     */
     private fun addHandlerOwner(il: InsnList) {
         if (isHandlerStatic()) {
             return
@@ -3334,8 +3411,20 @@ class RedirectInjector(
         )
     }
 
+    /**
+     * 判断当前 handler 是否为 JVM 静态方法。
+     *
+     * @return handler 带有 `static` 修饰符时返回 `true`
+     */
     private fun isHandlerStatic(): Boolean = Modifier.isStatic(asmMethod.modifiers)
 
+    /**
+     * 按类型从局部变量槽位加载值。
+     *
+     * @param il 正在构造的替换指令列表
+     * @param paramType 待加载值类型
+     * @param varIndex 局部变量槽位
+     */
     private fun loadFromVariable(
         il: InsnList,
         paramType: Type,
@@ -3344,6 +3433,15 @@ class RedirectInjector(
         InstructionUtil.loadParam(paramType, varIndex).let { il.add(it) }
     }
 
+    /**
+     * 将 handler 额外声明的目标方法参数前缀压入栈。
+     *
+     * 只加载从目标方法参数列表开头起请求的参数数量，并正确处理实例方法的 `this` 槽位与宽类型槽位。
+     *
+     * @param il 正在构造的替换指令列表
+     * @param target 当前目标方法
+     * @param requestedTargetParamCount handler 额外请求的目标方法参数数量
+     */
     private fun loadTargetMethodParameters(
         il: InsnList,
         target: MethodNode,
@@ -3362,6 +3460,15 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 按类型把栈顶值暂存到局部变量槽位。
+     *
+     * 根据 ASM 类型选择 `ISTORE`、`LSTORE`、`FSTORE`、`DSTORE` 或 `ASTORE`。
+     *
+     * @param il 正在构造的替换指令列表
+     * @param paramType 栈顶值类型
+     * @param varIndex 局部变量槽位
+     */
     private fun storeStackValue(
         il: InsnList,
         paramType: Type,
@@ -3386,6 +3493,14 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 计算可用于临时变量的下一个局部变量槽位。
+     *
+     * 结果会覆盖方法参数、调试局部变量表和现有局部变量读写指令已使用的最高槽位。
+     *
+     * @param target 当前目标方法
+     * @return 可安全分配给临时值的起始槽位
+     */
     private fun nextLocalIndex(target: MethodNode): Int {
         var maxIndex = if ((target.access and Opcodes.ACC_STATIC) != 0) 0 else 1
         for (paramType in Type.getArgumentTypes(target.desc)) {
