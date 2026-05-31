@@ -1060,10 +1060,14 @@ class RedirectInjector(
 
     /**
      * 解析目标方法签名。
+     *
      * 支持 owner 使用 slash 或 dot：
      * - java/lang/String.trim()Ljava/lang/String;
      * - java.lang.String.trim()Ljava/lang/String;
      * - trim()Ljava/lang/String;
+     *
+     * @param signature `At.target` 中声明的方法目标
+     * @return owner、方法名与描述符；未声明的部分返回 `null`
      */
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
@@ -1090,6 +1094,15 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 判断普通方法调用是否匹配目标方法约束。
+     *
+     * @param insn 候选普通方法调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名
+     * @param targetDesc 目标方法描述符；为空字符串时不限制描述符
+     * @return 候选调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -1105,6 +1118,17 @@ class RedirectInjector(
         return targetDesc.isEmpty() || insn.desc == targetDesc
     }
 
+    /**
+     * 判断 `invokedynamic` 调用是否匹配目标方法约束。
+     *
+     * owner 约束会匹配 bootstrap method owner，名称约束可匹配动态调用名或 bootstrap method 名。
+     *
+     * @param insn 候选 `invokedynamic` 调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 bootstrap owner
+     * @param targetName 目标动态调用名或 bootstrap method 名
+     * @param targetDesc 目标动态调用描述符；为空字符串时不限制描述符
+     * @return 候选动态调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetInvokeDynamic(
         insn: InvokeDynamicInsnNode,
         targetOwner: String?,
@@ -1120,6 +1144,15 @@ class RedirectInjector(
         return targetDesc.isEmpty() || insn.desc == targetDesc
     }
 
+    /**
+     * 解析字段目标签名。
+     *
+     * 支持 `owner.name:desc`、`owner/name:desc`、`name:desc` 与仅字段名形式；
+     * owner 会统一转换为 JVM internal name，空签名表示不限制字段。
+     *
+     * @param signature `At.target` 中声明的字段目标
+     * @return 解析后的字段目标约束
+     */
     private fun parseFieldTarget(signature: String): FieldTarget {
         if (signature.isEmpty()) {
             return FieldTarget(null, null, null)
@@ -1143,6 +1176,13 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 判断字段指令是否匹配字段目标约束。
+     *
+     * @param insn 候选字段指令
+     * @param target 字段目标约束
+     * @return 候选字段满足 owner、name 与 descriptor 约束时返回 `true`
+     */
     private fun matchesTargetField(
         insn: FieldInsnNode,
         target: FieldTarget,
@@ -2676,6 +2716,14 @@ class RedirectInjector(
         return targetParamCount
     }
 
+    /**
+     * 构造普通方法调用 handler 必须接收的前缀参数类型。
+     *
+     * 实例调用会把调用 owner 作为首参，静态调用只保留原调用参数。
+     *
+     * @param originalInsn 被重定向的普通方法调用指令
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedHandlerParams(originalInsn: MethodInsnNode): Array<Type> {
         val originalParams = Type.getArgumentTypes(originalInsn.desc).toList()
         return if (originalInsn.opcode == Opcodes.INVOKESTATIC) {
@@ -2685,6 +2733,14 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 构造字段读取 handler 必须接收的前缀参数类型。
+     *
+     * 静态字段读取不需要前缀参数，实例字段读取需要字段 owner。
+     *
+     * @param originalInsn 被重定向的字段读取指令
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedFieldHandlerParams(originalInsn: FieldInsnNode): Array<Type> =
         if (originalInsn.opcode == Opcodes.GETSTATIC) {
             emptyArray()
@@ -2692,6 +2748,14 @@ class RedirectInjector(
             arrayOf(Type.getObjectType(originalInsn.owner))
         }
 
+    /**
+     * 构造字段写入 handler 必须接收的前缀参数类型。
+     *
+     * 静态字段写入只需要待写入值，实例字段写入需要字段 owner 与待写入值。
+     *
+     * @param originalInsn 被重定向的字段写入指令
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedFieldAssignHandlerParams(originalInsn: FieldInsnNode): Array<Type> {
         val fieldType = Type.getType(originalInsn.desc)
         return if (originalInsn.opcode == Opcodes.PUTSTATIC) {
@@ -2701,6 +2765,15 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 构造数组访问 handler 必须接收的前缀参数类型。
+     *
+     * 读取模式接收数组和索引，写入模式追加元素值，长度模式只接收数组引用。
+     *
+     * @param fieldInsn 产生数组引用的字段读取指令
+     * @param mode 数组访问模式
+     * @return handler 前缀参数类型数组
+     */
     private fun buildExpectedArrayAccessHandlerParams(
         fieldInsn: FieldInsnNode,
         mode: ArrayAccessMode,
@@ -2713,6 +2786,17 @@ class RedirectInjector(
         }
     }
 
+    /**
+     * 从数组访问指令向前查找产生数组引用的字段读取指令。
+     *
+     * 只接受直接邻近且匹配目标字段的字段读取；遇到其他字段指令、方法调用或数组访问时停止，
+     * 避免跨过会改变栈结构的复杂表达式。
+     *
+     * @param arrayInsn 数组元素访问或数组长度指令
+     * @param target 字段目标约束
+     * @return 匹配的数组字段读取指令；无法确认简单字段数组访问时返回 `null`
+     * @throws IllegalArgumentException 匹配字段不是数组类型时抛出
+     */
     private fun findArrayFieldProducer(
         arrayInsn: AbstractInsnNode,
         target: FieldTarget,
