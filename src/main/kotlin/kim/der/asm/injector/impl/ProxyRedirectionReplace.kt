@@ -2,11 +2,10 @@
  * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
-package kim.der.asm.injector.impl.replace
+package kim.der.asm.injector.impl
 
 import kim.der.asm.api.replace.RedirectionReplace
 import kim.der.asm.api.replace.RedirectionReplaceManager
-import kim.der.asm.injector.impl.replace.defaults.BasicDataRedirections
 import kim.der.asm.utils.DescriptionUtil.getDesc
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method

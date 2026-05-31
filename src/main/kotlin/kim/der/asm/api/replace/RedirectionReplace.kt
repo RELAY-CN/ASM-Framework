@@ -72,7 +72,8 @@ fun interface RedirectionReplace {
         /**
          * 替换器桥接方法名。
          *
-         * 转换器生成字节码时会按该名称调用 [RedirectionReplaceApi.invoke]，不要在不同步更新注入器的情况下修改。
+         * 转换器生成字节码时会按该名称调用内部 `RedirectionReplaceApi.invoke`，
+         * 不要在不同步更新注入器的情况下修改。
          *
          * @author Dr (dr@der.kim)
          * @date 2026-05-31
@@ -82,7 +83,7 @@ fun interface RedirectionReplace {
         /**
          * 忽略模式替换器桥接方法名。
          *
-         * 转换器生成忽略模式字节码时会按该名称调用 [RedirectionReplaceApi.invokeIgnore]。
+         * 转换器生成忽略模式字节码时会按该名称调用内部 `RedirectionReplaceApi.invokeIgnore`。
          * 该入口主要服务全方法替换链路，用于跳过普通用户替换分派。
          *
          * @author Dr (dr@der.kim)
@@ -93,8 +94,8 @@ fun interface RedirectionReplace {
         /**
          * 替换器桥接方法描述符。
          *
-         * 该描述符是运行期 ABI 的一部分，必须与 [RedirectionReplaceApi.invoke] 和 [RedirectionReplaceApi.invokeIgnore]
-         * 的 JVM 签名保持一致。
+         * 该描述符是运行期 ABI 的一部分，必须与内部 `RedirectionReplaceApi.invoke`
+         * 和 `RedirectionReplaceApi.invokeIgnore` 的 JVM 签名保持一致。
          *
          * @author Dr (dr@der.kim)
          * @date 2026-05-31

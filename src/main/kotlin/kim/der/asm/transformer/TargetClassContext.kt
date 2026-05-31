@@ -6,9 +6,9 @@ package kim.der.asm.transformer
 
 import kim.der.asm.api.annotation.*
 import kim.der.asm.api.replace.RedirectionReplace
-import kim.der.asm.api.replace.RedirectionReplaceApi
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AsmInjectorFactory
+import kim.der.asm.injector.impl.RedirectionReplaceApi
 import kim.der.asm.injector.util.InlineCodeGenerator
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil

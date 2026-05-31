@@ -319,9 +319,9 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 
 `fallback` 是未命中显式替换器时使用的延迟默认实现，只有确实需要默认替换时才应调用。管理器会被转换后字节码的运行期入口调用，因此实现必须避免依赖转换期状态；若实现内部维护可变注册表，需要自行保证类加载器隔离与线程安全。默认实现保持无注册表状态，直接使用调用方传入的 fallback。替换逻辑或默认实现抛出的异常会透出给调用方。
 
-### RedirectionReplaceApi
+### RedirectionReplaceApi（内部运行期入口）
 
-`RedirectionReplaceApi` 是转换器注入字节码时直接引用的运行期替换入口。方法名和 JVM 描述符需要与 `RedirectionReplace` 中的桥接常量保持一致，调用方不应直接替换内部 manager。
+`kim.der.asm.injector.impl.RedirectionReplaceApi` 是转换器注入字节码时直接引用的内部运行期替换入口。它不属于普通用户扩展 API；方法名和 JVM 描述符需要与 `RedirectionReplace` 中的桥接常量保持一致，调用方不应直接替换内部 manager。
 
 #### 方法
 
@@ -330,7 +330,7 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 - `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行普通重定向替换，由 `@Redirect` 注入点调用
 - `invokeIgnore(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行忽略模式替换，由全方法替换链路调用
 
-`desc` 使用 `Lowner;name(desc)return` 格式描述调用点，`type` 是原调用返回类型，`args` 按原调用参数顺序传入。`invoke` 使用默认重定向管理器；`invokeIgnore` 使用忽略管理器，不进行用户替换分派，只走默认替换路径，主要用于全方法替换链路中保留调用形态但跳过额外重定向副作用。当前实现不使用 `ServiceLoader` 自动发现 manager，避免模块化环境或多 ClassLoader 场景下出现加载与隔离问题。`invoke` / `invokeIgnore` 的方法名、参数顺序、返回类型和 JVM 描述符都是运行期 ABI，修改时必须同步更新所有注入器和桥接常量。
+`desc` 使用 `Lowner;name(desc)return` 格式描述调用点，`type` 是原调用返回类型，`args` 按原调用参数顺序传入。`invoke` 使用默认重定向管理器；`invokeIgnore` 使用忽略管理器，不进行用户替换分派，只走默认替换路径，主要用于全方法替换链路中保留调用形态但跳过额外重定向副作用。当前实现不使用 `ServiceLoader` 自动发现 manager，避免模块化环境或多 ClassLoader 场景下出现加载与隔离问题。`invoke` / `invokeIgnore` 的方法名、参数顺序、返回类型和 JVM 描述符都是运行期 ABI，修改时必须同步更新所有注入器和桥接常量。用户侧需要自定义替换逻辑时应实现 `kim.der.asm.api.replace.RedirectionReplace`，不要依赖 `injector.impl` 下的内部类。
 
 ## 注解 API
 
@@ -1060,7 +1060,7 @@ fun removeSync() {}
 
 替换目标类中的所有方法。
 
-该注解会在方法级注解处理前运行，把目标类的方法体替换成框架默认返回或 `RedirectionReplaceApi.invokeIgnore`
+该注解会在方法级注解处理前运行，把目标类的方法体替换成框架默认返回或内部 `RedirectionReplaceApi.invokeIgnore`
 调用。它适合为整类建立默认实现，再通过同一个 Mixin 中的 `@Overwrite` 恢复少量需要保留逻辑的方法。
 
 **参数：**

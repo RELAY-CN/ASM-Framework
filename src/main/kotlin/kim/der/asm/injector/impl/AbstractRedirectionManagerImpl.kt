@@ -2,11 +2,10 @@
  * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
-package kim.der.asm.injector.impl.replace
+package kim.der.asm.injector.impl
 
 import kim.der.asm.api.replace.RedirectionReplace
 import kim.der.asm.api.replace.RedirectionReplaceManager
-import kim.der.asm.injector.impl.replace.defaults.BasicDataRedirections
 
 /**
  * 重定向替换管理器基类。

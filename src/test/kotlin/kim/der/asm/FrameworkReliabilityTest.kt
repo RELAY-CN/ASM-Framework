@@ -53,6 +53,7 @@ import org.objectweb.asm.tree.ClassNode
 import java.io.ByteArrayOutputStream
 import java.io.PrintStream
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -73,6 +74,40 @@ class FrameworkReliabilityTest {
         assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
         }
+    }
+
+    @Test
+    fun redirectionRuntimeImplementationStaysUnderInjectorImpl() {
+        val sourceRoot = Path.of("src", "main", "kotlin")
+        val sources =
+            Files
+                .walk(sourceRoot)
+                .use { paths ->
+                    paths
+                        .filter { Files.isRegularFile(it) && it.toString().endsWith(".kt") }
+                        .map { path -> path to Files.readString(path) }
+                        .toList()
+                }
+
+        val forbiddenPackages =
+            listOf(
+                "package kim.der.asm.manager.replace",
+                "package kim.der.asm.redirections.replace",
+                "package kim.der.asm.injector.impl.replace",
+            )
+
+        forbiddenPackages.forEach { forbidden ->
+            val offenders = sources.filter { (_, text) -> forbidden in text }.map { (path, _) -> path.toString() }
+
+            assertEquals(emptyList<String>(), offenders, "$forbidden should not be used")
+        }
+
+        val apiSource =
+            sources.single { (path, _) ->
+                path.endsWith(Path.of("kim", "der", "asm", "injector", "impl", "RedirectionReplaceApi.kt"))
+            }
+
+        assertEquals(true, "package kim.der.asm.injector.impl" in apiSource.second)
     }
 
     @Test

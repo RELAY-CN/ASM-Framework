@@ -133,7 +133,7 @@ annotation class RemoveInterface(
 /**
  * 全方法替换注解。
  *
- * 用于将目标类的所有方法体替换为调用 [RedirectionReplaceApi] 的兼容实现。
+ * 用于将目标类的所有方法体替换为调用内部 `RedirectionReplaceApi` 的兼容实现。
  * 该注解作用于类级别，并会在方法级注解处理前遍历目标类的方法列表逐一替换。
  * 后续同一个 Mixin 中的 [Overwrite] 仍可定点覆盖某个方法，用于在全局默认替换后恢复关键方法实现。
  *
@@ -142,7 +142,7 @@ annotation class RemoveInterface(
  * - 会移除目标类非接口场景下的 `abstract` 类标志。
  * - 会移除目标方法的 `abstract` / `native` 标志，并清空原方法体、异常处理块、局部变量表和参数信息。
  * - 非静态字段会被置为非 `final`，以便替换后的方法可按默认运行期策略构造对象状态。
- * - 基本类型、`String` 与 `CharSequence` 返回值优先写入框架默认值；其他非 void 返回值会调用 [RedirectionReplaceApi.invokeIgnore]。
+ * - 基本类型、`String` 与 `CharSequence` 返回值优先写入框架默认值；其他非 void 返回值会调用内部 `RedirectionReplaceApi.invokeIgnore`。
  *
  * @param removeSync 是否同时移除方法的 `synchronized` 语义（移除标志与相关指令）
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
