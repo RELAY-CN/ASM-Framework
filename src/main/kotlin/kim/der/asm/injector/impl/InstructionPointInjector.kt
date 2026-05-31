@@ -557,6 +557,14 @@ class InstructionPointInjector(
         return current
     }
 
+    /**
+     * 构造普通指令点注入的 handler 调用指令。
+     *
+     * 如 handler 需要 [CallbackInfo]，会先创建并暂存 callback；handler 非 `void` 返回值会被丢弃。
+     *
+     * @param target 目标方法
+     * @return 可插入到匹配指令附近的 handler 调用指令列表
+     */
     private fun buildHandlerCall(target: MethodNode): InsnList {
         val il = InsnList()
         val callbackVarIndex =
@@ -578,6 +586,17 @@ class InstructionPointInjector(
         return il
     }
 
+    /**
+     * 构造 `CONSTANT + Shift.REPLACE` 的替换 handler 调用指令。
+     *
+     * 该模式会用 handler 返回值替代原常量加载结果，并在引用类型需要时补充 `CHECKCAST`。
+     *
+     * @param target 目标方法
+     * @param constantInsn 被替换的常量加载指令
+     * @param constantTarget 注解声明的常量匹配文本
+     * @return 产生替代常量值的指令列表
+     * @throws IllegalStateException 常量类型无法解析、handler 返回 `void` 或返回值不兼容时抛出
+     */
     private fun buildConstantReplacementHandlerCall(
         target: MethodNode,
         constantInsn: AbstractInsnNode,
@@ -611,6 +630,16 @@ class InstructionPointInjector(
         return il
     }
 
+    /**
+     * 解析常量替换位置的原常量类型。
+     *
+     * 布尔字面量目标会把 `ICONST_0` / `ICONST_1` 识别为 [Type.BOOLEAN_TYPE]；
+     * 其他常量交给 [BytecodeUtil.getConstantType] 推断。
+     *
+     * @param constantInsn 被匹配的常量加载指令
+     * @param constantTarget 注解声明的常量匹配文本
+     * @return 可替换的常量类型；不支持的常量指令返回 `null`
+     */
     private fun resolveConstantReplacementType(
         constantInsn: AbstractInsnNode,
         constantTarget: String,
@@ -621,6 +650,16 @@ class InstructionPointInjector(
         return BytecodeUtil.getConstantType(constantInsn)
     }
 
+    /**
+     * 判断常量替换 handler 返回值是否能替代原常量类型。
+     *
+     * 基本类型要求完全一致；引用类型允许原常量或 handler 返回值为通用对象类型，
+     * 否则通过运行时类可赋值关系判断。
+     *
+     * @param constantType 原常量类型
+     * @param handlerReturnType handler 返回类型
+     * @return handler 返回值可作为替换常量使用时返回 `true`
+     */
     private fun isConstantReplacementReturnCompatible(
         constantType: Type,
         handlerReturnType: Type,
@@ -646,6 +685,16 @@ class InstructionPointInjector(
         }.getOrDefault(false)
     }
 
+    /**
+     * 必要时为常量替换返回值追加类型转换。
+     *
+     * `null` 常量和通用对象常量以 handler 返回类型为准；其他引用常量会转回原常量类型。
+     *
+     * @param il 正在构造的替换指令列表
+     * @param constantInsn 被替换的常量加载指令
+     * @param constantType 原常量类型
+     * @param handlerReturnType handler 返回类型
+     */
     private fun addConstantReplacementCastIfNeeded(
         il: InsnList,
         constantInsn: AbstractInsnNode,
@@ -663,13 +712,36 @@ class InstructionPointInjector(
         }
     }
 
+    /**
+     * 判断 ASM 类型是否为 JVM 引用类型。
+     *
+     * @return 当前类型是对象或数组类型时返回 `true`
+     */
     private fun Type.isReferenceType(): Boolean = sort == Type.OBJECT || sort == Type.ARRAY
 
+    /**
+     * 判断 ASM 类型是否为通用对象类型。
+     *
+     * @return 当前类型是 `java.lang.Object` 或 `kotlin.Any` 时返回 `true`
+     */
     private fun Type.isGenericObjectType(): Boolean =
         sort == Type.OBJECT && (internalName == "java/lang/Object" || internalName == "kotlin/Any")
 
+    /**
+     * 判断文本是否为布尔字面量。
+     *
+     * @param value 待检查文本
+     * @return 文本为 `true` 或 `false` 时返回 `true`
+     */
     private fun isBooleanLiteral(value: String): Boolean = value == "true" || value == "false"
 
+    /**
+     * 判断整数常量指令是否表示指定布尔值。
+     *
+     * @param insn 候选常量加载指令
+     * @param value 期望布尔值
+     * @return 指令是对应布尔值的 `ICONST_0` 或 `ICONST_1` 时返回 `true`
+     */
     private fun isBooleanConstantInsn(
         insn: AbstractInsnNode,
         value: Boolean,
@@ -680,6 +752,16 @@ class InstructionPointInjector(
             else -> false
         }
 
+    /**
+     * 按 ASM 引用类型加载对应的运行时 [Class]。
+     *
+     * 数组类型使用 descriptor 转 Java 类名，对象类型使用 [Type.getClassName]；
+     * 类加载器优先取当前 Mixin 类加载器。
+     *
+     * @param type 待加载的对象或数组类型
+     * @return 对应的运行时类
+     * @throws ClassNotFoundException 类型无法由当前类加载器解析时抛出
+     */
     private fun loadReferenceClass(type: Type): Class<*> {
         val className =
             if (type.sort == Type.ARRAY) {
@@ -691,6 +773,15 @@ class InstructionPointInjector(
         return Class.forName(className, false, classLoader)
     }
 
+    /**
+     * 解析字段指令点的目标约束。
+     *
+     * 支持 `owner.name:desc`、`owner/name:desc`、`name:desc` 与仅字段名形式；
+     * owner 会统一转换为 JVM internal name，空目标表示不限制字段。
+     *
+     * @param target `At.target` 中声明的字段目标
+     * @return 解析后的字段目标约束
+     */
     private fun parseFieldTarget(target: String): FieldTarget {
         if (target.isEmpty()) {
             return FieldTarget(null, null, null)
@@ -714,6 +805,13 @@ class InstructionPointInjector(
         }
     }
 
+    /**
+     * 判断字段指令是否满足目标约束。
+     *
+     * @param insn 候选字段指令
+     * @param target 字段目标约束
+     * @return 候选字段满足 owner、name 与 descriptor 约束时返回 `true`
+     */
     private fun matchesField(
         insn: FieldInsnNode,
         target: FieldTarget,
@@ -730,6 +828,14 @@ class InstructionPointInjector(
         return true
     }
 
+    /**
+     * 解析方法调用目标签名。
+     *
+     * 支持 owner 使用 slash 或 dot，也支持只声明方法名或方法名加描述符。
+     *
+     * @param signature `At.target` 中声明的方法目标
+     * @return owner、方法名与描述符；未声明的部分返回 `null`
+     */
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
         if (signature.isEmpty()) {
             return Triple(null, null, null)
@@ -757,6 +863,15 @@ class InstructionPointInjector(
         }
     }
 
+    /**
+     * 判断普通方法调用是否匹配目标方法约束。
+     *
+     * @param insn 候选普通方法调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
+     * @param targetName 目标方法名
+     * @param targetDesc 目标方法描述符；为 `null` 时不限制描述符
+     * @return 候选调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -772,6 +887,17 @@ class InstructionPointInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 判断 `invokedynamic` 调用是否匹配目标方法约束。
+     *
+     * owner 约束会匹配 bootstrap method owner，名称约束可匹配动态调用名或 bootstrap method 名。
+     *
+     * @param insn 候选 `invokedynamic` 调用指令
+     * @param targetOwner 目标 owner；为 `null` 时不限制 bootstrap owner
+     * @param targetName 目标动态调用名或 bootstrap method 名
+     * @param targetDesc 目标动态调用描述符；为 `null` 时不限制描述符
+     * @return 候选动态调用满足目标约束时返回 `true`
+     */
     private fun matchesTargetInvokeDynamic(
         insn: InvokeDynamicInsnNode,
         targetOwner: String?,
@@ -787,6 +913,16 @@ class InstructionPointInjector(
         return targetDesc == null || insn.desc == targetDesc
     }
 
+    /**
+     * 计算可用于临时值的局部变量槽位。
+     *
+     * 结果会覆盖方法参数、调试局部变量表和现有局部变量读写指令已使用的最高槽位；
+     * 双槽类型会额外向后移动一个槽位以避开宽类型占用。
+     *
+     * @param target 目标方法
+     * @param type 待暂存值类型
+     * @return 可用于写入临时值的局部变量槽位
+     */
     private fun allocateLocalVariable(
         target: MethodNode,
         type: Type,
@@ -816,17 +952,36 @@ class InstructionPointInjector(
         return varIndex + if (type.size == 2) 1 else 0
     }
 
+    /**
+     * 字段指令点的目标匹配条件。
+     *
+     * @property owner 字段 owner 的 JVM internal name；为 `null` 时不限制 owner
+     * @property name 字段名；为 `null` 时不限制名称
+     * @property desc 字段描述符；为 `null` 时不限制类型
+     */
     private data class FieldTarget(
         val owner: String?,
         val name: String?,
         val desc: String?,
     )
 
+    /**
+     * `InstructionPointInjector` 共用的 opcode 集合与名称索引。
+     */
     private companion object {
+        /** 字段读取指令集合。 */
         private val FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
+
+        /** 字段写入指令集合。 */
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+
+        /** 局部变量读取指令集合。 */
         private val LOAD_OPS = setOf(Opcodes.ILOAD, Opcodes.LLOAD, Opcodes.FLOAD, Opcodes.DLOAD, Opcodes.ALOAD)
+
+        /** 局部变量写入指令集合。 */
         private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
+
+        /** 支持在 `At.target` 中按名称声明的 JVM 跳转 opcode。 */
         private val JUMP_OPCODE_NAMES =
             mapOf(
                 "IFEQ" to Opcodes.IFEQ,
@@ -848,6 +1003,8 @@ class InstructionPointInjector(
                 "IFNULL" to Opcodes.IFNULL,
                 "IFNONNULL" to Opcodes.IFNONNULL,
             )
+
+        /** 所有可由跳转指令点识别的 JVM 跳转 opcode。 */
         private val JUMP_OPS = JUMP_OPCODE_NAMES.values.toSet()
     }
 }
