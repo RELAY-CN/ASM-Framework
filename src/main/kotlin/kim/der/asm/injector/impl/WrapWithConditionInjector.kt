@@ -19,6 +19,8 @@ import org.objectweb.asm.tree.InsnNode
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
+import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TypeInsnNode
@@ -29,21 +31,24 @@ import java.lang.reflect.Modifier
 /**
  * WrapWithCondition 注入器。
  *
- * 该注入器会匹配目标方法内的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、简单数组元素写入、条件跳转或抛异常点，
+ * 该注入器会匹配目标方法内的普通方法调用、任意返回值的 `invokedynamic` 调用、字段写入、简单数组元素写入、局部变量写入、条件跳转或抛异常点，
  * 并在原指令前插入 boolean handler。
- * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段写入值、数组写入栈参数、原条件跳转分支结果或原异常对象并继续执行原指令，
- * 返回 `false` 时跳过原指令、原条件跳转或原抛出。
- * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的 `void`
- * 普通调用或 `invokedynamic` 调用；构造器、非 `void` 调用和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
+ * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段写入值、数组写入栈参数、局部变量待写入值、原条件跳转分支结果或原异常对象并继续执行原指令。
+ * handler 返回 `false` 时跳过原指令、原条件跳转或原抛出；非 `void` 普通方法调用与非 `void` `invokedynamic`
+ * 调用会压入返回类型对应的默认值。
+ * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或
+ * `invokedynamic` 调用；构造器和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选
  * 兼容的字段写入，且不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
+ * [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
+ * 过滤局部变量写入，handler 首参接收本次 `xSTORE` 即将消费的待写入值。
  * [InjectionPoint.JUMP] 未指定跳转目标时会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持条件包裹。
  * [InjectionPoint.THROW] 未指定异常类型目标时会匹配切片内全部 `ATHROW`；指定目标时只匹配前一条真实指令为同类型 `<init>` 的直接构造异常。
  * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
  *
- * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.STORE]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 条件包裹使用
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.STORE]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 条件包裹使用
  * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -56,10 +61,10 @@ class WrapWithConditionInjector(
     private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、数组元素写入、条件跳转或抛异常点前插入条件包裹逻辑。
+     * 在匹配的方法调用、`invokedynamic` 调用、字段写入、数组元素写入、局部变量写入、条件跳转或抛异常点前插入条件包裹逻辑。
      *
      * @param target 目标方法
-     * @return 至少包裹一个调用点、动态调用点、字段写入点、数组元素写入点、条件跳转点或抛异常点时返回 `true`
+     * @return 至少包裹一个调用点、动态调用点、字段写入点、数组元素写入点、局部变量写入点、条件跳转点或抛异常点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -67,10 +72,10 @@ class WrapWithConditionInjector(
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
     /**
-     * 在匹配的 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、数组元素写入、条件跳转或抛异常点前插入条件包裹逻辑，并返回实际包裹数量。
+     * 在匹配的方法调用、`invokedynamic` 调用、字段写入、数组元素写入、局部变量写入、条件跳转或抛异常点前插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
-     * @return 实际包裹的调用点、动态调用点、字段写入点、数组元素写入点、条件跳转点或抛异常点数量
+     * @return 实际包裹的调用点、动态调用点、字段写入点、数组元素写入点、局部变量写入点、条件跳转点或抛异常点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -84,10 +89,11 @@ class WrapWithConditionInjector(
                 } else {
                     injectFieldAssign(target)
                 }
+            InjectionPoint.STORE -> injectStore(target)
             InjectionPoint.JUMP -> injectJump(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE, FIELD_ASSIGN, JUMP and THROW injection points",
+                "@WrapWithCondition supports only INVOKE, FIELD_ASSIGN, STORE, JUMP and THROW injection points",
             )
         }
     }
@@ -117,7 +123,7 @@ class WrapWithConditionInjector(
      *
      * @param target 目标方法
      * @return 实际插入条件包裹逻辑的调用数量
-     * @throws IllegalArgumentException 目标签名不完整、构造器或非 `void` 调用被显式匹配、handler 签名不兼容时抛出
+     * @throws IllegalArgumentException 目标签名不完整、构造器或 handler 签名不兼容时抛出
      */
     private fun injectMethodCall(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
@@ -146,12 +152,6 @@ class WrapWithConditionInjector(
                             "@WrapWithCondition does not support constructor calls, target ${insn.owner}.${insn.name}${insn.desc}",
                         )
                     }
-                    if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
-                        throw IllegalArgumentException(
-                            "@WrapWithCondition only supports void method calls, target ${insn.name}${insn.desc}",
-                        )
-                    }
-
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -159,21 +159,16 @@ class WrapWithConditionInjector(
 
                     val targetParamCount = validateHandlerSignature(target, insn)
                     val skipOriginalLabel = LabelNode()
+                    val afterOriginalLabel = LabelNode()
                     val il = buildConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
                     target.instructions.insertBefore(insn, il)
-                    target.instructions.insert(insn, skipOriginalLabel)
+                    target.instructions.insert(insn, buildSkippedCallDefaultReturn(insn, skipOriginalLabel, afterOriginalLabel))
                     injectionCount++
                 }
                 insn is InvokeDynamicInsnNode &&
                     (inferTarget || (targetName != null && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc))) -> {
                     if (inferTarget && !isInvokeDynamicConditionCompatible(target, insn)) {
                         continue
-                    }
-
-                    if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
-                        throw IllegalArgumentException(
-                            "@WrapWithCondition only supports void invokedynamic calls, target ${insn.name}${insn.desc}",
-                        )
                     }
 
                     val currentOrdinal = matchedOrdinal++
@@ -183,9 +178,10 @@ class WrapWithConditionInjector(
 
                     val targetParamCount = validateInvokeDynamicHandlerSignature(target, insn)
                     val skipOriginalLabel = LabelNode()
+                    val afterOriginalLabel = LabelNode()
                     val il = buildInvokeDynamicConditionWrapper(target, insn, targetParamCount, skipOriginalLabel)
                     target.instructions.insertBefore(insn, il)
-                    target.instructions.insert(insn, skipOriginalLabel)
+                    target.instructions.insert(insn, buildSkippedInvokeDynamicDefaultReturn(insn, skipOriginalLabel, afterOriginalLabel))
                     injectionCount++
                 }
             }
@@ -197,7 +193,7 @@ class WrapWithConditionInjector(
     /**
      * 判断 handler 是否兼容候选普通方法调用。
      *
-     * 该方法用于目标推断模式，构造器、非 `void` 调用或签名不兼容候选不会计入 ordinal 或命中数。
+     * 该方法用于目标推断模式，构造器或签名不兼容候选不会计入 ordinal 或命中数。
      *
      * @param target 目标方法
      * @param insn 候选方法调用指令
@@ -207,7 +203,7 @@ class WrapWithConditionInjector(
         target: MethodNode,
         insn: MethodInsnNode,
     ): Boolean {
-        if (insn.name == "<init>" || Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
+        if (insn.name == "<init>") {
             return false
         }
         return runCatching { validateHandlerSignature(target, insn) }.isSuccess
@@ -216,7 +212,7 @@ class WrapWithConditionInjector(
     /**
      * 判断 handler 是否兼容候选 `invokedynamic` 调用。
      *
-     * 该方法用于目标推断模式，非 `void` 动态调用或签名不兼容候选不会计入 ordinal 或命中数。
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
      *
      * @param target 目标方法
      * @param insn 候选 `invokedynamic` 指令
@@ -226,9 +222,6 @@ class WrapWithConditionInjector(
         target: MethodNode,
         insn: InvokeDynamicInsnNode,
     ): Boolean {
-        if (Type.getReturnType(insn.desc) != Type.VOID_TYPE) {
-            return false
-        }
         return runCatching { validateInvokeDynamicHandlerSignature(target, insn) }.isSuccess
     }
 
@@ -345,6 +338,85 @@ class WrapWithConditionInjector(
 
         return injectionCount
     }
+
+    /**
+     * 在匹配的局部变量写入前插入条件 handler。
+     *
+     * [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
+     * 限定候选 `xSTORE`。handler 返回 `false` 时丢弃待写入值并跳过原写入，返回 `true` 时恢复该值供原写入消费。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的局部变量写入数量
+     * @throws IllegalArgumentException 声明了 `at.target`、槽位过滤参数非法或 handler 签名不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun injectStore(target: MethodNode): Int {
+        require(at.target.isEmpty()) {
+            "@WrapWithCondition STORE uses At.args index=N, var=N or name=localName for local variable filtering, not At.target"
+        }
+        val localVariableFilter = parseLocalVariableFilter("STORE")
+        val handlerStoreType = requireHandlerLocalArgumentType("STORE")
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is VarInsnNode || insn.opcode !in STORE_OPS) {
+                continue
+            }
+            if (!matchesLocalVariableFilter(target, insn, localVariableFilter)) {
+                continue
+            }
+            if (!isStoreCompatibleWithHandler(insn.opcode, handlerStoreType)) {
+                continue
+            }
+
+            val resolvedStoreType = resolveIndexedLocalValueType(target, insn.`var`, handlerStoreType)
+            if (localVariableFilter.index == null && handlerStoreType.isReferenceType() && resolvedStoreType == null) {
+                continue
+            }
+            val storeType = resolvedStoreType ?: handlerStoreType
+            if (localVariableFilter.index == null && !isStoreHandlerCompatible(target, storeType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateStoreHandlerSignature(target, storeType)
+            val skipOriginalLabel = LabelNode()
+            val il = buildStoreConditionWrapper(target, storeType, targetParamCount, skipOriginalLabel)
+            target.instructions.insertBefore(insn, il)
+            target.instructions.insert(insn, skipOriginalLabel)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 判断 handler 是否兼容候选局部变量写入。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param storeType 候选写入值类型
+     * @return handler 可条件包裹该局部变量写入时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun isStoreHandlerCompatible(
+        target: MethodNode,
+        storeType: Type,
+    ): Boolean = runCatching { validateStoreHandlerSignature(target, storeType) }.isSuccess
 
     /**
      * 条件包裹条件跳转的原始分支结果。
@@ -539,6 +611,100 @@ class WrapWithConditionInjector(
     }
 
     /**
+     * 为被跳过的非 `void` 普通方法调用补齐默认返回值。
+     *
+     * 原调用返回 `void` 时只放置跳过标签；非 `void` 调用会先让原调用完成后跳过默认值分支，
+     * 再在 handler 返回 `false` 的路径压入 JVM 默认值或 [DefaultReturnValueProvider] 生成的引用默认值。
+     *
+     * @param callInsn 被条件包裹的方法调用指令
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @param afterOriginalLabel 原调用完成后跳转到的汇合标签
+     * @return 应插入到原调用后的指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-01
+     */
+    private fun buildSkippedCallDefaultReturn(
+        callInsn: MethodInsnNode,
+        skipOriginalLabel: LabelNode,
+        afterOriginalLabel: LabelNode,
+    ): InsnList {
+        val il = InsnList()
+        val returnType = Type.getReturnType(callInsn.desc)
+        if (returnType == Type.VOID_TYPE) {
+            il.add(skipOriginalLabel)
+            return il
+        }
+
+        il.add(JumpInsnNode(Opcodes.GOTO, afterOriginalLabel))
+        il.add(skipOriginalLabel)
+        loadDefaultReturnValue(returnType, il)
+        il.add(afterOriginalLabel)
+        return il
+    }
+
+    /**
+     * 为条件跳过的非 `void` 调用加载默认返回值。
+     *
+     * 基础类型和常见文本类型直接使用 JVM 默认值；其他引用类型委托 [DefaultReturnValueProvider]。
+     *
+     * @param type 被跳过调用的返回类型
+     * @param il 待追加指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-01
+     */
+    private fun loadDefaultReturnValue(
+        type: Type,
+        il: InsnList,
+    ) {
+        when (type.sort) {
+            Type.BOOLEAN,
+            Type.BYTE,
+            Type.SHORT,
+            Type.INT,
+            Type.CHAR -> il.add(InsnNode(Opcodes.ICONST_0))
+            Type.FLOAT -> il.add(InsnNode(Opcodes.FCONST_0))
+            Type.LONG -> il.add(InsnNode(Opcodes.LCONST_0))
+            Type.DOUBLE -> il.add(InsnNode(Opcodes.DCONST_0))
+            Type.OBJECT ->
+                if (type.internalName == "java/lang/String" || type.internalName == "java/lang/CharSequence") {
+                    il.add(LdcInsnNode(""))
+                } else {
+                    injectDefaultReturnValue(type, il)
+                }
+            Type.ARRAY -> injectDefaultReturnValue(type, il)
+            else -> throw IllegalStateException("Unsupported default return type for @WrapWithCondition: $type")
+        }
+    }
+
+    /**
+     * 通过 [DefaultReturnValueProvider] 生成引用类型默认值。
+     *
+     * @param type 被跳过调用的返回类型
+     * @param il 待追加指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-01
+     */
+    private fun injectDefaultReturnValue(
+        type: Type,
+        il: InsnList,
+    ) {
+        il.add(InstructionUtil.loadType(type))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKESTATIC,
+                Type.getInternalName(DefaultReturnValueProvider::class.java),
+                "defaultValue",
+                "(Ljava/lang/Class;)Ljava/lang/Object;",
+                false,
+            ),
+        )
+        il.add(TypeInsnNode(Opcodes.CHECKCAST, type.internalName))
+    }
+
+    /**
      * 构造 `invokedynamic` 调用条件包裹的前置指令序列。
      *
      * 序列会暂存动态调用参数，调用 boolean handler；
@@ -588,6 +754,33 @@ class WrapWithConditionInjector(
             loadFromVariable(il, callParamTypes[index], argSlots[index])
         }
 
+        return il
+    }
+
+    /**
+     * 为被跳过的 `invokedynamic` 调用补齐默认返回值。
+     *
+     * @param callInsn 被条件包裹的 `invokedynamic` 指令
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @param afterOriginalLabel 原调用完成后跳转到的汇合标签
+     * @return 应插入到原动态调用后的指令列表
+     */
+    private fun buildSkippedInvokeDynamicDefaultReturn(
+        callInsn: InvokeDynamicInsnNode,
+        skipOriginalLabel: LabelNode,
+        afterOriginalLabel: LabelNode,
+    ): InsnList {
+        val il = InsnList()
+        val returnType = Type.getReturnType(callInsn.desc)
+        if (returnType == Type.VOID_TYPE) {
+            il.add(skipOriginalLabel)
+            return il
+        }
+
+        il.add(JumpInsnNode(Opcodes.GOTO, afterOriginalLabel))
+        il.add(skipOriginalLabel)
+        loadDefaultReturnValue(returnType, il)
+        il.add(afterOriginalLabel)
         return il
     }
 
@@ -699,6 +892,49 @@ class WrapWithConditionInjector(
         loadFromVariable(il, arrayType, arrayIndex)
         loadFromVariable(il, Type.INT_TYPE, indexIndex)
         loadFromVariable(il, elementType, valueIndex)
+
+        return il
+    }
+
+    /**
+     * 构造局部变量写入条件包裹的前置指令序列。
+     *
+     * 序列会暂存 `xSTORE` 即将消费的栈顶值，调用 boolean handler；
+     * handler 返回 `false` 时跳过原写入，返回 `true` 时恢复待写入值供原 `xSTORE` 消费。
+     *
+     * @param target 目标方法
+     * @param storeType 局部变量待写入值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @param skipOriginalLabel handler 返回 `false` 时跳转到的标签
+     * @return 插入到原局部变量写入前的条件包裹指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun buildStoreConditionWrapper(
+        target: MethodNode,
+        storeType: Type,
+        targetParamCount: Int,
+        skipOriginalLabel: LabelNode,
+    ): InsnList {
+        val il = InsnList()
+        val valueIndex = nextLocalIndex(target)
+
+        storeStackValue(il, storeType, valueIndex)
+        addHandlerOwner(il)
+        loadFromVariable(il, storeType, valueIndex)
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
+        il.add(JumpInsnNode(Opcodes.IFEQ, skipOriginalLabel))
+        loadFromVariable(il, storeType, valueIndex)
 
         return il
     }
@@ -1052,6 +1288,68 @@ class WrapWithConditionInjector(
     }
 
     /**
+     * 校验局部变量写入条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收本次 `xSTORE` 即将消费的待写入值；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param storeType 局部变量待写入值类型
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、待写入值参数或追加目标参数不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun validateStoreHandlerSignature(
+        target: MethodNode,
+        storeType: Type,
+    ): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition STORE handler ${asmMethod.name} must receive original local value",
+            )
+        }
+        if (!isHandlerParameterCompatible(storeType, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected $storeType, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    /**
      * 校验条件跳转包裹的 handler 签名。
      *
      * handler 必须返回 `boolean`，首参接收原条件跳转结果；
@@ -1283,6 +1581,25 @@ class WrapWithConditionInjector(
     }
 
     /**
+     * 查找指定指令后一条真实 JVM 指令。
+     *
+     * 标签、行号与 frame 等伪指令会被跳过。
+     *
+     * @param insn 起始指令
+     * @return 后一条 opcode 非负的真实指令；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun nextRealInstruction(insn: AbstractInsnNode): AbstractInsnNode? {
+        var current = insn.next
+        while (current != null && current.opcode < 0) {
+            current = current.next
+        }
+        return current
+    }
+
+    /**
      * 解析条件跳转定位目标。
      *
      * 空字符串表示不限制跳转 opcode；非空目标可使用 opcode 数值或 [JUMP_OPCODE_NAMES] 中的助记名。
@@ -1309,6 +1626,370 @@ class WrapWithConditionInjector(
                 "@WrapWithCondition JUMP target must be a jump opcode name or number: $target",
             )
     }
+
+    /**
+     * 解析局部变量写入过滤条件。
+     *
+     * `index=` 与 `var=` 等价，用于按 JVM 局部变量槽位过滤；`name=` 用于按 LocalVariableTable 变量名过滤。
+     *
+     * @param pointName 当前定位点名称，用于错误提示
+     * @return 局部变量过滤条件；未指定时返回空过滤
+     * @throws IllegalArgumentException 声明多个同类过滤条件、非整数、负数槽位或空变量名时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun parseLocalVariableFilter(pointName: String): LocalVariableFilter {
+        val slotValues =
+            at.args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                when {
+                    trimmed.startsWith("index=") -> trimmed.substringAfter("index=")
+                    trimmed.startsWith("var=") -> trimmed.substringAfter("var=")
+                    else -> null
+                }
+            }
+        val nameValues =
+            at.args.mapNotNull { arg ->
+                val trimmed = arg.trim()
+                if (trimmed.startsWith("name=")) {
+                    trimmed.substringAfter("name=")
+                } else {
+                    null
+                }
+            }
+
+        require(slotValues.size <= 1) {
+            "@WrapWithCondition $pointName supports only one local variable slot filter in At.args"
+        }
+        require(nameValues.size <= 1) {
+            "@WrapWithCondition $pointName supports only one local variable name filter in At.args"
+        }
+
+        val index =
+            slotValues.singleOrNull()?.let { value ->
+                val parsed =
+                    value.toIntOrNull()
+                        ?: throw IllegalArgumentException(
+                            "@WrapWithCondition $pointName local variable slot filter must be an integer: $value",
+                        )
+                require(parsed >= 0) {
+                    "@WrapWithCondition $pointName local variable slot filter must be non-negative: $parsed"
+                }
+                parsed
+            }
+        val name =
+            nameValues.singleOrNull()?.trim()?.also { value ->
+                require(value.isNotEmpty()) {
+                    "@WrapWithCondition $pointName local variable name filter must not be blank"
+                }
+            }
+
+        return LocalVariableFilter(index, name)
+    }
+
+    /**
+     * 判断局部变量写入指令是否满足槽位和名称过滤条件。
+     *
+     * @param target 目标方法
+     * @param insn 候选局部变量写入指令
+     * @param filter 注解声明的局部变量过滤条件
+     * @return 候选指令满足过滤条件时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun matchesLocalVariableFilter(
+        target: MethodNode,
+        insn: VarInsnNode,
+        filter: LocalVariableFilter,
+    ): Boolean {
+        if (filter.isEmpty()) {
+            return true
+        }
+        if (filter.index != null && insn.`var` != filter.index) {
+            return false
+        }
+        if (filter.name == null) {
+            return true
+        }
+        return localVariableAt(target, nextRealInstruction(insn) ?: insn, insn.`var`)?.name == filter.name
+    }
+
+    /**
+     * 查找锚点处覆盖指定槽位的局部变量表记录。
+     *
+     * @param target 目标方法
+     * @param anchor 待匹配的锚点指令
+     * @param index JVM 局部变量槽位
+     * @return 覆盖锚点的局部变量记录；不存在时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun localVariableAt(
+        target: MethodNode,
+        anchor: AbstractInsnNode,
+        index: Int,
+    ): LocalVariableNode? {
+        val insns = target.instructions.toArray()
+        val anchorIndex = insns.indexOf(anchor)
+        if (anchorIndex < 0) {
+            return null
+        }
+
+        return target.localVariables.firstOrNull { local ->
+            local.index == index && local.containsInstruction(insns, anchorIndex)
+        }
+    }
+
+    /**
+     * 判断局部变量表记录是否覆盖给定指令下标。
+     *
+     * @param insns 目标方法指令数组
+     * @param instructionIndex 待判断的指令下标
+     * @return 指令下标处于该局部变量生命周期内时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun LocalVariableNode.containsInstruction(
+        insns: Array<AbstractInsnNode>,
+        instructionIndex: Int,
+    ): Boolean {
+        val startIndex = insns.indexOf(start)
+        val endIndex = insns.indexOf(end)
+        return startIndex >= 0 &&
+            endIndex >= 0 &&
+            instructionIndex >= startIndex &&
+            instructionIndex < endIndex
+    }
+
+    /**
+     * 读取 handler 首个参数作为局部变量待写入值类型。
+     *
+     * @param pointName 当前定位点名称，用于错误提示
+     * @return handler 首参的 ASM 类型
+     * @throws IllegalArgumentException handler 没有参数时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun requireHandlerLocalArgumentType(pointName: String): Type {
+        val handlerParams = Type.getArgumentTypes(asmMethod)
+        if (handlerParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must take at least one argument for the local variable $pointName value",
+            )
+        }
+        return handlerParams[0]
+    }
+
+    /**
+     * 解析指定局部变量槽位中引用值的更具体表达式类型。
+     *
+     * 基础类型不需要额外推断，引用类型会依次尝试目标方法参数、LocalVariableTable 与相邻指令上下文。
+     * 只有推断类型能被 handler 首参接收时才会返回，避免把不相关槽位误计为候选写入。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 推断出的引用表达式类型；无法可靠推断时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun resolveIndexedLocalValueType(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? {
+        if (!fallbackType.isReferenceType()) {
+            return null
+        }
+
+        val headVariable = collectHeadParameters(target).firstOrNull { it.index == index }
+        if (headVariable != null) {
+            return headVariable.type
+        }
+
+        val localVariable =
+            target.localVariables
+                .filter { it.index == index }
+                .mapNotNull { runCatching { Type.getType(it.desc) }.getOrNull() }
+                .firstOrNull { it.isReferenceType() && isHandlerParameterCompatible(it, fallbackType) }
+        if (localVariable != null) {
+            return localVariable
+        }
+
+        return referencedTypeFromSlotInstructions(target, index, fallbackType)
+    }
+
+    /**
+     * 收集目标方法参数在方法入口处占用的局部变量槽位。
+     *
+     * 实例方法会跳过 `this` 槽位，宽类型参数按两个槽位推进。
+     *
+     * @param target 目标方法
+     * @return 参数起始槽位与参数类型列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun collectHeadParameters(target: MethodNode): List<LocalSlotType> {
+        val isStatic = (target.access and Opcodes.ACC_STATIC) != 0
+        var slot = if (isStatic) 0 else 1
+        return buildList {
+            for (argumentType in Type.getArgumentTypes(target.desc)) {
+                add(LocalSlotType(slot, argumentType))
+                slot += argumentType.size
+            }
+        }
+    }
+
+    /**
+     * 通过同一槽位附近的引用读写指令推断表达式类型。
+     *
+     * 该推断作为 LocalVariableTable 缺失或不完整时的兜底，只考察 `ALOAD` 与 `ASTORE` 相关上下文。
+     *
+     * @param target 目标方法
+     * @param index JVM 局部变量槽位
+     * @param fallbackType handler 首参类型
+     * @return 能与 handler 首参兼容的引用类型；无法推断时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun referencedTypeFromSlotInstructions(
+        target: MethodNode,
+        index: Int,
+        fallbackType: Type,
+    ): Type? =
+        target.instructions.toArray()
+            .asSequence()
+            .filterIsInstance<VarInsnNode>()
+            .filter { it.`var` == index && it.opcode in SLOT_REFERENCE_OPS }
+            .mapNotNull { inferReferenceTypeAroundSlotInstruction(target, it) }
+            .firstOrNull { isHandlerParameterCompatible(it, fallbackType) }
+
+    /**
+     * 根据单条引用槽位读写指令的相邻上下文推断引用类型。
+     *
+     * `ASTORE` 优先使用前一条真实指令中的 `CHECKCAST` 或字符串常量特征；
+     * `ALOAD` 则观察后续方法调用、字段访问、类型转换或返回指令对该引用的消费方式。
+     *
+     * @param target 目标方法
+     * @param insn 待分析的 `ALOAD` 或 `ASTORE` 指令
+     * @return 推断出的引用类型；上下文不足时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun inferReferenceTypeAroundSlotInstruction(
+        target: MethodNode,
+        insn: VarInsnNode,
+    ): Type? {
+        if (insn.opcode == Opcodes.ASTORE) {
+            val previous = previousRealInstruction(insn)
+            if (previous is TypeInsnNode && previous.opcode == Opcodes.CHECKCAST) {
+                return Type.getObjectType(previous.desc)
+            }
+            if (previous is LdcInsnNode && previous.cst is String) {
+                return Type.getType(String::class.java)
+            }
+            inferReferenceTypeFromNextLoadConsumer(target, insn)?.let { return it }
+            return null
+        }
+
+        val next = nextRealInstruction(insn)
+        return when (next) {
+            is MethodInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.INVOKEVIRTUAL || next.opcode == Opcodes.INVOKEINTERFACE) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is FieldInsnNode -> {
+                val ownerType = Type.getObjectType(next.owner)
+                if (next.opcode == Opcodes.GETFIELD || next.opcode == Opcodes.PUTFIELD) {
+                    ownerType
+                } else {
+                    null
+                }
+            }
+            is TypeInsnNode ->
+                if (next.opcode == Opcodes.CHECKCAST) {
+                    Type.getObjectType(next.desc)
+                } else {
+                    null
+                }
+            else ->
+                if (next?.opcode == Opcodes.ARETURN) {
+                    val returnType = Type.getReturnType(target.desc)
+                    if (returnType.isReferenceType()) returnType else null
+                } else {
+                    null
+                }
+        }
+    }
+
+    /**
+     * 从 `ASTORE` 后续第一次读取该槽位的消费场景推断引用类型。
+     *
+     * 如果在读取前遇到同槽位再次写入，则当前写入值的类型无法继续追踪。
+     *
+     * @param target 目标方法
+     * @param storeInsn 当前引用写入指令
+     * @return 后续读取消费场景推断出的引用类型；无法推断时返回 `null`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun inferReferenceTypeFromNextLoadConsumer(
+        target: MethodNode,
+        storeInsn: VarInsnNode,
+    ): Type? {
+        var current = storeInsn.next
+        while (current != null) {
+            if (current is VarInsnNode && current.`var` == storeInsn.`var`) {
+                if (current.opcode == Opcodes.ALOAD) {
+                    return inferReferenceTypeAroundSlotInstruction(target, current)
+                }
+                if (current.opcode in STORE_OPS) {
+                    return null
+                }
+            }
+            current = current.next
+        }
+        return null
+    }
+
+    /**
+     * 判断局部变量写入指令消费的值类型是否可交给 handler 首参。
+     *
+     * JVM 的 `ISTORE` 覆盖 boolean、byte、short、int 与 char，引用写入只接受对象或数组 handler 参数。
+     *
+     * @param opcode 写入指令 opcode
+     * @param handlerType handler 首参类型
+     * @return 写入值类型与 handler 首参兼容时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private fun isStoreCompatibleWithHandler(
+        opcode: Int,
+        handlerType: Type,
+    ): Boolean =
+        when (opcode) {
+            Opcodes.ISTORE -> handlerType.sort in INT_VARIABLE_TYPE_SORTS
+            Opcodes.LSTORE -> handlerType == Type.LONG_TYPE
+            Opcodes.FSTORE -> handlerType == Type.FLOAT_TYPE
+            Opcodes.DSTORE -> handlerType == Type.DOUBLE_TYPE
+            Opcodes.ASTORE -> handlerType.sort == Type.OBJECT || handlerType.sort == Type.ARRAY
+            else -> false
+        }
 
     /**
      * 判断 handler 参数类型是否能接收期望值。
@@ -1761,6 +2442,44 @@ class WrapWithConditionInjector(
     )
 
     /**
+     * 局部变量读写过滤条件。
+     *
+     * @property index JVM 局部变量槽位；为 `null` 时不按槽位过滤
+     * @property name LocalVariableTable 中的变量名；为 `null` 时不按名称过滤
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private data class LocalVariableFilter(
+        val index: Int? = null,
+        val name: String? = null,
+    ) {
+        /**
+         * 当前过滤条件是否为空。
+         *
+         * @return 未声明槽位和名称过滤时返回 `true`
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-05-31
+         */
+        fun isEmpty(): Boolean = index == null && name == null
+    }
+
+    /**
+     * 局部变量槽位与其类型的配对信息。
+     *
+     * @property index JVM 局部变量槽位
+     * @property type 该槽位承载的值类型
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-05-31
+     */
+    private data class LocalSlotType(
+        val index: Int,
+        val type: Type,
+    )
+
+    /**
      * WrapWithCondition 注入器使用的 opcode 集合与助记名索引。
      */
     private companion object {
@@ -1773,6 +2492,21 @@ class WrapWithConditionInjector(
          * 可被 `FIELD_ASSIGN` 条件包裹的字段写入 opcode。
          */
         private val FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
+
+        /**
+         * 可被 `STORE` 条件包裹的局部变量写入 opcode。
+         */
+        private val STORE_OPS = setOf(Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE)
+
+        /**
+         * 可参与引用类型上下文推断的局部变量读写 opcode。
+         */
+        private val SLOT_REFERENCE_OPS = setOf(Opcodes.ALOAD, Opcodes.ASTORE)
+
+        /**
+         * JVM `I*` 局部变量指令可承载的窄整型类型。
+         */
+        private val INT_VARIABLE_TYPE_SORTS = setOf(Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR)
 
         /**
          * 可被数组元素写入条件包裹的数组写入 opcode。

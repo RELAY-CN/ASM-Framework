@@ -77,7 +77,7 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun redirectionRuntimeImplementationStaysUnderInjectorImpl() {
+    fun legacyRedirectionManagerAndListenerApisAreRemoved() {
         val sourceRoot = Path.of("src", "main", "kotlin")
         val sources =
             Files
@@ -89,42 +89,58 @@ class FrameworkReliabilityTest {
                         .toList()
                 }
 
-        val forbiddenPackages =
+        val removedFiles =
             listOf(
-                "package kim.der.asm.manager.replace",
-                "package kim.der.asm.redirections.replace",
-                "package kim.der.asm.injector.impl.replace",
+                Path.of("kim", "der", "asm", "api", "listener", "RedirectionListener.kt"),
+                Path.of("kim", "der", "asm", "api", "replace", "RedirectionReplace.kt"),
+                Path.of("kim", "der", "asm", "data", "MethodTypeInfoValue.kt"),
+                Path.of("kim", "der", "asm", "injector", "impl", "RedirectionReplaceApi.kt"),
+                Path.of("kim", "der", "asm", "injector", "impl", "RedirectionReplaceManager.kt"),
+                Path.of("kim", "der", "asm", "injector", "impl", "RedirectionManagerImpl.kt"),
+                Path.of("kim", "der", "asm", "injector", "impl", "RedirectionIgnoreManagerImpl.kt"),
+                Path.of("kim", "der", "asm", "injector", "impl", "AbstractRedirectionManagerImpl.kt"),
+                Path.of("kim", "der", "asm", "AsmListener.kt"),
+                Path.of("kim", "der", "asm", "AsmReplace.kt"),
             )
-
-        forbiddenPackages.forEach { forbidden ->
-            val offenders = sources.filter { (_, text) -> forbidden in text }.map { (path, _) -> path.toString() }
-
-            assertEquals(emptyList<String>(), offenders, "$forbidden should not be used")
-        }
-
-        val apiSource =
-            sources.single { (path, _) ->
-                path.endsWith(Path.of("kim", "der", "asm", "injector", "impl", "RedirectionReplaceApi.kt"))
-            }
-
-        assertEquals(true, "package kim.der.asm.injector.impl" in apiSource.second)
-
-        val apiReplaceFiles =
+        val remainingRemovedFiles =
             sources
-                .map { (path, _) -> path }
-                .filter { path -> path.startsWith(sourceRoot.resolve(Path.of("kim", "der", "asm", "api", "replace"))) }
-                .map { path -> path.fileName.toString() }
+                .map { (path, _) -> sourceRoot.relativize(path) }
+                .filter { relative -> removedFiles.any(relative::endsWith) }
+                .map { it.toString() }
                 .sorted()
 
-        assertEquals(listOf("RedirectionReplace.kt"), apiReplaceFiles)
+        assertEquals(emptyList<String>(), remainingRemovedFiles)
 
-        val managerSource =
+        val forbiddenText =
+            listOf(
+                "RedirectionReplaceApi",
+                "RedirectionReplaceManager",
+                "RedirectionManagerImpl",
+                "RedirectionIgnoreManagerImpl",
+                "RedirectionListener",
+                "MethodTypeInfoValue",
+                "AsmListener",
+                "AsmReplace",
+                "api.replace.RedirectionReplace",
+                "api.listener.RedirectionListener",
+            )
+
+        forbiddenText.forEach { forbidden ->
+            val offenders =
+                sources
+                    .filter { (_, text) -> forbidden in text }
+                    .map { (path, _) -> path.toString() }
+                    .sorted()
+
+            assertEquals(emptyList<String>(), offenders, "$forbidden should not remain in source")
+        }
+
+        val defaultValueSource =
             sources.single { (path, _) ->
-                path.endsWith(Path.of("kim", "der", "asm", "injector", "impl", "RedirectionReplaceManager.kt"))
+                path.endsWith(Path.of("kim", "der", "asm", "injector", "impl", "DefaultReturnValueProvider.kt"))
             }
 
-        assertEquals(true, "package kim.der.asm.injector.impl" in managerSource.second)
-        assertEquals(emptyList<String>(), sources.filter { (_, text) -> "kim.der.asm.api.replace.RedirectionReplaceManager" in text }.map { (path, _) -> path.toString() })
+        assertEquals(true, "package kim.der.asm.injector.impl" in defaultValueSource.second)
     }
 
     @Test
@@ -1686,6 +1702,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAtInvokeUsesDefaultReturnForNonVoidInvokeDynamicCall() {
+        AsmRegistry.register(WrapConditionNonVoidInvokeDynamicMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("InvokeDynamicExpressionValueTarget", invokeDynamicExpressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeDynamicExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "raw", 7)
+
+        assertEquals("", result)
+    }
+
+    @Test
     fun wrapWithConditionAtInvokeReceivesInstanceReceiverAndCallArguments() {
         AsmRegistry.register(WrapConditionInstanceCallMixin::class.java)
 
@@ -1706,6 +1735,34 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("run", String::class.java, Int::class.javaPrimitiveType).invoke(null, "suffix", 7)
 
         assertEquals("raw-suffix7", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtInvokeUsesDefaultReturnForNonVoidCallInTestClass() {
+        AsmRegistry.register(WrapConditionNonVoidTestCallMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface", "TestFunctionalInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+                ),
+            )
+
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("comprehensiveTest").invoke(instance) as String
+
+        assertEquals("", result.substringBefore("|"))
+        assertEquals(true, result.startsWith("|DefaultConstructor|ParentMethod|"))
     }
 
     @Test
@@ -1817,18 +1874,15 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun wrapWithConditionRejectsNonVoidInvokeCall() {
+    fun wrapWithConditionAtInvokeUsesDefaultReturnForNonVoidCall() {
         AsmRegistry.register(WrapConditionNonVoidCallMixin::class.java)
 
-        val exception =
-            assertThrows(AsmTransformException::class.java) {
-                AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
-            }
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
 
-        assertEquals(
-            true,
-            exception.cause?.message?.contains("only supports void method calls") == true,
-        )
+        assertEquals("", result)
     }
 
     @Test
@@ -2040,6 +2094,45 @@ class FrameworkReliabilityTest {
             .invoke(instance, 0, "unused")
 
         assertEquals("field", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtStoreSkipsLocalWriteWhenFalse() {
+        AsmRegistry.register(WrapConditionStoreDenyMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConditionalStoreTarget", conditionalStoreTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConditionalStoreTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("initial", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtStoreArgsNameLimitsLocalVariableName() {
+        AsmRegistry.register(WrapConditionStoreNameMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("NamedConditionalStoreTarget", namedConditionalStoreTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("NamedConditionalStoreTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("blocked-other:second", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtStoreCanUseTargetMethodParameters() {
+        AsmRegistry.register(WrapConditionStoreWithTargetParamsMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ConditionalStoreParamTarget", conditionalStoreParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConditionalStoreParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "allow")
+
+        assertEquals("target", result)
     }
 
     @Test
@@ -5257,6 +5350,32 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("overwritten", result)
+    }
+
+    @Test
+    fun replaceAllMethodsUsesDefaultReturnValueProviderForReferenceReturn() {
+        AsmRegistry.register(ReplaceAllReferenceReturnMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("ReferenceReturnTarget", referenceReturnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReferenceReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(true, result is java.util.ArrayList<*>)
+        assertEquals(0, (result as java.util.ArrayList<*>).size)
+    }
+
+    @Test
+    fun replaceAllMethodsUsesJvmDefaultForCharReturn() {
+        AsmRegistry.register(ReplaceAllCharReturnMixin::class.java)
+
+        val transformed = AsmProcessor().transform("CharReturnTarget", charReturnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("CharReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(0.toChar(), result)
     }
 
     @Test
@@ -9712,6 +9831,26 @@ class FrameworkReliabilityTest {
         ): Boolean = value != "skip" && value == targetValue && count == targetCount
     }
 
+    @AsmMixin("InvokeDynamicExpressionValueTarget")
+    object WrapConditionNonVoidInvokeDynamicMixin {
+        @WrapWithCondition(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(
+            value: String,
+            count: Int,
+        ): Boolean {
+            value.length
+            count.toString()
+            return false
+        }
+    }
+
     @AsmMixin("WrapConditionInstanceTarget")
     object WrapConditionInstanceCallMixin {
         @WrapWithCondition(
@@ -9747,6 +9886,19 @@ class FrameworkReliabilityTest {
             suffix: String,
             count: Int,
         ): Boolean = value == "raw" && suffix == "suffix" && count == 7
+    }
+
+    @AsmMixin("Test")
+    object WrapConditionNonVoidTestCallMixin {
+        @WrapWithCondition(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.testB0()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(): Boolean = false
     }
 
     @AsmMixin("MultiWrapConditionTarget")
@@ -10150,6 +10302,54 @@ class FrameworkReliabilityTest {
             suffix: String,
         ): Boolean =
             array[index] == "raw" && index == targetIndex && value == targetValue && suffix == "suffix"
+    }
+
+    @AsmMixin("ConditionalStoreTarget")
+    object WrapConditionStoreDenyMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=1"]),
+            ordinal = 1,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldStore(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("NamedConditionalStoreTarget")
+    object WrapConditionStoreNameMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=target"]),
+            ordinal = 1,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldStore(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("ConditionalStoreParamTarget")
+    object WrapConditionStoreWithTargetParamsMixin {
+        @WrapWithCondition(
+            method = "value(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=2"]),
+            ordinal = 1,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldStore(
+            value: String,
+            flag: String,
+        ): Boolean = value == "target" && flag == "allow"
     }
 
     @AsmMixin("ArrayAccessTarget")
@@ -13241,6 +13441,14 @@ class FrameworkReliabilityTest {
         fun value(): String = "overwritten"
     }
 
+    @ReplaceAllMethods
+    @AsmMixin("ReferenceReturnTarget")
+    object ReplaceAllReferenceReturnMixin
+
+    @ReplaceAllMethods
+    @AsmMixin("CharReturnTarget")
+    object ReplaceAllCharReturnMixin
+
     @AsmMixin("StrictTarget")
     object MissingRemoveMethodTargetMixin {
         @RemoveMethod("missing()V")
@@ -16189,6 +16397,77 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun conditionalStoreTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConditionalStoreTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("initial")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("blocked")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun namedConditionalStoreTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "NamedConditionalStoreTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            val start = org.objectweb.asm.Label()
+            val end = org.objectweb.asm.Label()
+            visitCode()
+            visitLabel(start)
+            visitLdcInsn("first")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn("blocked-other")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("blocked-target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitLabel(end)
+            visitInsn(Opcodes.ARETURN)
+            visitLocalVariable("other", "Ljava/lang/String;", null, start, end, 1)
+            visitLocalVariable("target", "Ljava/lang/String;", null, start, end, 2)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun conditionalStoreParamTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConditionalStoreParamTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("initial")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun loadVariableParamTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LoadVariableParamTarget", null, "java/lang/Object", null)
@@ -16390,6 +16669,23 @@ class FrameworkReliabilityTest {
             visitLdcInsn("value")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun referenceReturnTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReferenceReturnTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/util/ArrayList;", null, null).apply {
+            visitCode()
+            visitTypeInsn(Opcodes.NEW, "java/util/ArrayList")
+            visitInsn(Opcodes.DUP)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 1)
             visitEnd()
         }
         cw.visitEnd()

@@ -213,112 +213,21 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 
 **方法：**
 
-- `transform(classNode: ClassNode)` - 只接收待改写的类节点，不提供外部目标描述上下文
-- `transform(classNode: ClassNode, methodTypeInfoValueList: ArrayList<MethodTypeInfoValue>?)` - 接收类节点和可选的目标方法描述列表，通常用于重定向或监听器场景
+- `transform(classNode: ClassNode)` - 只接收待改写的类节点，不再携带旧版 Redirection 目标描述列表
 
 实现方应直接修改传入的 `ClassNode`，调用方负责后续写回字节码。该接口不约束线程安全；如果实现类持有可变状态，需要由实现方或调用方避免并发复用同一实例。
 
-### MethodTypeInfoValue
+### DefaultReturnValueProvider
 
-`MethodTypeInfoValue` 用于描述需要被重定向或监听的目标方法，包含目标类 internal name、方法名和 JVM 方法描述符。
-
-#### 构造方式
-
-**构造方式：**
-
-- `MethodTypeInfoValue(classPath: String, methodName: String, methodParamsInfo: String)` - 只描述目标方法，不绑定替换器或监听器
-- `MethodTypeInfoValue(classPath: String, methodName: String, methodParamsInfo: String, replaceClass: Class<out RedirectionReplace>?)` - 绑定用于替换调用的 `RedirectionReplace` 实现类
-- `MethodTypeInfoValue(classPath: String, methodName: String, methodParamsInfo: String, before: Boolean, listenerClass: Class<out RedirectionListener>?)` - 绑定用于监听调用的 `RedirectionListener` 实现类，`before` 表示监听发生在目标调用前还是调用后
-
-#### 属性
-
-**属性：**
-
-- `classPath: String` - 目标类 internal name，不含前导 `L`，例如 `java/lang/String`
-- `methodName: String` - 目标方法名
-- `methodParamsInfo: String` - 目标方法描述符，例如 `(Ljava/lang/String;)V`
-- `desc: String` - 统一调用点描述符，格式为 `L<classPath>;<methodName><methodParamsInfo>`
-- `replaceClass: Class<out RedirectionReplace>?` - 可选的替换实现类
-- `listenerClass: Class<out RedirectionListener>?` - 可选的监听实现类
-- `listenerBefore: Boolean` - 监听器是否在目标调用前执行
-
-相等性用于目标描述去重：替换条目按目标类、方法名与方法描述符比较；监听条目还会区分调用前/调用后。
-
-### RedirectionListener
-
-`RedirectionListener` 是运行期监听接口，用于观察转换器插入的目标调用点，而不直接替换返回值。
+`DefaultReturnValueProvider` 是 `@ReplaceAllMethods` 使用的内部默认返回值生成器。
 
 #### 方法
 
 **方法：**
 
-- `invoke(obj: Any, desc: String, vararg args: Any?)` - 执行监听回调
+- `defaultValue(type: Class<*>): Any?` - 根据返回类型生成默认值
 
-`desc` 使用 `Lowner;name(desc)return` 格式描述调用点；`args` 为原调用参数或调用结果上下文，具体顺序由注入点决定。监听器抛出的异常会沿注入调用链向外传播。
-
-**常量：**
-
-- `METHOD_NAME = "invoke"` - 监听器桥接方法名
-- `METHOD_DESC = "(Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)V"` - 监听器桥接方法描述符
-
-### AsmListener
-
-`AsmListener` 是把 `RedirectionListener` 统一调用契约桥接到 ASM 类反射方法的适配器。
-
-#### 方法
-
-**方法：**
-
-- `invoke(obj: Any, desc: String, vararg args: Any?)` - 调用 ASM 监听方法；当前实现不使用 `obj` 与 `desc` 做分派，只按目标方法参数数量截取 `args`
-- `AsmListener.create(asmInstance: Any, method: Method): AsmListener` - 为 ASM 实例和方法创建监听器
-
-构造时会将目标方法设为可访问。若 ASM 方法第一个参数是 `CallbackInfo`，调用时会自动创建并传入新的回调对象。反射调用失败时会包装为 `RuntimeException` 抛出。
-
-### RedirectionReplace
-
-`RedirectionReplace` 是 `@Redirect` 与全方法替换链路的运行期调用契约。
-
-#### 方法
-
-**方法：**
-
-- `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行替换调用
-- `RedirectionReplace.of(value: Any?): RedirectionReplace` - 创建固定返回值替换器
-
-转换器会把原调用点的对象、描述符、返回类型与参数数组传给替换器，并使用返回值替代原调用返回值。`desc` 使用框架内部调用点描述符，普通调用通常形如 `Lowner;name(desc)return`；`type` 是原调用返回类型，基础类型会以对应 Java primitive `Class` 传入；`args` 按原调用参数顺序传入，不包含实例方法 receiver。实现方需要保证返回值能赋给 `type` 对应的目标类型；`void` 调用可返回 `null`。替换实现抛出的异常会沿目标方法调用链向外传播，不会被框架吞掉。
-
-**常量：**
-
-- `CAST_PREFIX = "<cast> "` - 类型转换重定向描述符前缀；默认管理器会把该前缀视为 cast fallback
-- `METHOD_NAME = "invoke"` - 替换器桥接方法名；转换器生成普通替换调用时使用
-- `METHOD_SPACE_NAME = "invokeIgnore"` - 忽略模式替换器桥接方法名；转换器生成忽略模式调用时使用
-- `METHOD_DESC = "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;[Ljava/lang/Object;)Ljava/lang/Object;"` - 替换器桥接方法描述符，属于运行期 ABI
-
-### AsmReplace
-
-`AsmReplace` 是把 `RedirectionReplace` 统一调用契约桥接到 ASM 类反射方法的适配器。
-
-#### 方法
-
-**方法：**
-
-- `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 调用 ASM 替换方法；当前实现不使用 `obj`、`desc` 与 `type` 做分派，只按目标方法参数数量截取 `args`
-- `AsmReplace.create(asmInstance: Any, method: Method): AsmReplace` - 为 ASM 实例和方法创建替换器
-
-构造时会将目标方法设为可访问，并使用反射方法的返回值作为替换结果。反射调用失败时会包装为 `RuntimeException` 抛出。
-
-### RedirectionReplaceApi（内部运行期入口）
-
-`kim.der.asm.injector.impl.RedirectionReplaceApi` 是转换器注入字节码时直接引用的内部运行期替换入口。它不属于普通用户扩展 API；方法名和 JVM 描述符需要与 `RedirectionReplace` 中的桥接常量保持一致，调用方不应直接替换内部 manager。
-
-#### 方法
-
-**方法：**
-
-- `invoke(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行普通重定向替换，由 `@Redirect` 注入点调用
-- `invokeIgnore(obj: Any, desc: String, type: Class<*>, vararg args: Any?): Any?` - 执行忽略模式替换，由全方法替换链路调用
-
-`desc` 使用 `Lowner;name(desc)return` 格式描述调用点，`type` 是原调用返回类型，`args` 按原调用参数顺序传入。`invoke` 使用默认重定向管理器；`invokeIgnore` 使用忽略管理器，不进行用户替换分派，只走默认替换路径，主要用于全方法替换链路中保留调用形态但跳过额外重定向副作用。运行期 manager 契约留在 `kim.der.asm.injector.impl` 内部，不再作为 `api.replace` 用户扩展面暴露；用户侧需要自定义替换逻辑时应实现 `kim.der.asm.api.replace.RedirectionReplace`。当前实现不使用 `ServiceLoader` 自动发现 manager，避免模块化环境或多 ClassLoader 场景下出现加载与隔离问题。`invoke` / `invokeIgnore` 的方法名、参数顺序、返回类型和 JVM 描述符都是运行期 ABI，修改时必须同步更新所有注入器和桥接常量。
+它不作为普通扩展 API 暴露；旧版 `MethodTypeInfoValue`、`RedirectionListener`、`AsmListener`、`RedirectionReplace`、`AsmReplace` 与 `RedirectionReplaceApi` 已移除。迁移说明见 [REDIRECTION_MIGRATION.md](REDIRECTION_MIGRATION.md)。
 
 ## 注解 API
 
@@ -646,7 +555,7 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 
 ### @WrapWithCondition
 
-在目标方法内匹配 `void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、简单数组元素写入、条件跳转或即将抛出的异常，并用 boolean handler 决定是否继续执行原指令、原分支或原抛出。适合按条件跳过日志、通知、字段写入、数组写入、广播等副作用，也适合只在特定上下文下抑制原分支跳转或异常抛出。
+在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段写入、简单数组元素写入、条件跳转或即将抛出的异常，并用 boolean handler 决定是否继续执行原指令、原分支或原抛出。适合按条件跳过日志、通知、字段写入、数组写入、广播等副作用，也适合只在特定上下文下抑制原分支跳转或异常抛出。
 
 **参数：**
 
@@ -659,10 +568,10 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
-`@WrapWithCondition` handler 必须返回 `Boolean`。返回 `true` 时恢复原 receiver/参数、字段写入值、数组写入栈参数、原条件跳转分支结果或原异常对象并继续执行原指令；返回 `false` 时跳过该指令、原跳转或原抛出。
+`@WrapWithCondition` handler 必须返回 `Boolean`。返回 `true` 时恢复原 receiver/参数、字段写入值、数组写入栈参数、原条件跳转分支结果或原异常对象并继续执行原指令；返回 `false` 时跳过该指令、原跳转或原抛出，非 `void` 方法调用和 `invokedynamic` 调用会留下返回类型对应的默认值。
 handler 的引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`；原始类型参数仍必须按 JVM 栈类型匹配。
 
-`INVOKE` 模式只支持返回 `void` 的目标调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；`invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数。动态调用目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。省略 `At.target` 时，框架会按 handler 参数和 boolean 返回类型筛选兼容的 `void` 普通调用或 `invokedynamic` 调用；构造器、非 `void` 调用和 handler 不兼容的调用不计入 `ordinal` 或命中数。后续参数可按目标方法声明顺序接收目标方法参数前缀。显式目标遇到非 `void` 调用会在转换阶段失败。构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，不能用 `@WrapWithCondition` 条件跳过；显式命中构造器目标会在转换阶段失败，如需控制构造过程应使用 `@Redirect` 或 `@WrapOperation`。
+`INVOKE` 模式支持普通方法调用和 `invokedynamic` 调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；`invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数。动态调用目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。省略 `At.target` 时，框架会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或 `invokedynamic` 调用；构造器和 handler 不兼容的调用不计入 `ordinal` 或命中数。后续参数可按目标方法声明顺序接收目标方法参数前缀。构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，不能用 `@WrapWithCondition` 条件跳过；显式命中构造器目标会在转换阶段失败，如需控制构造过程应使用 `@Redirect` 或 `@WrapOperation`。
 可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容条件包裹操作点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
@@ -679,7 +588,7 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 `THROW` 模式匹配 `ATHROW` 前即将抛出的异常对象。handler 先接收 `Throwable`，并可继续接收目标方法参数前缀；返回 `true` 时恢复原异常并继续原 `ATHROW`，返回 `false` 时跳过该 `ATHROW` 并继续后续字节码。`At.target` 可写异常类型 internal name 或 binary name，只匹配 `ATHROW` 前一条真实指令为同类型 `<init>` 的直接构造异常；省略时会按 handler 签名筛选兼容抛异常候选。`THROW` 模式同样可用 `slice.from` / `slice.to` 把候选抛异常点限制在一段 `INVOKE` 边界之间。
 
-`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，`void` 方法调用、返回 `void` 的 `invokedynamic` 调用、字段写入、数组元素写入、条件跳转与抛异常点均按实际条件包裹数量计数；省略 `INVOKE` 调用目标、`FIELD_ASSIGN` 字段目标或 `THROW` 异常类型目标时，不兼容候选不计入数量；省略 `JUMP` 跳转目标时会按兼容 handler 匹配全部条件跳转；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
+`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，普通方法调用、`invokedynamic` 调用、字段写入、数组元素写入、条件跳转与抛异常点均按实际条件包裹数量计数；省略 `INVOKE` 调用目标、`FIELD_ASSIGN` 字段目标或 `THROW` 异常类型目标时，不兼容候选不计入数量；省略 `JUMP` 跳转目标时会按兼容 handler 匹配全部条件跳转；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -1048,7 +957,7 @@ fun removeSync() {}
 
 替换目标类中的所有方法。
 
-该注解会在方法级注解处理前运行，把目标类的方法体替换成框架默认返回或内部 `RedirectionReplaceApi.invokeIgnore`
+该注解会在方法级注解处理前运行，把目标类的方法体替换成框架默认返回或内部 `DefaultReturnValueProvider.defaultValue`
 调用。它适合为整类建立默认实现，再通过同一个 Mixin 中的 `@Overwrite` 恢复少量需要保留逻辑的方法。
 
 **参数：**
@@ -1397,7 +1306,7 @@ fun wrapLoad(operation: Operation<String>): String {
 把 `FIELD_ASSIGN` 解释为“匹配实例字段写入前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
 handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值、数组元素值或数组长度的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”，把 `NEW` 解释为“用可执行原构造过程的 handler 替换匹配构造表达式”，把 `CAST` 解释为“用可执行原类型转换的 handler 替换匹配 `CHECKCAST`”，把 `INSTANCEOF` 解释为“用可执行原类型判断的 handler 替换匹配类型判断”，把 `LOAD` 解释为“用可返回原读取值的 handler 替换匹配局部变量读取表达式”，把 `STORE` 解释为“用可返回原待写入值的 handler 替换匹配局部变量待写入表达式”，把 `JUMP` 解释为“用可返回原分支结果的 handler 替换匹配条件跳转”，把 `SWITCH` 解释为“用可返回原 selector 的 handler 替换匹配 switch selector”，把 `CONSTANT` 解释为“用可读取原常量的 handler 替换匹配常量加载”，把 `THROW` 解释为“用可返回原异常对象的 handler 替换即将抛出的异常”。
-`@WrapWithCondition` 会把 `INVOKE` 解释为“匹配 `void` 调用前的条件判断”，把 `FIELD_ASSIGN`
+`@WrapWithCondition` 会把 `INVOKE` 解释为“匹配普通方法调用或 `invokedynamic` 调用前的条件判断”，把 `FIELD_ASSIGN`
 解释为“匹配字段写入或数组元素写入前的条件判断”，把 `JUMP` 解释为“匹配条件跳转分支结果前的条件判断”，把 `THROW` 解释为“匹配即将抛出的异常前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`，并支持 `At.by` 按真实字节码指令数移动插入锚点；
 普通 `@AsmInject(NEW)` 只支持

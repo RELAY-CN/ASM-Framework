@@ -4,7 +4,6 @@
 
 package kim.der.asm.api
 
-import kim.der.asm.data.MethodTypeInfoValue
 import org.objectweb.asm.tree.ClassNode
 
 /**
@@ -16,37 +15,20 @@ import org.objectweb.asm.tree.ClassNode
  * 该接口不约束线程安全。若实现类持有可变状态，应由实现类或调用方保证同一实例不会被并发复用。
  *
  * @author Dr (dr@der.kim)
- * @date 2025-11-24
+ * @date 2026-06-01
  */
 fun interface Transformer {
     /**
      * 转换类节点。
      *
-     * 该便捷入口不会提供重定向/监听目标描述列表，适合只依赖 [ClassNode] 本身的改写。
+     * 该入口只暴露 [ClassNode]，不再提供旧版 Redirection manager/listener 的目标方法描述列表。
+     * 需要替换调用、监听调用或改写表达式时，应使用 `@Redirect`、`@WrapOperation`、
+     * `@WrapWithCondition`、`@ModifyExpressionValue` 或其他注解式 Mixin API。
      *
      * @param classNode 待改写的类节点
      *
      * @author Dr (dr@der.kim)
-     * @date 2025-11-24
+     * @date 2026-06-01
      */
-    fun transform(classNode: ClassNode) {
-        transform(classNode, null)
-    }
-
-    /**
-     * 转换类节点，并可接收外部收集的目标方法描述。
-     *
-     * [methodTypeInfoValueList] 由调用方按需传入，通常用于重定向或监听器场景。
-     * 实现方可以读取或追加元素，但应避免依赖调用方未声明的列表所有权。
-     *
-     * @param classNode 待改写的类节点
-     * @param methodTypeInfoValueList 目标方法描述列表；为 `null` 表示本次转换不提供该上下文
-     *
-     * @author Dr (dr@der.kim)
-     * @date 2025-11-24
-     */
-    fun transform(
-        classNode: ClassNode,
-        methodTypeInfoValueList: ArrayList<MethodTypeInfoValue>?,
-    )
+    fun transform(classNode: ClassNode)
 }

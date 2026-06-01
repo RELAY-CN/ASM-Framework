@@ -5,10 +5,9 @@
 package kim.der.asm.transformer
 
 import kim.der.asm.api.annotation.*
-import kim.der.asm.api.replace.RedirectionReplace
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AsmInjectorFactory
-import kim.der.asm.injector.impl.RedirectionReplaceApi
+import kim.der.asm.injector.impl.DefaultReturnValueProvider
 import kim.der.asm.injector.util.InlineCodeGenerator
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -4583,9 +4582,9 @@ class TargetClassContext(
             for (insnNode in methodNode.instructions) {
                 if (insnNode.opcode == Opcodes.RETURN) {
                     if (!useDefaultReturn && returnType != Type.VOID_TYPE) {
-                        // 在 RETURN 前注入 RedirectionReplaceApi 调用
+                        // 在 RETURN 前注入默认返回值调用
                         val il = InsnList()
-                        injectRedirection(classNode, methodNode, il)
+                        injectDefaultReturnValue(methodNode, il)
                         newInstructions.add(il)
                     }
                 }
@@ -4599,7 +4598,7 @@ class TargetClassContext(
             if (useDefaultReturn) {
                 loadDefaultReturnValue(returnType, il)
             } else if (returnType != Type.VOID_TYPE) {
-                injectRedirection(classNode, methodNode, il)
+                injectDefaultReturnValue(methodNode, il)
             }
             il.add(InstructionUtil.makeReturn(returnType))
             methodNode.instructions = il
@@ -4608,39 +4607,28 @@ class TargetClassContext(
     }
 
     /**
-     * 注入 RedirectionReplaceApi 调用
+     * 注入默认返回值提供器调用。
+     *
+     * @param mn 目标方法
+     * @param il 待追加指令列表
+     * @return 目标方法返回类型
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-01
      */
-    private fun injectRedirection(
-        cn: ClassNode,
+    private fun injectDefaultReturnValue(
         mn: MethodNode,
         il: InsnList,
     ): Type {
-        val isStatic = Modifier.isStatic(mn.access)
-
-        // 加载对象（静态方法加载类，实例方法加载 this）
-        if (isStatic) {
-            il.add(LdcInsnNode(Type.getType("L${cn.name};")))
-        } else {
-            il.add(VarInsnNode(Opcodes.ALOAD, 0))
-        }
-
-        // 加载方法描述符字符串
-        il.add(LdcInsnNode("L${cn.name};${mn.name}${mn.desc}"))
-
-        // 加载返回类型
         val returnType = Type.getReturnType(mn.desc)
         il.add(InstructionUtil.loadType(returnType))
 
-        // 加载参数数组
-        loadArgArray(mn.desc, il, isStatic)
-
-        // 调用 RedirectionReplaceApi.invokeIgnore（全方法替换使用 invokeIgnore）
         il.add(
             MethodInsnNode(
                 Opcodes.INVOKESTATIC,
-                Type.getInternalName(RedirectionReplaceApi::class.java),
-                RedirectionReplace.METHOD_SPACE_NAME,
-                RedirectionReplace.METHOD_DESC,
+                Type.getInternalName(DefaultReturnValueProvider::class.java),
+                "defaultValue",
+                "(Ljava/lang/Class;)Ljava/lang/Object;",
             ),
         )
 
@@ -4662,41 +4650,6 @@ class TargetClassContext(
         }
 
         return returnType
-    }
-
-    /**
-     * 加载参数数组
-     */
-    private fun loadArgArray(
-        desc: String,
-        il: InsnList,
-        isStatic: Boolean,
-    ) {
-        val args = Type.getArgumentTypes(desc)
-        il.add(LdcInsnNode(args.size))
-        il.add(TypeInsnNode(Opcodes.ANEWARRAY, Type.getInternalName(Any::class.java)))
-
-        var v = if (isStatic) 0 else 1
-        for (i in args.indices) {
-            il.add(InsnNode(Opcodes.DUP))
-            val type = args[i]
-            il.add(LdcInsnNode(i))
-            il.add(InstructionUtil.loadParam(type, v))
-
-            // double 和 long 占用两个寄存器
-            if (type.sort == Type.DOUBLE || type.sort == Type.LONG) {
-                v++
-            }
-
-            // 装箱
-            val boxing = InstructionUtil.box(type)
-            if (boxing != null) {
-                il.add(boxing)
-            }
-
-            il.add(InsnNode(Opcodes.AASTORE))
-            v++
-        }
     }
 
     private fun shouldUseDefaultReturn(type: Type): Boolean {
@@ -4726,7 +4679,7 @@ class TargetClassContext(
             Type.BYTE,
             Type.SHORT,
             Type.INT -> il.add(InsnNode(Opcodes.ICONST_0))
-            Type.CHAR -> il.add(LdcInsnNode('a'))
+            Type.CHAR -> il.add(InsnNode(Opcodes.ICONST_0))
             Type.FLOAT -> il.add(InsnNode(Opcodes.FCONST_0))
             Type.LONG -> il.add(InsnNode(Opcodes.LCONST_0))
             Type.DOUBLE -> il.add(InsnNode(Opcodes.DCONST_0))
