@@ -77,9 +77,13 @@ class AsmProcessor : AsmTransformer() {
 
         var transformed = false
 
+        // Accessor setter 的 final 校验必须基于本次转换开始时的字段状态，避免被前置 Mixin 绕过。
+        val originalFieldAccessBySignature =
+            classNode.fields.associate { field -> "${field.name}:${field.desc}" to field.access }
+
         asms.forEach { asmInfo ->
             try {
-                if (TargetClassContext(className, classNode, asmInfo).applyAsm()) {
+                if (TargetClassContext(className, classNode, asmInfo, originalFieldAccessBySignature).applyAsm()) {
                     transformed = true
                 }
             } catch (throwable: Throwable) {

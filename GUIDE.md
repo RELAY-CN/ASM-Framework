@@ -1078,14 +1078,16 @@ class AccessMixin {
 `@Shadow("actualSecret") private val secretAlias: String? = null`。兼容 Mixin 风格的 `shadow_` 前缀：
 `@Shadow("shadow_privateField")` 会匹配目标成员 `privateField`。
 Shadow 字段/方法会沿可加载父类查找可继承成员；字段还会查找可加载接口中的 `public static` 字段，
-方法还会查找可加载接口中的默认方法。`@Mutable` 只会改写目标类自身字段的 `final` 标志。
+方法还会查找可加载接口中的默认方法。无论用于 Shadow 字段还是 Accessor setter，`@Mutable`
+都只会改写目标类自身字段的 `final` 标志。
 
 `@Accessor` 可按方法形态生成 getter 或 setter。getter 必须无参数并返回字段类型，
 setter 必须接收一个字段类型参数并返回 `void`。
 访问静态字段时，访问器方法也必须是静态方法；Kotlin `object` 中通常需要添加 `@JvmStatic`。
 目标类自身没有字段时，访问器会沿可加载父类查找可继承字段，再查找可加载接口中的 `public static` 字段；
 继承字段和接口字段的访问指令会使用字段实际 owner。接口字段按 JVM 规则作为静态字段读取，
-当前只支持 getter；setter 会在转换阶段失败。
+当前只支持 getter；setter 会在转换阶段失败。写入 final 字段的 setter 必须标记 `@Mutable`，
+否则会在转换阶段失败。
 
 ### 场景 7: 调用私有方法或构造器
 

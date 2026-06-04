@@ -42,9 +42,13 @@ import kim.der.asm.api.annotation.WrapOperation
 import kim.der.asm.api.annotation.WrapWithCondition
 import kim.der.asm.transformer.AsmProcessor
 import kim.der.asm.transformer.AsmTransformException
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.DisplayName
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassWriter
@@ -5574,6 +5578,108 @@ class FrameworkReliabilityTest {
         val field = classNode.fields.single { it.name == "name" }
 
         assertEquals(false, (field.access and Opcodes.ACC_FINAL) != 0)
+    }
+
+    @Nested
+    @DisplayName("@Accessor setter 场景")
+    inner class AccessorSetterScenarios {
+        @Test
+        @DisplayName("实例字段 setter 应通过公共访问器更新目标对象状态")
+        fun instanceFieldSetterUpdatesTargetState() {
+            // Given
+            AsmRegistry.register(InstanceFieldSetterAccessorMixin::class.java)
+            val transformed =
+                AsmProcessor().transform("AccessorSetterTarget", accessorSetterTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("AccessorSetterTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val readName = clazz.getMethod("readName")
+            val setName = clazz.getMethod("setName", String::class.java)
+
+            assertThat(readName.invoke(instance))
+                .`as`("Given: 目标类应保留原始字段状态，证明 setter 前置状态真实可见")
+                .isEqualTo("initial")
+
+            // When
+            setName.invoke(instance, "地图-Alpha_01")
+
+            // Then
+            assertThat(readName.invoke(instance))
+                .`as`("Then: @Accessor 生成的 setter 应写入 private 实例字段并改变目标对象状态")
+                .isEqualTo("地图-Alpha_01")
+        }
+
+        @Test
+        @DisplayName("final 字段 setter 缺少 @Mutable 时应在转换阶段失败")
+        fun finalFieldSetterWithoutMutableFailsDuringTransform() {
+            // Given
+            AsmRegistry.register(FinalFieldSetterWithoutMutableMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("FinalAccessorSetterTarget", finalAccessorSetterTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: 未标 @Mutable 的 final 字段 setter 不能生成运行时才失败的写字段字节码")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage("Accessor setter for final field name requires @Mutable")
+        }
+
+        @Test
+        @DisplayName("同一 Mixin 先移除 final 后，未标 @Mutable 的 setter 仍应失败")
+        fun finalFieldSetterWithoutMutableFailsAfterSameMixinMutableShadow() {
+            // Given
+            AsmRegistry.register(FinalFieldShadowMutableThenSetterWithoutMutableMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("FinalAccessorSetterTarget", finalAccessorSetterTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: setter 是否需要 @Mutable 应基于目标类原始 final 语义，而不是同一 Mixin 里已改写后的状态")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage("Accessor setter for final field name requires @Mutable")
+        }
+
+        @Test
+        @DisplayName("前置 Mixin 移除 final 后，后续未标 @Mutable 的 setter 仍应失败")
+        fun finalFieldSetterWithoutMutableFailsAfterPreviousMixinMutableShadow() {
+            // Given
+            AsmRegistry.register(HighPriorityFinalFieldMutableMixin::class.java)
+            AsmRegistry.register(LowPriorityFinalFieldSetterWithoutMutableMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("FinalAccessorSetterTarget", finalAccessorSetterTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: 多个 Mixin 顺序应用时，后续 setter 也必须遵守原始 final 字段的 @Mutable 契约")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage("Accessor setter for final field name requires @Mutable")
+        }
+
+        @Test
+        @DisplayName("@Mutable final 字段 setter 应移除 final 并更新对象状态")
+        fun mutableFinalFieldSetterRemovesFinalAndUpdatesTargetState() {
+            // Given
+            AsmRegistry.register(FinalFieldMutableSetterAccessorMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform("FinalAccessorSetterTarget", finalAccessorSetterTargetBytes(), javaClass.classLoader)
+            val classNode = readClass(transformed)
+            val field = classNode.fields.single { it.name == "name" }
+            val clazz = loadClass("FinalAccessorSetterTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val readName = clazz.getMethod("readName")
+            val setName = clazz.getMethod("setName", String::class.java)
+
+            setName.invoke(instance, "锁定值-已更新")
+
+            // Then
+            assertThat(field.access and Opcodes.ACC_FINAL)
+                .`as`("Then: @Mutable setter 必须先移除目标类自身字段的 final 标志")
+                .isZero()
+            assertThat(readName.invoke(instance))
+                .`as`("Then: 移除 final 后，生成的 setter 应能更新目标对象状态")
+                .isEqualTo("锁定值-已更新")
+        }
     }
 
     @Test
@@ -13914,6 +14020,58 @@ class FrameworkReliabilityTest {
         private val name: String? = null
     }
 
+    @AsmMixin("FinalAccessorSetterTarget")
+    class FinalFieldSetterWithoutMutableMixin {
+        @Accessor("name")
+        fun setName(value: String) {
+            throw UnsupportedOperationException()
+        }
+    }
+
+    @AsmMixin("FinalAccessorSetterTarget")
+    class FinalFieldShadowMutableThenSetterWithoutMutableMixin {
+        @Shadow
+        @Mutable
+        private val name: String? = null
+
+        @Accessor("name")
+        fun setName(value: String) {
+            throw UnsupportedOperationException()
+        }
+    }
+
+    @AsmMixin(value = "FinalAccessorSetterTarget", priority = 1500)
+    class HighPriorityFinalFieldMutableMixin {
+        @Shadow
+        @Mutable
+        private val name: String? = null
+    }
+
+    @AsmMixin(value = "FinalAccessorSetterTarget", priority = 500)
+    class LowPriorityFinalFieldSetterWithoutMutableMixin {
+        @Accessor("name")
+        fun setName(value: String) {
+            throw UnsupportedOperationException()
+        }
+    }
+
+    @AsmMixin("AccessorSetterTarget")
+    class InstanceFieldSetterAccessorMixin {
+        @Accessor("name")
+        fun setName(value: String) {
+            throw UnsupportedOperationException()
+        }
+    }
+
+    @AsmMixin("FinalAccessorSetterTarget")
+    class FinalFieldMutableSetterAccessorMixin {
+        @Accessor("name")
+        @Mutable
+        fun setName(value: String) {
+            throw UnsupportedOperationException()
+        }
+    }
+
     @AsmMixin("StrictTarget")
     class MissingShadowMethodMixin {
         @Shadow
@@ -19846,6 +20004,60 @@ class FrameworkReliabilityTest {
         cw.visitMethod(Opcodes.ACC_PUBLIC, "getName", "()Ljava/lang/String;", null, null).apply {
             visitCode()
             visitLdcInsn("existing")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun accessorSetterTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "AccessorSetterTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("initial")
+            visitFieldInsn(Opcodes.PUTFIELD, "AccessorSetterTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readName", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "AccessorSetterTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun finalAccessorSetterTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FinalAccessorSetterTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE or Opcodes.ACC_FINAL, "name", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("locked")
+            visitFieldInsn(Opcodes.PUTFIELD, "FinalAccessorSetterTarget", "name", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "readName", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FinalAccessorSetterTarget", "name", "Ljava/lang/String;")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
             visitEnd()

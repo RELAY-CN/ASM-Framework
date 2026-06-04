@@ -37,6 +37,7 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
+    testImplementation("org.assertj:assertj-core:3.26.3")
     testImplementation("org.mockito:mockito-core:5.18.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.4.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

@@ -870,7 +870,8 @@ getter/setter 类型不匹配、访问器静态性与字段静态性不一致，
 目标类自身没有该字段时，访问器会沿可加载父类查找可继承字段，再查找可加载接口中的 `public static` 字段，
 并使用字段实际 owner 生成访问指令；静态继承字段和接口字段都要求访问器方法也是静态方法。
 接口字段按 JVM 规则作为静态字段读取，当前只支持 getter；setter 会在转换阶段失败。
-setter 可与 `@Mutable` 组合，用于移除目标类自身字段的 `final` 标志后写入字段；继承字段不会被改写修饰符。
+setter 写入 `final` 字段时必须标记 `@Mutable`，框架会移除目标类自身字段的 `final` 标志后再写入；
+继承字段不会被改写修饰符，未标记 `@Mutable` 的 final 字段 setter 会在转换阶段失败。
 
 **参数：**
 
@@ -1024,7 +1025,10 @@ object MyMixin
 
 ### @Mutable
 
-标记字段为可变，用于移除 `final` 修饰符。
+标记字段或 `@Accessor` setter 为可变，用于移除目标类自身字段的 `final` 修饰符。
+
+该注解可用于 `@Shadow` 字段，也可用于写入 final 字段的 `@Accessor` setter。它只会改写目标类自身字段；
+继承字段和接口字段不会被改写，接口字段 setter 仍会在转换阶段失败。
 
 **示例：**
 
@@ -1032,6 +1036,12 @@ object MyMixin
 @Shadow()
 @Mutable
 private val finalField: String? = null
+
+@Accessor("finalField")
+@Mutable
+fun setFinalField(value: String) {
+    throw UnsupportedOperationException()
+}
 ```
 
 ### @Final

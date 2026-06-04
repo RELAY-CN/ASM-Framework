@@ -1597,7 +1597,8 @@ annotation class Shadow(
  * - getter 返回类型、setter 参数类型必须与目标字段类型一致。
  * - 静态字段要求访问器方法也是静态方法；Kotlin `object` 中通常需要配合 `@JvmStatic`。
  * - 接口字段按 JVM 规则作为静态字段读取，当前只支持 getter；setter 会在转换阶段失败。
- * - setter 标记 [Mutable] 时只会移除目标类自身字段的 `final` 标志；继承字段不会被改写修饰符。
+ * - setter 写入 `final` 字段时必须标记 [Mutable]；[Mutable] 只会移除目标类自身字段的 `final` 标志，
+ *   继承字段不会被改写修饰符。
  * - 生成的方法若与目标类已有同名同描述符方法冲突，转换会失败。
  *
  * @param value 目标字段名；为空时从方法名推断
@@ -1674,7 +1675,10 @@ annotation class Invoker(
 /**
  * 可变字段标记注解。
  *
- * 标记字段为可变（移除目标字段的 `final` 修饰符）。该注解可用于字段或 [Accessor] 方法。
+ * 标记字段或 [Accessor] setter 为可变。
+ *
+ * 用于移除目标类自身字段的 `final` 修饰符。该注解可用于 [Shadow] 字段，也可用于写入 final
+ * 字段的 [Accessor] setter；继承字段和接口字段不会被改写修饰符。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24

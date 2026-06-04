@@ -43,6 +43,7 @@ class TargetClassContext(
     private val className: String,
     private val classNode: ClassNode,
     private val asmInfo: AsmInfo,
+    private val originalFieldAccessBySignature: Map<String, Int> = emptyMap(),
 ) {
     /**
      * 应用 ASM 到目标类。
@@ -928,7 +929,12 @@ class TargetClassContext(
 
     private fun findAccessorTargetField(fieldName: String): AccessorTargetField? {
         classNode.fields.find { it.name == fieldName }?.let {
-            return AccessorTargetField(className, it, isInterfaceOwner = false)
+            return AccessorTargetField(
+                className,
+                it,
+                isInterfaceOwner = false,
+                wasFinalAtTransformStart = wasFinalAtTransformStart(className, it),
+            )
         }
         return findInheritedAccessorTargetField(fieldName)
     }
@@ -939,7 +945,12 @@ class TargetClassContext(
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             parentClass.fields.find { it.name == fieldName && isAccessorInheritedFieldVisible(it) }?.let {
-                return AccessorTargetField(parentClass.name, it, isInterfaceOwner = false)
+                return AccessorTargetField(
+                    parentClass.name,
+                    it,
+                    isInterfaceOwner = false,
+                    wasFinalAtTransformStart = wasFinalAtTransformStart(parentClass.name, it),
+                )
             }
             interfaceNames += parentClass.interfaces
             parentName = parentClass.superName
@@ -958,11 +969,29 @@ class TargetClassContext(
             }
             val interfaceClass = loadParentClass(interfaceName) ?: continue
             interfaceClass.fields.find { it.name == fieldName && isAccessorInheritedInterfaceFieldVisible(it) }?.let {
-                return AccessorTargetField(interfaceName, it, isInterfaceOwner = true)
+                return AccessorTargetField(
+                    interfaceName,
+                    it,
+                    isInterfaceOwner = true,
+                    wasFinalAtTransformStart = wasFinalAtTransformStart(interfaceName, it),
+                )
             }
             findInterfaceAccessorTargetField(interfaceClass.interfaces, fieldName, visited)?.let { return it }
         }
         return null
+    }
+
+    private fun wasFinalAtTransformStart(
+        owner: String,
+        field: FieldNode,
+    ): Boolean {
+        val fieldAccess =
+            if (owner == className) {
+                originalFieldAccessBySignature["${field.name}:${field.desc}"] ?: field.access
+            } else {
+                field.access
+            }
+        return (fieldAccess and Opcodes.ACC_FINAL) != 0
     }
 
     private fun isAccessorInheritedFieldVisible(field: FieldNode): Boolean =
@@ -1166,9 +1195,16 @@ class TargetClassContext(
             il.add(InstructionUtil.makeReturn(fieldType))
         } else {
             // Setter: 接收参数并设置字段值
-            // 如果字段是 final，需要先移除 final 标志（如果访问器方法有 @Mutable 注解）
             val mutable = asmMethod.isAnnotationPresent(Mutable::class.java)
-            if (mutable && targetField.owner == className && (fieldNode.access and Opcodes.ACC_FINAL) != 0) {
+            val finalField = targetField.wasFinalAtTransformStart || (fieldNode.access and Opcodes.ACC_FINAL) != 0
+            if (finalField) {
+                if (!mutable) {
+                    throw IllegalStateException("Accessor setter for final field $fieldName requires @Mutable")
+                }
+                if (targetField.owner != className) {
+                    throw IllegalStateException("Accessor setter cannot make inherited final field $fieldName mutable")
+                }
+                // final 字段只能在声明类初始化阶段写入；@Mutable 必须先移除目标类自身字段的 final 标志。
                 fieldNode.access = fieldNode.access and Opcodes.ACC_FINAL.inv()
             }
 
@@ -1195,6 +1231,7 @@ class TargetClassContext(
         val owner: String,
         val field: FieldNode,
         val isInterfaceOwner: Boolean,
+        val wasFinalAtTransformStart: Boolean,
     )
 
     /**
