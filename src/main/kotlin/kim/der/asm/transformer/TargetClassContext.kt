@@ -48,6 +48,8 @@ class TargetClassContext(
      * 应用 ASM 到目标类。
      *
      * @return 如果至少一个改写生效则返回 true
+     * @author Dr (dr@der.kim)
+     * @date 2025-11-24
      */
     fun applyAsm(): Boolean {
         var transformed = false

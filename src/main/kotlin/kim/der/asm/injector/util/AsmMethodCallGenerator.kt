@@ -206,6 +206,113 @@ object AsmMethodCallGenerator {
     }
 
     /**
+     * 生成可取消回调的目标方法提前返回分支。
+     *
+     * 该方法要求调用方在进入分支前已经清空当前注入点临时栈值；否则直接追加目标方法返回指令可能破坏
+     * JVM verifier 对返回点栈形态的要求。适用场景包括 HEAD 注入、已暂存调用点参数的 INVOKE 注入等。
+     *
+     * @param il 指令列表
+     * @param callbackVarIndex [CallbackInfo] 所在局部变量槽位
+     * @param returnType 目标方法返回类型
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-04
+     */
+    fun generateCancellationReturn(
+        il: InsnList,
+        callbackVarIndex: Int,
+        returnType: Type,
+    ) {
+        val continueLabel = LabelNode()
+        il.add(VarInsnNode(Opcodes.ALOAD, callbackVarIndex))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                Type.getInternalName(CallbackInfo::class.java),
+                "isCancelled",
+                "()Z",
+                false,
+            ),
+        )
+        il.add(JumpInsnNode(Opcodes.IFEQ, continueLabel))
+
+        if (returnType != Type.VOID_TYPE) {
+            generateCallbackReturnValue(il, callbackVarIndex, returnType)
+        }
+
+        il.add(InstructionUtil.makeReturn(returnType))
+        il.add(continueLabel)
+    }
+
+    /**
+     * 从回调对象读取目标方法返回值。
+     *
+     * 基础类型回调值为 `null` 时会生成 JVM 默认值；引用和数组返回值允许显式 `null`，并在非空时由
+     * `CHECKCAST` 维持目标方法返回类型约束。
+     *
+     * @param il 指令列表
+     * @param callbackVarIndex [CallbackInfo] 所在局部变量槽位
+     * @param returnType 目标方法返回类型
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-04
+     */
+    private fun generateCallbackReturnValue(
+        il: InsnList,
+        callbackVarIndex: Int,
+        returnType: Type,
+    ) {
+        il.add(VarInsnNode(Opcodes.ALOAD, callbackVarIndex))
+        il.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                Type.getInternalName(CallbackInfo::class.java),
+                "getReturnValue",
+                "()Ljava/lang/Object;",
+                false,
+            ),
+        )
+
+        if (returnType.sort == Type.OBJECT || returnType.sort == Type.ARRAY) {
+            il.add(TypeInsnNode(Opcodes.CHECKCAST, returnType.internalName))
+            return
+        }
+
+        val defaultReturnLabel = LabelNode()
+        val endLabel = LabelNode()
+        il.add(InsnNode(Opcodes.DUP))
+        il.add(JumpInsnNode(Opcodes.IFNULL, defaultReturnLabel))
+        InstructionUtil.unbox(returnType).forEach { il.add(it) }
+        il.add(JumpInsnNode(Opcodes.GOTO, endLabel))
+        il.add(defaultReturnLabel)
+        il.add(InsnNode(Opcodes.POP))
+        generateDefaultReturnValue(il, returnType)
+        il.add(endLabel)
+    }
+
+    /**
+     * 生成目标返回类型的 JVM 默认值。
+     *
+     * @param il 指令列表
+     * @param returnType 目标方法返回类型
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-04
+     */
+    private fun generateDefaultReturnValue(
+        il: InsnList,
+        returnType: Type,
+    ) {
+        when (returnType.sort) {
+            Type.BOOLEAN, Type.BYTE, Type.SHORT, Type.INT, Type.CHAR -> il.add(InsnNode(Opcodes.ICONST_0))
+            Type.LONG -> il.add(InsnNode(Opcodes.LCONST_0))
+            Type.FLOAT -> il.add(InsnNode(Opcodes.FCONST_0))
+            Type.DOUBLE -> il.add(InsnNode(Opcodes.DCONST_0))
+            else -> il.add(InsnNode(Opcodes.ACONST_NULL))
+        }
+    }
+
+    /**
      * 判断类型是否为可作为注入回调首参的类型。
      *
      * @param type 待判断类型

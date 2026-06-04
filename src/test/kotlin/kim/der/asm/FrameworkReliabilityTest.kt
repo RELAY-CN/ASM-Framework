@@ -156,6 +156,63 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun asmMixinDefaultPriorityIsCompatibleWithMixinStyleDefault() {
+        val annotation = DefaultPriorityMixin::class.java.getAnnotation(AsmMixin::class.java)
+
+        assertEquals(1000, annotation.priority)
+    }
+
+    @Test
+    fun registryOrdersExactMixinsByPriorityBeforeRegistrationOrder() {
+        AsmRegistry.register(LowPriorityExactMixin::class.java)
+        AsmRegistry.register(HighPriorityExactMixin::class.java)
+
+        val mixins = AsmRegistry.getForTarget("PriorityTarget").map { it.asmClass }
+
+        assertEquals(listOf(HighPriorityExactMixin::class.java, LowPriorityExactMixin::class.java), mixins)
+    }
+
+    @Test
+    fun registryKeepsRegistrationOrderWhenPriorityTies() {
+        AsmRegistry.register(FirstTiePriorityMixin::class.java)
+        AsmRegistry.register(SecondTiePriorityMixin::class.java)
+
+        val mixins = AsmRegistry.getForTarget("PriorityTarget").map { it.asmClass }
+
+        assertEquals(listOf(FirstTiePriorityMixin::class.java, SecondTiePriorityMixin::class.java), mixins)
+    }
+
+    @Test
+    fun registryOrdersPathMatcherMixinsByPriorityWithinPathGroup() {
+        AsmRegistry.registerWithPathMatcher(LowPriorityPathMixin::class.java) { it == "PriorityTarget" }
+        AsmRegistry.registerWithPathMatcher(HighPriorityPathMixin::class.java) { it == "PriorityTarget" }
+
+        val mixins = AsmRegistry.getForTarget("PriorityTarget").map { it.asmClass }
+
+        assertEquals(listOf(HighPriorityPathMixin::class.java, LowPriorityPathMixin::class.java), mixins)
+    }
+
+    @Test
+    fun registryKeepsPathGroupBeforeExactGroupEvenWhenExactPriorityIsHigher() {
+        AsmRegistry.registerWithPathMatcher(LowPriorityPathMixin::class.java) { it == "PriorityTarget" }
+        AsmRegistry.register(HighPriorityExactMixin::class.java)
+
+        val mixins = AsmRegistry.getForTarget("PriorityTarget").map { it.asmClass }
+
+        assertEquals(listOf(LowPriorityPathMixin::class.java, HighPriorityExactMixin::class.java), mixins)
+    }
+
+    @Test
+    fun pathMatcherWithoutAsmMixinUsesDefaultPriority() {
+        AsmRegistry.registerWithPathMatcher(LowPriorityPathMixin::class.java) { it == "PriorityTarget" }
+        AsmRegistry.registerWithPathMatcher(UnannotatedPathMixin::class.java) { it == "PriorityTarget" }
+
+        val mixins = AsmRegistry.getForTarget("PriorityTarget").map { it.asmClass }
+
+        assertEquals(listOf(UnannotatedPathMixin::class.java, LowPriorityPathMixin::class.java), mixins)
+    }
+
+    @Test
     fun scannerReportsClassLoadingFailures() {
         val jarFile = Files.createTempFile("asm-scanner-invalid-", ".jar")
         try {
@@ -863,6 +920,30 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("call").invoke(instance)
 
         assertEquals("value", result)
+    }
+
+    @Test
+    fun cancellableInvokeBeforeReturnsCallbackValue() {
+        AsmRegistry.register(CancellableInvokeBeforeMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("invoke-cancelled", result)
+    }
+
+    @Test
+    fun cancellableInvokeAssignAfterReturnsCallbackValue() {
+        AsmRegistry.register(CancellableInvokeAssignAfterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        assertEquals("invoke-assign-cancelled", result)
     }
 
     @Test
@@ -1874,6 +1955,56 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionLoadSliceLimitsLocalLoadsBetweenFromAndTo() {
+        AsmRegistry.register(WrapConditionLoadSliceMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("SliceLoadVariableTarget", sliceLoadVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceLoadVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("pre::outside", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtConstantUsesDefaultValueWhenFalse() {
+        AsmRegistry.register(WrapConditionConstantDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstantParamTarget", constantParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstantParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtConstantKeepsOriginalValueWhenTrue() {
+        AsmRegistry.register(WrapConditionConstantAllowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ConstantParamTarget", constantParamTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ConstantParamTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java, Int::class.javaPrimitiveType).invoke(instance, "suffix", 3)
+
+        assertEquals("base-", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtConstantInfersBooleanWhenTargetOmitted() {
+        AsmRegistry.register(WrapConditionConstantBooleanDenyMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("TrueBooleanConstantTarget", trueBooleanConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("TrueBooleanConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals(false, result)
+    }
+
+    @Test
     fun wrapWithConditionAtInvokeUsesDefaultReturnForNonVoidCall() {
         AsmRegistry.register(WrapConditionNonVoidCallMixin::class.java)
 
@@ -1913,6 +2044,49 @@ class FrameworkReliabilityTest {
             true,
             exception.cause?.message?.contains("must return boolean") == true,
         )
+    }
+
+    @Test
+    fun wrapWithConditionAtFieldUsesDefaultValueWhenFalse() {
+        AsmRegistry.register(WrapConditionFieldReadDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "blocked")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtFieldKeepsOriginalValueWhenTrue() {
+        AsmRegistry.register(WrapConditionFieldReadAllowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "allowed")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        assertEquals("allowed", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtFieldPrimitiveUsesDefaultValueWhenFalse() {
+        AsmRegistry.register(WrapConditionPrimitiveFieldReadDenyMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("PrimitiveFieldPointTarget", primitiveFieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("PrimitiveFieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        clazz.getMethod("writeScore", Int::class.javaPrimitiveType).invoke(instance, 42)
+        val result = clazz.getMethod("readScore").invoke(instance)
+
+        assertEquals(0, result)
     }
 
     @Test
@@ -2081,6 +2255,59 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    fun wrapWithConditionAtArrayReadUsesDefaultValueWhenFalse() {
+        AsmRegistry.register(WrapConditionArrayReadDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayReadKeepsOriginalValueWhenTrue() {
+        AsmRegistry.register(WrapConditionArrayReadAllowMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals("raw", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayReadPrimitiveUsesDefaultValueWhenFalse() {
+        AsmRegistry.register(WrapConditionPrimitiveArrayReadDenyMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform(
+                "PrimitiveArrayAccessTarget",
+                primitiveArrayAccessTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("PrimitiveArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readScore", Int::class.javaPrimitiveType).invoke(instance, 0)
+
+        assertEquals(0, result)
+    }
+
+    @Test
+    fun wrapWithConditionAtArrayLengthUsesDefaultValueWhenFalse() {
+        AsmRegistry.register(WrapConditionArrayLengthDenyMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ArrayAccessTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("nameCount").invoke(instance)
+
+        assertEquals(0, result)
+    }
+
+    @Test
     fun wrapWithConditionAtArrayWriteCanUseTargetMethodParameters() {
         AsmRegistry.register(WrapConditionArrayWriteWithTargetParamsMixin::class.java)
 
@@ -2133,6 +2360,45 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value", String::class.java).invoke(instance, "allow")
 
         assertEquals("target", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtLoadSkipsLocalReadWhenFalse() {
+        AsmRegistry.register(WrapConditionLoadDenyMixin::class.java)
+
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface", "TestFunctionalInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        val clazz =
+            loadClasses(
+                "Test",
+                mapOf(
+                    "Test" to transformed,
+                    "TestParent" to testFixtureClassBytes("TestParent"),
+                    "TestInterface" to testFixtureClassBytes("TestInterface"),
+                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+                ),
+            )
+
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("localNameDiscriminatorTest", String::class.java).invoke(instance, "raw") as String
+
+        assertEquals(":raw-second", result)
+    }
+
+    @Test
+    fun wrapWithConditionAtLoadIndexUsesCurrentLocalVariableScopeWhenSlotIsReused() {
+        AsmRegistry.register(WrapConditionLoadReusedSlotMixin::class.java)
+
+        val transformed = AsmProcessor().transform("ReusedLoadSlotTarget", reusedLoadSlotTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReusedLoadSlotTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertEquals("", result)
     }
 
     @Test
@@ -8822,6 +9088,42 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("RedirectTarget")
+    object CancellableInvokeBeforeMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.BEFORE,
+            ),
+            cancellable = true,
+        )
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.setReturnValue("invoke-cancelled")
+        }
+    }
+
+    @AsmMixin("RedirectTarget")
+    object CancellableInvokeAssignAfterMixin {
+        @AsmInject(
+            method = "call()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE_ASSIGN,
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+                shift = Shift.AFTER,
+            ),
+            cancellable = true,
+        )
+        @JvmStatic
+        fun inject(callback: CallbackInfo) {
+            callback.setReturnValue("invoke-assign-cancelled")
+        }
+    }
+
     @AsmMixin("InvokeDynamicExpressionValueTarget")
     object InvokeDynamicInjectMixin {
         var injectCount: Int = 0
@@ -10043,6 +10345,61 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceLoadVariableTarget")
+    object WrapConditionLoadSliceMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=1"]),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldLoad(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("ConstantParamTarget")
+    object WrapConditionConstantDenyMixin {
+        @WrapWithCondition(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "base-"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: String): Boolean = false
+    }
+
+    @AsmMixin("ConstantParamTarget")
+    object WrapConditionConstantAllowMixin {
+        @WrapWithCondition(
+            method = "value(Ljava/lang/String;I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "base-"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: String): Boolean = true
+    }
+
+    @AsmMixin("TrueBooleanConstantTarget")
+    object WrapConditionConstantBooleanDenyMixin {
+        @WrapWithCondition(
+            method = "value()Z",
+            at = At(value = InjectionPoint.CONSTANT),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: Boolean): Boolean = !value
+    }
+
     @AsmMixin("ExpressionValueTarget")
     object WrapConditionNonVoidCallMixin {
         @WrapWithCondition(
@@ -10086,6 +10443,54 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun shouldRun(value: String): String = value
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldReadDenyMixin {
+        @WrapWithCondition(
+            method = "readName()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldReadAllowMixin {
+        @WrapWithCondition(
+            method = "readName()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean = value == "allowed"
+    }
+
+    @AsmMixin("PrimitiveFieldPointTarget")
+    object WrapConditionPrimitiveFieldReadDenyMixin {
+        @WrapWithCondition(
+            method = "readScore()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "PrimitiveFieldPointTarget.score:I",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldRead(value: Int): Boolean = value < 0
     }
 
     @AsmMixin("FieldPointTarget")
@@ -10282,6 +10687,71 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayReadDenyMixin {
+        @WrapWithCondition(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayReadAllowMixin {
+        @WrapWithCondition(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean = value == "raw"
+    }
+
+    @AsmMixin("PrimitiveArrayAccessTarget")
+    object WrapConditionPrimitiveArrayReadDenyMixin {
+        @WrapWithCondition(
+            method = "readScore(I)I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "PrimitiveArrayAccessTarget.scores:[I",
+                args = ["array=get"],
+            ),
+        )
+        @JvmStatic
+        fun shouldRead(value: Int): Boolean {
+            value.toString()
+            return false
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayLengthDenyMixin {
+        @WrapWithCondition(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun shouldRead(length: Int): Boolean {
+            length.toString()
+            return false
+        }
+    }
+
     @AsmMixin("ArrayParamTarget")
     object WrapConditionArrayWriteWithTargetParamsMixin {
         @WrapWithCondition(
@@ -10350,6 +10820,38 @@ class FrameworkReliabilityTest {
             value: String,
             flag: String,
         ): Boolean = value == "target" && flag == "allow"
+    }
+
+    @AsmMixin("Test")
+    object WrapConditionLoadDenyMixin {
+        @WrapWithCondition(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=first"]),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldLoad(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("ReusedLoadSlotTarget")
+    object WrapConditionLoadReusedSlotMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=1"]),
+            ordinal = 1,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldLoad(value: Any): Boolean {
+            value.hashCode()
+            return false
+        }
     }
 
     @AsmMixin("ArrayAccessTarget")
@@ -15639,6 +16141,29 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("PriorityTarget")
+    object DefaultPriorityMixin
+
+    @AsmMixin(value = "PriorityTarget", priority = 500)
+    object LowPriorityExactMixin
+
+    @AsmMixin(value = "PriorityTarget", priority = 1500)
+    object HighPriorityExactMixin
+
+    @AsmMixin(value = "PriorityTarget", priority = 1000)
+    object FirstTiePriorityMixin
+
+    @AsmMixin(value = "PriorityTarget", priority = 1000)
+    object SecondTiePriorityMixin
+
+    @AsmMixin(priority = 500)
+    object LowPriorityPathMixin
+
+    @AsmMixin(priority = 1500)
+    object HighPriorityPathMixin
+
+    object UnannotatedPathMixin
+
     private fun strictTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StrictTarget", null, "java/lang/Object", null)
@@ -16322,6 +16847,41 @@ class FrameworkReliabilityTest {
             visitLocalVariable("other", "Ljava/lang/String;", null, start, end, 1)
             visitLocalVariable("target", "Ljava/lang/String;", null, start, end, 2)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun reusedLoadSlotTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReusedLoadSlotTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            val firstStart = org.objectweb.asm.Label()
+            val firstEnd = org.objectweb.asm.Label()
+            val builderStart = org.objectweb.asm.Label()
+            val builderEnd = org.objectweb.asm.Label()
+            visitCode()
+            visitLabel(firstStart)
+            visitLdcInsn("old")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.POP)
+            visitLabel(firstEnd)
+            visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder")
+            visitInsn(Opcodes.DUP)
+            visitLdcInsn("current")
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLabel(builderStart)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
+            visitLabel(builderEnd)
+            visitInsn(Opcodes.ARETURN)
+            visitLocalVariable("oldValue", "Ljava/lang/String;", null, firstStart, firstEnd, 1)
+            visitLocalVariable("builder", "Ljava/lang/StringBuilder;", null, builderStart, builderEnd, 1)
+            visitMaxs(3, 2)
             visitEnd()
         }
         cw.visitEnd()

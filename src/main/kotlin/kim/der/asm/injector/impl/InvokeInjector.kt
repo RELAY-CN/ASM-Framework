@@ -29,6 +29,8 @@ import java.lang.reflect.Modifier
  * 需要调用前注入时应使用普通 [InjectionPoint.INVOKE]。
  * 当注解缺少目标调用签名时返回未修改。BEFORE/AFTER handler 可先接收原调用参数前缀，
  * 再继续接收目标方法参数前缀；`invokedynamic` 没有 receiver，handler 从动态调用点描述符的参数开始接收。
+ * BEFORE/AFTER handler 若首参为 [CallbackInfo] 且声明 `cancellable = true`，会在 handler 调用后检查取消状态，
+ * 被取消时直接按目标方法返回类型从回调读取返回值并提前返回。
  * REPLACE handler 保持替换原调用的参数与返回值语义。
  *
  * @author Dr (dr@der.kim)
@@ -125,11 +127,11 @@ class InvokeInjector(
 
             when (shift) {
                 Shift.BEFORE -> {
-                    injectBeforeCall(instructions, callSite, target)
+                    injectBeforeCall(instructions, callSite, target, injectAnnotation.cancellable)
                     injectionCount++
                 }
                 Shift.AFTER -> {
-                    injectAfterCall(instructions, callSite, target)
+                    injectAfterCall(instructions, callSite, target, injectAnnotation.cancellable)
                     injectionCount++
                 }
                 Shift.REPLACE -> {
@@ -389,11 +391,13 @@ class InvokeInjector(
      * @param instructions 目标方法指令列表
      * @param callSite 被命中的调用点
      * @param targetMethod 目标方法
+     * @param cancellable 是否允许 [CallbackInfo] 取消目标方法后续执行
      */
     private fun injectBeforeCall(
         instructions: InsnList,
         callSite: CallSite,
         targetMethod: MethodNode,
+        cancellable: Boolean,
     ) {
         val il = InsnList()
 
@@ -419,7 +423,15 @@ class InvokeInjector(
             il.add(VarInsnNode(Opcodes.ASTORE, savedInstanceIndex))
         }
 
-        val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
+        val callbackVarIndex =
+            createCallbackInfoIfNeeded(
+                il = il,
+                targetMethod = targetMethod,
+                savedParamTypes = paramTypes,
+                savedParamIndexes = savedParams,
+                savedInstanceIndex = savedInstanceIndex,
+                cancellable = cancellable,
+            )
 
         // 生成调用 ASM 方法的指令，参数来自已保存的调用点参数和目标方法参数。
         generateCallSiteHandlerCall(
@@ -430,6 +442,9 @@ class InvokeInjector(
             callbackVarIndex,
         )
         dropUnusedHandlerReturnValue(il)
+
+        // 调用点参数已经全部暂存到局部变量，此时栈为空，可以安全执行目标方法提前返回。
+        addCancellationReturnIfNeeded(il, callbackVarIndex, targetMethod, cancellable)
 
         // 恢复参数（从左到右）
         if (savedInstanceIndex != null) {
@@ -455,11 +470,13 @@ class InvokeInjector(
      * @param instructions 目标方法指令列表
      * @param callSite 被命中的调用点
      * @param targetMethod 目标方法
+     * @param cancellable 是否允许 [CallbackInfo] 取消目标方法后续执行
      */
     private fun injectAfterCall(
         instructions: InsnList,
         callSite: CallSite,
         targetMethod: MethodNode,
+        cancellable: Boolean,
     ) {
         // 查找调用后的位置
         val nextInsn = callSite.insn.next
@@ -514,6 +531,7 @@ class InvokeInjector(
                     paramTypes + returnType,
                     savedParams + returnVarIndex,
                     savedInstanceIndex,
+                    cancellable,
                 )
 
             // 生成调用 ASM 方法的指令。
@@ -526,6 +544,9 @@ class InvokeInjector(
             )
             dropUnusedHandlerReturnValue(il)
 
+            // 原调用返回值已暂存，栈为空；取消时直接返回目标方法回调值，不再恢复原调用结果。
+            addCancellationReturnIfNeeded(il, callbackVarIndex, targetMethod, cancellable)
+
             // 恢复返回值
             loadReturnValue(il, returnType, returnVarIndex)
 
@@ -533,7 +554,15 @@ class InvokeInjector(
         } else {
             // 无返回值，直接在调用后插入
             val il = InsnList()
-            val callbackVarIndex = createCallbackInfoIfNeeded(il, targetMethod, paramTypes, savedParams, savedInstanceIndex)
+            val callbackVarIndex =
+                createCallbackInfoIfNeeded(
+                    il = il,
+                    targetMethod = targetMethod,
+                    savedParamTypes = paramTypes,
+                    savedParamIndexes = savedParams,
+                    savedInstanceIndex = savedInstanceIndex,
+                    cancellable = cancellable,
+                )
             generateCallSiteHandlerCall(
                 il,
                 targetMethod,
@@ -542,6 +571,7 @@ class InvokeInjector(
                 callbackVarIndex,
             )
             dropUnusedHandlerReturnValue(il)
+            addCancellationReturnIfNeeded(il, callbackVarIndex, targetMethod, cancellable)
             instructions.insertBefore(nextInsn, il)
         }
     }
@@ -934,6 +964,7 @@ class InvokeInjector(
      * @param savedParamTypes 已暂存值类型
      * @param savedParamIndexes 已暂存值槽位
      * @param savedInstanceIndex 已暂存 receiver 槽位；静态或 `invokedynamic` 调用为 `null`
+     * @param cancellable 创建的回调是否允许 [CallbackInfo.cancel] 和 [CallbackInfo.setReturnValue] 触发取消
      * @return callback 暂存槽位；handler 不需要 callback 时返回 `null`
      */
     private fun createCallbackInfoIfNeeded(
@@ -942,15 +973,44 @@ class InvokeInjector(
         savedParamTypes: Array<Type>,
         savedParamIndexes: List<Int>,
         savedInstanceIndex: Int?,
+        cancellable: Boolean = false,
     ): Int? {
         if (!AsmMethodCallGenerator.needsCallbackInfo(asmMethod)) {
             return null
         }
 
-        AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod)
+        AsmMethodCallGenerator.generateCallbackInfoCreation(il, asmMethod, cancellable)
         val callbackVarIndex = allocateVariableAfterSavedCallState(targetMethod, savedParamTypes, savedParamIndexes, savedInstanceIndex)
         il.add(VarInsnNode(Opcodes.ASTORE, callbackVarIndex))
         return callbackVarIndex
+    }
+
+    /**
+     * 在普通调用点注入后追加可取消提前返回分支。
+     *
+     * 该入口只在 BEFORE/AFTER 注入中调用；这些路径会先暂存调用点参数、receiver 或返回值，因此这里执行
+     * 目标方法返回时不会留下原调用点操作数。
+     *
+     * @param il 正在构造的注入指令列表
+     * @param callbackVarIndex [CallbackInfo] 局部变量槽位；没有回调首参时为 `null`
+     * @param targetMethod 目标方法
+     * @param cancellable 注解是否声明可取消
+     */
+    private fun addCancellationReturnIfNeeded(
+        il: InsnList,
+        callbackVarIndex: Int?,
+        targetMethod: MethodNode,
+        cancellable: Boolean,
+    ) {
+        if (!cancellable || callbackVarIndex == null) {
+            return
+        }
+
+        AsmMethodCallGenerator.generateCancellationReturn(
+            il = il,
+            callbackVarIndex = callbackVarIndex,
+            returnType = Type.getReturnType(targetMethod.desc),
+        )
     }
 
     /**

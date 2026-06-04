@@ -9,10 +9,12 @@ package kim.der.asm.api.annotation
  *
  * 用于标记某个 ASM 类需要应用到一个或多个目标类上。
  * 目标类名称使用 JVM internal name（例如 `"com/example/Target"`），并由注册器用于建立“目标类 -> ASM 列表”的索引。
+ * 当同一目标类匹配多个 Mixin 时，[priority] 用于控制同一匹配分组内的应用顺序。
  *
  * @param value 单目标类 internal name；为空时可使用 [targets]
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @param targets 多目标类 internal name 列表
+ * @param priority 应用优先级；数值越高越先应用，同优先级保持注册顺序
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -40,6 +42,14 @@ annotation class AsmMixin(
      * 适合同一个 Mixin 需要应用到一组结构兼容目标类的场景。
      */
     val targets: Array<String> = [],
+
+    /**
+     * Mixin 应用优先级。
+     *
+     * 默认值与常见 Mixin 风格保持一致。同一匹配分组内数值越高越先应用；
+     * 数值相同时保持注册顺序，路径匹配分组仍整体先于精确目标分组。
+     */
+    val priority: Int = 1000,
 )
 
 /**
@@ -799,9 +809,11 @@ annotation class WrapMethod(
 /**
  * 条件包裹注解。
  *
- * 用于在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段写入、简单数组元素写入、局部变量写入、条件跳转或抛异常点前插入条件判断（语义参考
+ * 用于在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段读取、字段写入、简单数组元素读取、
+ * 数组元素写入、数组长度读取、局部变量读取/写入、常量加载、条件跳转或抛异常点插入条件判断（语义参考
  * Mixin Extras 的 `@WrapWithCondition`）。handler 返回 `true` 时继续执行原调用、写入、按原分支结果跳转或继续原抛出，
- * 返回 `false` 时跳过原指令、原跳转或原抛出；非 `void` 方法调用和 `invokedynamic` 调用会留下返回类型对应的默认值。
+ * 返回 `false` 时跳过原指令、原跳转或原抛出；非 `void` 方法调用、`invokedynamic` 调用、字段读取、
+ * 数组元素读取、数组长度读取、局部变量读取和常量加载会留下对应类型的默认值。
  * 相比 [Redirect]，该注解不替换原逻辑，只决定原指令、原跳转或原抛出是否继续执行，更适合“按条件跳过副作用调用、写入、分支跳转或异常抛出”的场景。
  *
  * [InjectionPoint.INVOKE] 模式支持普通方法调用和 `invokedynamic` 调用。
@@ -810,20 +822,38 @@ annotation class WrapMethod(
  * 构造器 `<init>` 不能作为条件包裹目标；跳过构造器会留下未初始化对象并生成不可验证字节码，转换阶段会失败。
  * 如需控制构造过程，应使用 [Redirect] 或 [WrapOperation]。
  * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+ * [InjectionPoint.FIELD] 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取，字段目标格式支持
+ * `owner.field:desc`、`field:desc` 与 `field`。handler 首参接收读取出的字段值，不接收 receiver；
+ * 返回 `true` 时保留原字段值，返回 `false` 时用字段类型默认值替换本次读取结果。省略 [At.target] 时会按 handler
+ * 首参和 `Boolean` 返回类型筛选兼容的字段读取，不兼容候选不计入 [ordinal] 或命中数。
+ * 数组元素读取使用 [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定，
+ * handler 首参接收已经读取出的数组元素值，不接收数组引用或索引；
+ * 返回 `false` 时用元素类型默认值替换本次读取结果。
+ * 数组长度读取使用 [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定，
+ * handler 首参接收 `Int` 长度值，不接收数组引用；返回 `false` 时用 `0` 替换本次数组长度结果。
  * [InjectionPoint.FIELD_ASSIGN] 模式匹配
  * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
  * 省略 [At.target] 时会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容的字段写入，
  * 不兼容候选不计入 [ordinal] 或命中数。
  * 数组元素写入使用 [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定，
  * 当前匹配由最近的目标数组字段读取产生数组引用的 `xASTORE` 指令。
- * [InjectionPoint.STORE] 模式匹配局部变量写入，不使用 [At.target]；可通过 [At.args] 中的 `index=N`、`var=N`
- * 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。handler 先接收 `xSTORE` 消费前的待写入值；
- * 返回 `true` 时执行原写入，返回 `false` 时丢弃该值并跳过原写入。
+ * [InjectionPoint.LOAD] 模式匹配局部变量读取，不使用 [At.target]；可通过 [At.args] 中的 `index=N`、`var=N`
+ * 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。handler 先接收 `xLOAD` 读取出的值；
+ * 返回 `true` 时保留原读取值，返回 `false` 时用该值类型的默认值替换本次读取结果，不回写原槽位。
+ * [InjectionPoint.STORE] 模式匹配局部变量写入，不使用 [At.target]；可通过同样的槽位或名称过滤指定候选。
+ * handler 先接收 `xSTORE` 消费前的待写入值；返回 `true` 时执行原写入，返回 `false` 时丢弃该值并跳过原写入。
  * [InjectionPoint.JUMP] 模式匹配条件跳转，handler 先接收原始分支结果 `Boolean`，
  * 返回 `true` 时保留原分支结果，返回 `false` 时跳过原跳转；`GOTO` 与 `JSR` 不支持条件包裹。
+ * [InjectionPoint.CONSTANT] 模式匹配常量加载指令。转换会保留原常量加载，并在其后插入 LOAD 风格条件包裹；
+ * handler 首参接收原常量值，返回 `true` 时保留原值，返回 `false` 时压入同类型默认值。
+ * 指定 [At.target] 时按常量文本过滤；省略 [At.target] 时按 handler 首参与 `Boolean` 返回类型筛选兼容常量，
+ * 不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.THROW] 模式匹配 `ATHROW` 前即将抛出的 [Throwable]，handler 先接收该异常对象，
  * 返回 `true` 时恢复原异常并继续原 `ATHROW`，返回 `false` 时跳过原抛出；指定 [At.target] 时只匹配直接构造后抛出的同类型异常。
- * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.STORE]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 模式可使用 [slice] 把候选调用、字段写入、数组元素写入、局部变量写入、条件跳转或抛异常点
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、
+ * [InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
+ * 模式可使用 [slice] 把候选调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
+ * 局部变量读取、局部变量写入、条件跳转、常量加载或抛异常点
  * 限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
  *
  * ASM 方法要求：
@@ -832,23 +862,32 @@ annotation class WrapMethod(
  * - 非静态目标调用的 handler 参数先接收 receiver，再接收原调用参数
  * - 静态目标调用的 handler 参数接收原调用参数
  * - `invokedynamic` 目标调用没有 receiver，handler 参数接收动态调用点描述符中的参数
+ * - 字段读取的 handler 先接收 `GETFIELD` / `GETSTATIC` 读取出的字段值，不接收 receiver
  * - 实例字段写入的 handler 参数先接收字段 owner，再接收待写入值
  * - 静态字段写入的 handler 参数接收待写入值
+ * - 数组元素读取的 handler 参数先接收已经读取出的元素值，不接收数组引用或索引
  * - 数组元素写入的 handler 参数先接收数组引用、`Int` 索引，再接收待写入元素值
+ * - 数组长度读取的 handler 参数先接收 `Int` 长度值，不接收数组引用
+ * - 局部变量读取的 handler 先接收 `xLOAD` 读取出的栈顶表达式值
  * - 局部变量写入的 handler 先接收 `xSTORE` 消费前的待写入值
+ * - 常量加载的 handler 先接收原常量值
  * - 条件跳转的 handler 先接收原始分支结果 `Boolean`
  * - 抛异常点的 handler 先接收即将抛出的 [Throwable]
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
- * - [At.target] 可指定要匹配的方法调用、动态调用、字段签名、跳转操作码或异常类型；[InjectionPoint.INVOKE]、
- *   [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 可省略 [At.target]，按 handler 签名筛选兼容候选；
- *   [InjectionPoint.STORE] 不使用 [At.target]，通过 [At.args] 过滤局部变量写入候选
+ * - [At.target] 可指定要匹配的方法调用、动态调用、字段签名、跳转操作码、常量文本或异常类型；[InjectionPoint.INVOKE]、
+ *   [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]
+ *   与 [InjectionPoint.THROW] 可省略 [At.target]，按 handler 签名筛选兼容候选；
+ *   [InjectionPoint.LOAD] / [InjectionPoint.STORE] 不使用 [At.target]，通过 [At.args] 过滤局部变量读写候选
  * - [method] 为空时会按 handler 名称、条件包裹操作点和 handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
  * @param method 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
- * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.STORE]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.STORE]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 模式支持 INVOKE 边界切片
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
+ * 模式支持 INVOKE 边界切片
  * @param require 最小命中数；大于 0 时实际条件包裹数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际条件包裹数不能超过该值
@@ -869,7 +908,7 @@ annotation class WrapWithCondition(
     /**
      * 条件包裹操作点定位。
      *
-     * 支持普通方法调用、字段写入、数组元素写入、局部变量写入、条件跳转和抛异常点。
+     * 支持普通方法调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、局部变量读取/写入、条件跳转、常量加载和抛异常点。
      */
     val at: At = At(value = InjectionPoint.INVOKE),
 

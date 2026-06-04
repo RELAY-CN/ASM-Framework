@@ -32,13 +32,16 @@ ASM 注册器，负责管理所有注册的 ASM 类。
 
 注册一个按目标类路径动态匹配的 ASM 类。`pathMatcher` 接收目标类 internal name，返回 `true` 表示该 ASM 应用于该目标类。
 
-该入口适合批量处理某个包、前缀或运行时才能确定的目标类。路径匹配注册不会强制校验 `asmClass` 是否带 `@AsmMixin`，调用方需要保证类中的 handler 声明符合框架约定。
+该入口适合批量处理某个包、前缀或运行时才能确定的目标类。路径匹配注册不会强制校验 `asmClass`
+是否带 `@AsmMixin`，调用方需要保证类中的 handler 声明符合框架约定；未标注 `@AsmMixin` 时使用默认 priority `1000`。
 
 ##### `getForTarget(targetClass: String): List<AsmInfo>`
 
 返回目标类匹配到的 ASM 列表。
 
-`targetClass` 使用 JVM internal name，例如 `com/example/TargetClass`。返回顺序固定为路径匹配命中的 ASM 在前、精确目标注册命中的 ASM 在后；同一分组内保持注册顺序。注册关系变化后会清空缓存，下一次查询重新计算匹配结果。
+`targetClass` 使用 JVM internal name，例如 `com/example/TargetClass`。返回顺序固定为路径匹配命中的 ASM 在前、
+精确目标注册命中的 ASM 在后；同一分组内按 priority 从高到低排序，priority 相同保持注册顺序。
+注册关系变化后会清空缓存，下一次查询重新计算匹配结果。
 
 ##### `clear()`
 
@@ -66,8 +69,11 @@ AsmRegistry.clear()
 - `asmClass: Class<*>` - ASM 类，通常带有 `@AsmMixin`，也可由路径匹配入口显式注册
 - `targets: List<String>` - 精确匹配的目标类 internal name 列表
 - `pathMatcher: Find<String, Boolean>?` - 可选路径匹配器；返回 `true` 表示该 ASM 应用于给定目标类
+- `priority: Int = 1000` - Mixin 应用优先级；同一匹配分组内数值越高越先应用
+- `registrationOrder: Long = 0L` - 注册序号；同 priority 时保持注册顺序
 
 精确目标注册会填充 `targets`，并保持 `pathMatcher` 为空；路径匹配注册会填充 `pathMatcher`，并保持 `targets` 为空。
+`priority` 与 `registrationOrder` 只决定同一匹配分组内的顺序，不改变路径匹配分组先于精确目标分组的公开契约。
 
 ### Find
 
@@ -138,7 +144,9 @@ ASM 处理器，负责应用所有注册的 ASM 到目标类。
 - `applyAsms(className: String, classNode: ClassNode): Boolean` - 直接修改传入的 `ClassNode`，至少一个 ASM 生效时返回 `true`
 - `shouldTransform(className: String): Boolean` - 仅查询 `AsmRegistry`，判断目标类是否存在匹配 ASM，不读取或解析 classfile 字节码
 
-多个 ASM 的执行顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中在前，精确目标命中在后。任一 ASM 应用失败时会抛出 `AsmTransformException`，本次转换不会继续写出部分改写后的字节码。
+多个 ASM 的执行顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中在前，精确目标命中在后；
+同一分组内 priority 高的 Mixin 先应用，priority 相同则保持注册顺序。任一 ASM 应用失败时会抛出
+`AsmTransformException`，本次转换不会继续写出部分改写后的字节码。
 
 **示例：**
 
@@ -240,12 +248,16 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 - `value: String = ""` - 单个目标类名（内部名称）
 - `targets: Array<String> = []` - 多个目标类名数组
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
+- `priority: Int = 1000` - Mixin 应用优先级；同一匹配分组内数值越高越先应用，同 priority 保持注册顺序
 
 **示例：**
 
 ```kotlin
 @AsmMixin("com/example/TargetClass")
 object MyMixin
+
+@AsmMixin(value = "com/example/TargetClass", priority = 1500)
+object EarlyMixin
 
 @AsmMixin(targets = ["com/example/Class1", "com/example/Class2"])
 object MultiTargetMixin
@@ -321,7 +333,7 @@ object RemoveInterfacesMixin
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、注入点和签名兼容规则推断唯一同名目标方法
 - `target: InjectionPoint = InjectionPoint.HEAD` - 注入点位置
-- `cancellable: Boolean = false` - 是否允许 handler 调用 `CallbackInfo.cancel()` 或通过 `CallbackInfo.setReturnValue(...)` 触发取消；当前 `HEAD` 与 `TAIL` 注入会据此生成提前返回分支
+- `cancellable: Boolean = false` - 是否允许 handler 调用 `CallbackInfo.cancel()` 或通过 `CallbackInfo.setReturnValue(...)` 触发取消；当前 `HEAD`、`TAIL` 与普通 `INVOKE` / `INVOKE_ASSIGN` 的 `BEFORE` / `AFTER` 注入会据此生成提前返回分支
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
 - `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可通过 `["name=localName"]` 按 LocalVariableTable 变量名过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
@@ -342,7 +354,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 以及普通非替换指令点注入的 handler 返回值不会参与目标方法结果，框架会在调用后丢弃该返回值以保持栈平衡。
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容注入点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
-需要在 `HEAD` 或 `TAIL` 注入中提前返回时，必须设置 `cancellable = true`。未声明可取消的 `CallbackInfo` 调用 `cancel()` 会抛出
+需要在 `HEAD`、`TAIL` 或普通 `INVOKE` / `INVOKE_ASSIGN` 的 `BEFORE` / `AFTER` 注入中提前返回时，必须设置 `cancellable = true`。未声明可取消的 `CallbackInfo` 调用 `cancel()` 会抛出
 `IllegalStateException`，避免配置错误被静默忽略。对于非 `void` 目标方法，可取消回调调用 `setReturnValue(...)`
 会同时标记取消，并提前返回该值。普通 `RETURN` 与非 `void` `TAIL` 注入会先把原始返回值预置到 `CallbackInfo`，handler 调用
 `setReturnValue(null)` 时，引用类型返回值会被明确替换为 `null`，不会被当作未修改；`TAIL` handler 修改后的回调返回值会写回原返回点。
@@ -555,20 +567,27 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 
 ### @WrapWithCondition
 
-在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段写入、简单数组元素写入、条件跳转或即将抛出的异常，并用 boolean handler 决定是否继续执行原指令、原分支或原抛出。适合按条件跳过日志、通知、字段写入、数组写入、广播等副作用，也适合只在特定上下文下抑制原分支跳转或异常抛出。
+在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段读取、字段写入、简单数组元素读取、
+数组元素写入、数组长度读取、局部变量读取或写入、常量加载、条件跳转或即将抛出的异常，
+并用 boolean handler 决定是否继续执行原指令、原分支或原抛出。适合按条件跳过日志、通知、字段读取结果、
+字段写入、数组读取结果、数组写入、数组长度结果、局部状态读取/写入、常量表达式值使用、广播等副作用，
+也适合只在特定上下文下抑制原分支跳转或异常抛出。
 
 **参数：**
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
-- `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前支持 `INVOKE`、`FIELD_ASSIGN`、`JUMP` 与 `THROW`
+- `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前支持 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CONSTANT`、`JUMP` 与 `THROW`
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
-- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE`、`FIELD_ASSIGN`、`JUMP` 与 `THROW` 模式支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 切片范围；当前 `INVOKE`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`CONSTANT`、`JUMP` 与 `THROW` 模式支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际条件包裹数必须不少于该值
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
-`@WrapWithCondition` handler 必须返回 `Boolean`。返回 `true` 时恢复原 receiver/参数、字段写入值、数组写入栈参数、原条件跳转分支结果或原异常对象并继续执行原指令；返回 `false` 时跳过该指令、原跳转或原抛出，非 `void` 方法调用和 `invokedynamic` 调用会留下返回类型对应的默认值。
+`@WrapWithCondition` handler 必须返回 `Boolean`。返回 `true` 时恢复原 receiver/参数、字段读取值、字段写入值、
+数组读取值、数组写入栈参数、数组长度值、局部变量读取值、局部变量待写入值、常量值、
+原条件跳转分支结果或原异常对象并继续执行原指令；返回 `false` 时跳过该指令、原跳转或原抛出，
+非 `void` 方法调用、`invokedynamic` 调用、字段读取、数组元素读取、数组长度读取、局部变量读取和常量加载会留下对应类型的默认值。
 handler 的引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`；原始类型参数仍必须按 JVM 栈类型匹配。
 
 `INVOKE` 模式支持普通方法调用和 `invokedynamic` 调用。实例调用 handler 先接收 receiver，再接收原调用参数；静态调用 handler 只接收原调用参数；`invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数。动态调用目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。省略 `At.target` 时，框架会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或 `invokedynamic` 调用；构造器和 handler 不兼容的调用不计入 `ordinal` 或命中数。后续参数可按目标方法声明顺序接收目标方法参数前缀。构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，不能用 `@WrapWithCondition` 条件跳过；显式命中构造器目标会在转换阶段失败，如需控制构造过程应使用 `@Redirect` 或 `@WrapOperation`。
@@ -576,19 +595,49 @@ handler 的引用类型参数可声明为精确类型、可赋值父类型或 `A
 
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容条件包裹操作点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
 
+`FIELD` 模式默认匹配 `GETFIELD` / `GETSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
+handler 先接收已经读取出的字段值，不接收 `GETFIELD` receiver；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。
+返回 `true` 时保留本次原字段值，返回 `false` 时把本次读取结果替换为字段类型默认值。
+省略 `At.target` 时，框架会按 handler 首参类型和 `Boolean` 返回类型筛选兼容字段读取，
+不兼容字段读取不计入 `ordinal` 或命中数。`FIELD` 模式同样可用 `slice.from` / `slice.to`
+把候选字段读取限制在一段 `INVOKE` 边界之间。
+
 `FIELD_ASSIGN` 模式默认匹配 `PUTFIELD` / `PUTSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。实例字段写入 handler 先接收字段 owner，再接收待写入值；静态字段写入 handler 接收待写入值；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。省略 `At.target` 时，框架会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容的字段写入，不兼容字段写入不计入 `ordinal` 或命中数。
 
-字段写入和数组元素写入同样可用 `slice.from` / `slice.to` 把候选写入限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+字段写入、数组元素读取、数组元素写入和数组长度读取同样可用 `slice.from` / `slice.to` 把候选访问限制在一段 `INVOKE` 边界之间，边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
-数组元素写入使用 `at.args = ["array=set"]`，`At.target` 指向产生数组引用的数组字段。handler 先接收数组引用、
+数组元素读取使用 `FIELD + at.args = ["array=get"]`，`At.target` 指向产生数组引用的数组字段。
+handler 先接收已经读取出的元素值，不接收数组引用或索引，后续可继续接收目标方法参数前缀。
+返回 `true` 时保留原元素值，返回 `false` 时用元素类型默认值替换本次读取结果。
+数组元素写入使用 `FIELD_ASSIGN + at.args = ["array=set"]`，`At.target` 指向产生数组引用的数组字段。handler 先接收数组引用、
 `Int` 索引与待写入元素值，后续可继续接收目标方法参数前缀。返回 `true` 时执行原 `xASTORE`，返回 `false`
 时跳过该数组写入。当前实现匹配简单数组字段访问形态，即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。
+数组长度读取使用 `FIELD + at.args = ["array=length"]`，`At.target` 指向产生数组引用的数组字段。
+handler 先接收 `Int` 长度值，不接收数组引用，后续可继续接收目标方法参数前缀。
+返回 `true` 时保留原长度，返回 `false` 时用 `0` 替换本次数组长度结果。
+
+`LOAD` 模式匹配局部变量读取，不使用 `At.target`。可通过 `at.args = ["index=N"]`、`["var=N"]` 或
+`["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。handler 先接收原 `xLOAD`
+读取出的栈顶值，后续可继续接收目标方法参数前缀。返回 `true` 时保留本次原读取值，返回 `false` 时把本次读取结果替换为该值类型的默认值，不会回写局部变量槽位。`LOAD` 模式同样可用 `slice.from` / `slice.to` 把候选局部变量读取限制在一段 `INVOKE` 边界之间。
+
+`STORE` 模式匹配局部变量写入，不使用 `At.target`。可通过 `at.args = ["index=N"]`、`["var=N"]` 或
+`["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。handler 先接收原 `xSTORE`
+即将消费的待写入值，后续可继续接收目标方法参数前缀。返回 `true` 时执行原局部变量写入，返回 `false`
+时丢弃待写入值并跳过原 `xSTORE`。`STORE` 模式同样可用 `slice.from` / `slice.to` 把候选局部变量写入限制在一段 `INVOKE` 边界之间。
+
+`CONSTANT` 模式匹配常量加载结果后的条件判断。框架会保留原常量加载指令，并在其后插入 `LOAD` 风格条件 wrapper。handler 先接收原常量值，后续可继续接收目标方法参数前缀；返回 `true` 时保留本次原常量值，返回 `false` 时压入该常量类型的默认值。`At.target` 可写常量文本过滤；省略 `At.target` 时，框架会按 handler 首参类型和 `Boolean` 返回类型筛选兼容常量候选，不兼容常量不计入 `ordinal` 或命中数。`CONSTANT` 模式同样可用 `slice.from` / `slice.to` 把候选常量加载限制在一段 `INVOKE` 边界之间。
 
 `JUMP` 模式匹配条件跳转。handler 先接收原始分支结果 `Boolean`，并可继续接收目标方法参数前缀；返回 `true` 时按原分支结果决定是否跳到原标签，返回 `false` 时跳过原跳转。`At.target` 可写条件跳转操作码名或数字；省略时会匹配切片内全部条件跳转。`GOTO` 与 `JSR` 没有条件分支结果，不支持条件包裹。`JUMP` 模式同样可用 `slice.from` / `slice.to` 把候选条件跳转限制在一段 `INVOKE` 边界之间。
 
 `THROW` 模式匹配 `ATHROW` 前即将抛出的异常对象。handler 先接收 `Throwable`，并可继续接收目标方法参数前缀；返回 `true` 时恢复原异常并继续原 `ATHROW`，返回 `false` 时跳过该 `ATHROW` 并继续后续字节码。`At.target` 可写异常类型 internal name 或 binary name，只匹配 `ATHROW` 前一条真实指令为同类型 `<init>` 的直接构造异常；省略时会按 handler 签名筛选兼容抛异常候选。`THROW` 模式同样可用 `slice.from` / `slice.to` 把候选抛异常点限制在一段 `INVOKE` 边界之间。
 
-`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，普通方法调用、`invokedynamic` 调用、字段写入、数组元素写入、条件跳转与抛异常点均按实际条件包裹数量计数；省略 `INVOKE` 调用目标、`FIELD_ASSIGN` 字段目标或 `THROW` 异常类型目标时，不兼容候选不计入数量；省略 `JUMP` 跳转目标时会按兼容 handler 匹配全部条件跳转；设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
+`@WrapWithCondition` 会统计实际插入条件判断的操作点数量。未设置 `ordinal` 时，普通方法调用、
+`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、局部变量读取、
+局部变量写入、常量加载、条件跳转与抛异常点均按实际条件包裹数量计数；省略 `INVOKE` 调用目标、
+`FIELD` 字段目标、`FIELD_ASSIGN` 字段目标、`CONSTANT` 常量目标或 `THROW` 异常类型目标时，
+不兼容候选不计入数量；省略 `JUMP` 跳转目标时会按兼容 handler 匹配全部条件跳转；
+设置 `ordinal` 时最多命中对应序号的 1 个操作点。显式设置 `require` / `allow` / 非默认 `expect` 时按实际条件包裹数量校验契约，
+违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -1008,7 +1057,8 @@ private val field: String? = null
 ##### `cancel()`
 
 取消方法的继续执行。该方法只能在可取消回调上调用；未声明 `cancellable = true` 的普通 `@AsmInject`
-调用会抛出 `IllegalStateException`。当前实际提前返回分支由 `HEAD` 与 `TAIL` 注入支持。
+调用会抛出 `IllegalStateException`。当前实际提前返回分支由 `HEAD`、`TAIL` 与普通 `INVOKE` / `INVOKE_ASSIGN`
+的 `BEFORE` / `AFTER` 注入支持。
 
 **示例：**
 
@@ -1068,7 +1118,8 @@ val value = callback.getReturnValue<String>()
 
 ##### `setReturnValue(value: Any?)`
 
-设置返回值（仅在支持返回值修改的注入点有效）。当回调来自 `cancellable = true` 的 `HEAD` 或 `TAIL` 注入时，
+设置返回值（仅在支持返回值修改的注入点有效）。当回调来自 `cancellable = true` 的 `HEAD`、`TAIL`
+或普通 `INVOKE` / `INVOKE_ASSIGN` 的 `BEFORE` / `AFTER` 注入时，
 该方法也会标记取消，使目标方法提前返回该值；普通 `RETURN` 与非 `void` `TAIL` 注入中的非可取消回调只会改写当前返回点。
 引用类型返回值可以设置为 `null`，并会作为明确的新返回值写回。
 
@@ -1306,8 +1357,10 @@ fun wrapLoad(operation: Operation<String>): String {
 把 `FIELD_ASSIGN` 解释为“匹配实例字段写入前的 receiver 改写”。`@WrapOperation` 会把 `INVOKE` 解释为“用可调用原操作的
 handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解释为“用可读取原字段值、数组元素值或数组长度的 handler 替换匹配读取”，
 把 `FIELD_ASSIGN` 解释为“用可执行原字段写入或数组元素写入的 handler 替换匹配写入”，把 `NEW` 解释为“用可执行原构造过程的 handler 替换匹配构造表达式”，把 `CAST` 解释为“用可执行原类型转换的 handler 替换匹配 `CHECKCAST`”，把 `INSTANCEOF` 解释为“用可执行原类型判断的 handler 替换匹配类型判断”，把 `LOAD` 解释为“用可返回原读取值的 handler 替换匹配局部变量读取表达式”，把 `STORE` 解释为“用可返回原待写入值的 handler 替换匹配局部变量待写入表达式”，把 `JUMP` 解释为“用可返回原分支结果的 handler 替换匹配条件跳转”，把 `SWITCH` 解释为“用可返回原 selector 的 handler 替换匹配 switch selector”，把 `CONSTANT` 解释为“用可读取原常量的 handler 替换匹配常量加载”，把 `THROW` 解释为“用可返回原异常对象的 handler 替换即将抛出的异常”。
-`@WrapWithCondition` 会把 `INVOKE` 解释为“匹配普通方法调用或 `invokedynamic` 调用前的条件判断”，把 `FIELD_ASSIGN`
-解释为“匹配字段写入或数组元素写入前的条件判断”，把 `JUMP` 解释为“匹配条件跳转分支结果前的条件判断”，把 `THROW` 解释为“匹配即将抛出的异常前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`
+`@WrapWithCondition` 会把 `INVOKE` 解释为“匹配普通方法调用或 `invokedynamic` 调用前的条件判断”，把 `FIELD`
+解释为“匹配字段读取结果后的条件判断”；当 `FIELD + args = ["array=get"]` 时解释为“匹配数组元素读取结果后的条件判断”，
+当 `FIELD + args = ["array=length"]` 时解释为“匹配数组长度读取结果后的条件判断”，把 `FIELD_ASSIGN`
+解释为“匹配字段写入或数组元素写入前的条件判断”，把 `LOAD` 解释为“匹配局部变量读取结果后的条件判断”，把 `STORE` 解释为“匹配局部变量写入前的条件判断”，把 `CONSTANT` 解释为“匹配常量加载结果后的条件判断”，把 `JUMP` 解释为“匹配条件跳转分支结果前的条件判断”，把 `THROW` 解释为“匹配即将抛出的异常前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`，并支持 `At.by` 按真实字节码指令数移动插入锚点；
 普通 `@AsmInject(NEW)` 只支持
 `Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 可用 `Slice`
@@ -1328,7 +1381,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `shift: Shift = Shift.BEFORE` - 偏移方向
 - `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 支持按真实字节码指令数正负移动锚点
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`、
-  `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapWithCondition` 当前支持 `array=set`，`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
+  `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapWithCondition` 当前支持 `array=get`、`array=length`、`array=set` 与 `LOAD` / `STORE` 的 `index=N`、`var=N`、`name=localName` 局部变量过滤，其中 `array=get` / `array=length` 需配合 `FIELD`，`array=set` 需配合 `FIELD_ASSIGN`；`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
   与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=set` 需配合 `FIELD_ASSIGN`；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
 
 **`target` 格式：**
@@ -1343,7 +1396,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `STORE`: 不使用 `target`；可通过 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 名称过滤
 - `JUMP`: 跳转操作码名或数字操作码，例如 `IFEQ`、`IF_ICMPGT` 或 `153`；省略时匹配所有跳转，`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)`、`@WrapOperation(JUMP)` 与 `@WrapWithCondition(JUMP)` 只支持条件跳转
 - `SWITCH`: 不使用 `target`；匹配 `tableswitch` 与 `lookupswitch`
-- `CONSTANT`: 常量文本；类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符；普通 `@AsmInject(CONSTANT)`、`@Redirect(CONSTANT)`、`@WrapOperation(CONSTANT)` 与 `@ModifyExpressionValue(CONSTANT)` 可省略目标以匹配或推断常量
+- `CONSTANT`: 常量文本；类字面量可写 internal name 或 binary name，方法类型常量写 JVM 方法描述符；普通 `@AsmInject(CONSTANT)`、`@Redirect(CONSTANT)`、`@WrapOperation(CONSTANT)`、`@WrapWithCondition(CONSTANT)` 与 `@ModifyExpressionValue(CONSTANT)` 可省略目标以匹配或推断常量
 - `THROW`: 通常不需要 `target`，匹配 `ATHROW`；普通 `@AsmInject`、`@Redirect`、`@WrapOperation`、`@WrapWithCondition` 与 `@ModifyExpressionValue` 可用类型 internal name 或 binary name 只匹配直接构造后抛出的同类型异常
 
 `@Redirect` 可在 `FIELD` 目标上使用 `args = ["array=get"]`、`args = ["array=set"]` 或 `args = ["array=length"]`，
@@ -1378,7 +1431,7 @@ At(
 用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、
-`@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD_ASSIGN / InjectionPoint.JUMP / InjectionPoint.THROW)`、
+`@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.CONSTANT / InjectionPoint.JUMP / InjectionPoint.THROW)`、
 `@ModifyExpressionValue(at.value = InjectionPoint.INVOKE / InjectionPoint.INVOKE_ASSIGN / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、
 `@ModifyVariable(at.value = InjectionPoint.LOAD / InjectionPoint.STORE)`、`@ModifyReturnValue`、`@ModifyConstant`
 支持 `from` / `to` 为 `InjectionPoint.INVOKE`
@@ -1419,7 +1472,9 @@ AsmRegistry.register(ModifyArgMixin::class.java)
 AsmRegistry.register(ModifyReturnValueMixin::class.java)
 ```
 
-多个 ASM 的实际应用顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中的 ASM 在前，精确目标注册命中的 ASM 在后；同一分组内保持注册顺序。
+多个 ASM 的实际应用顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中的 ASM 在前，
+精确目标注册命中的 ASM 在后；同一分组内按 `@AsmMixin(priority = ...)` 从高到低排序，
+priority 相同时保持注册顺序。
 
 ### 内联代码注入
 

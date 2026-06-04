@@ -8,8 +8,8 @@ package kim.der.asm.api.annotation
  * 带目标返回值类型的注入回调控制信息。
  *
  * 该类型用于非 `void` 目标方法的普通 `@AsmInject` handler 首参，语义与 [CallbackInfo] 一致，
- * 但通过泛型把目标方法返回类型标注在 handler 签名中，使 RETURN 注入和可取消 HEAD 注入更接近 Mixin 的
- * `CallbackInfoReturnable<T>` 写法。
+ * 但通过泛型把目标方法返回类型标注在 handler 签名中，使 RETURN 注入以及可取消 HEAD、TAIL、普通调用点注入
+ * 更接近 Mixin 的 `CallbackInfoReturnable<T>` 写法。
  *
  * ## 示例
  *
@@ -37,7 +37,7 @@ class CallbackInfoReturnable<T>
          * 当前返回值。
          *
          * 该属性等价于 [getTypedReturnValue] 与 [setTypedReturnValue] 的组合，方便 Kotlin handler 使用
-         * `callback.value = ...` 写法改写 RETURN 注入的返回值，或在可取消 HEAD 注入中设置提前返回值。
+         * `callback.value = ...` 写法改写 RETURN 注入的返回值，或在可取消注入点中设置提前返回值。
          *
          * 当当前回调可取消时，写入该属性会与 [setReturnValue] 一样自动标记为已取消。
          *

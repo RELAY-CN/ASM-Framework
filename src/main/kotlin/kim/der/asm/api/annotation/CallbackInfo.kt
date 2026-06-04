@@ -9,7 +9,7 @@ package kim.der.asm.api.annotation
  *
  * 当注入方法以 [CallbackInfo] 作为第一个参数时，注入器会在调用后读取该对象的状态：
  *
- * - 通过 [cancel] 标记取消：用于声明 `cancellable = true` 的 HEAD 注入提前返回（跳过原方法体）
+ * - 通过 [cancel] 标记取消：用于声明 `cancellable = true` 的 HEAD、TAIL 或普通调用点注入提前返回
  * - 通过 [setReturnValue] 修改返回值：用于 RETURN 注入在返回前替换结果；在可取消回调中也会标记取消
  *   引用类型返回值可以被显式替换为 `null`
  *
@@ -41,7 +41,7 @@ open class CallbackInfo
         /**
          * 标记取消。
          *
-         * 注入器在支持取消的注入点（例如声明 `cancellable = true` 的 HEAD）会根据该标记决定是否提前返回。
+         * 注入器在支持取消的注入点（例如声明 `cancellable = true` 的 HEAD 或普通调用点注入）会根据该标记决定是否提前返回。
          *
          * @throws IllegalStateException 当前注入点未声明可取消时抛出
          * @author Dr (dr@der.kim)
@@ -91,7 +91,7 @@ open class CallbackInfo
          * 设置返回值。
          *
          * 该值用于支持“返回值可变”的注入点（例如 RETURN），以及取消分支需要返回特定结果的场景。
-         * 当前回调可取消时，设置返回值会同时标记为已取消，使 HEAD 注入提前返回该值。
+         * 当前回调可取消时，设置返回值会同时标记为已取消，使支持取消的注入点提前返回该值。
          * 在 RETURN 注入中，引用类型的 `null` 会作为明确的新返回值写回，而不是被视为未修改。
          *
          * @param value 新的返回值；可以为 `null`

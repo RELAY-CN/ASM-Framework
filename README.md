@@ -30,7 +30,7 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **实用的重定向能力** - `@Redirect` 可替换方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、简单数组元素读写、数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、`tableswitch` / `lookupswitch` selector、常量加载或即将抛出的异常，并支持追加目标方法参数前缀；`@RedirectAllMethods` 可把同一组重定向规则应用到目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
 - **可控的操作包裹能力** - `@WrapOperation` 可替换匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、`tableswitch` / `lookupswitch` selector、常量读取或即将抛出的异常，并通过 `Operation` 按需调用、跳过或多次执行原操作
 - **整方法包裹能力** - `@WrapMethod` 可把整个目标方法体迁移为原方法句柄，并用 handler 统一决定是否调用、改写参数或多次执行原方法
-- **实用的条件包裹能力** - `@WrapWithCondition` 可按条件跳过普通方法调用、`invokedynamic` 调用、字段写入、数组元素写入、局部变量写入、条件跳转或即将抛出的异常，适合保留原逻辑但控制副作用、局部状态、分支流向与异常抛出
+- **实用的条件包裹能力** - `@WrapWithCondition` 可按条件跳过普通方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、局部变量读取或写入、常量加载/常量值、条件跳转或即将抛出的异常，适合保留原逻辑但控制副作用、局部状态、分支流向与异常抛出
 - **表达式改写能力** - `@ModifyExpressionValue` 可改写普通调用或 `invokedynamic` 调用返回值、字段读取值、字段写入值、数组元素读取值、数组元素待写入值、数组长度、对象构造结果、类型转换结果、类型判断结果、局部变量读取或待写入表达式值、条件跳转分支结果、`tableswitch` / `lookupswitch` selector、常量表达式值或即将抛出的异常
 - **常量替换能力** - `@ModifyConstant`、`@Redirect(CONSTANT)`、`@ModifyExpressionValue(CONSTANT)` 与 `@WrapOperation(CONSTANT)` 可基于原常量值修改常量；普通 `@AsmInject(CONSTANT, shift = Shift.REPLACE)` 可直接用 handler 返回值替换匹配常量加载
 - **访问器与调用器能力** - `@Accessor` 可生成字段 getter/setter，`@Invoker` 可生成私有方法桥接和构造器工厂方法
@@ -53,12 +53,13 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **Injector 系统** - 各种注入器实现，处理不同类型的字节码转换
 
 框架通过注解处理器扫描 `@AsmMixin` 注解，将 Mixin 类注册到 `AsmRegistry` 中。当需要转换类时，`AsmProcessor` 会查找所有相关的
-Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转换规则，同一分组内保持注册顺序，最终生成转换后的字节码。
+Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转换规则；同一分组内按 `@AsmMixin(priority = ...)`
+从高到低排序，priority 相同时保持注册顺序，最终生成转换后的字节码。
 
 ## 工作原理
 
 1. **注册阶段** - Mixin 类通过 `AsmRegistry` 或 `AsmScanner` 注册到框架中
-2. **匹配阶段** - 当类需要转换时，框架根据类名查找所有匹配的 Mixin（路径匹配命中在前，精确目标命中在后）
+2. **匹配阶段** - 当类需要转换时，框架根据类名查找所有匹配的 Mixin（路径匹配命中在前，精确目标命中在后；同一分组内 priority 高者优先）
 3. **转换阶段** - 框架按匹配列表顺序应用 Mixin；单个 Mixin 内部的 RETURN/TAIL 注入优先于 HEAD 注入
 4. **生成阶段** - 将转换后的 ClassNode 写回字节码数组
 
