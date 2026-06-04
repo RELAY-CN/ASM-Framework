@@ -46,6 +46,8 @@ class TargetClassContext(
     private val asmInfo: AsmInfo,
     private val originalFieldAccessBySignature: Map<String, Int> = emptyMap(),
 ) {
+    private val groupStates = linkedMapOf<String, GroupState>()
+
     /**
      * 应用 ASM 到目标类。
      *
@@ -278,6 +280,7 @@ class TargetClassContext(
             }
         }
 
+        verifyGroupCounts()
         return transformed
     }
 
@@ -390,6 +393,12 @@ class TargetClassContext(
 
         return transformed
     }
+
+    private data class GroupState(
+        val annotation: Group,
+        val ownerMethodName: String,
+        var injectionCount: Int = 0,
+    )
 
     /**
      * 应用 @AddField 添加字段。
@@ -588,11 +597,9 @@ class TargetClassContext(
                 methodSignature,
             )
         }
-        if (annotation.constant.isEmpty()) {
-            return injectionCount > 0
-        }
+        // 未指定 constant 仅表示按类型匹配任意常量，未分组处理器仍必须遵守默认命中契约。
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyConstant",
             method,
             methodSignature,
@@ -1562,7 +1569,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyArg",
             method,
             target.signature,
@@ -1815,7 +1822,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyArgs",
             method,
             methodSignature,
@@ -2111,7 +2118,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyReceiver",
             method,
             methodSignature,
@@ -2511,7 +2518,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@WrapOperation",
             method,
             methodSignature,
@@ -2589,7 +2596,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@WrapWithCondition",
             method,
             methodSignature,
@@ -2667,7 +2674,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyExpressionValue",
             method,
             methodSignature,
@@ -2761,7 +2768,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyVariable",
             method,
             methodSignature,
@@ -3028,7 +3035,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@Redirect",
             method,
             methodSignature,
@@ -3696,7 +3703,7 @@ class TargetClassContext(
             )
         }
         return requireInjectorMatched(
-            injectionCount > 0,
+            injectionCount,
             "@ModifyReturnValue",
             method,
             methodSignature,
@@ -3871,391 +3878,322 @@ class TargetClassContext(
         classNode.fields.find { it.name == fieldName }
             ?: throw IllegalStateException(buildMissingTargetFieldMessage(fieldName))
 
+    private fun recordGroupCount(
+        method: Method,
+        injectionCount: Int,
+    ): Boolean {
+        val group = method.getAnnotation(Group::class.java) ?: return false
+        validateGroupAnnotation(group, method)
+
+        val state =
+            groupStates.getOrPut(group.name) {
+                GroupState(group, method.name)
+            }
+        if (state.annotation.min != group.min || state.annotation.max != group.max || state.annotation.expect != group.expect) {
+            throw IllegalStateException(
+                "@Group ${group.name} on handler ${method.name} conflicts with handler ${state.ownerMethodName} " +
+                    "in class $className: min/max/expect must be consistent within a group",
+            )
+        }
+
+        // 组级计数延迟到 applyAsm 末尾统一校验，避免 HEAD/RETURN 等多轮调度提前判定失败。
+        state.injectionCount += injectionCount
+        return true
+    }
+
+    private fun validateGroupAnnotation(
+        group: Group,
+        method: Method,
+    ) {
+        if (group.name.isBlank()) {
+            throw IllegalStateException("@Group on handler ${method.name} must declare a non-blank name in class $className")
+        }
+        if (group.min < 0) {
+            throw IllegalStateException("@Group ${group.name} min must be >= 0 in class $className")
+        }
+        if (group.max < 0) {
+            throw IllegalStateException("@Group ${group.name} max must be >= 0 in class $className")
+        }
+        if (group.min > group.max) {
+            throw IllegalStateException("@Group ${group.name} min must be <= max in class $className")
+        }
+        if (group.expect < -1) {
+            throw IllegalStateException("@Group ${group.name} expect must be >= -1 in class $className")
+        }
+    }
+
+    private fun verifyGroupCounts() {
+        for ((groupName, state) in groupStates) {
+            val actual = state.injectionCount
+            if (actual < state.annotation.min) {
+                throw IllegalStateException(
+                    "@Group $groupName requires at least ${state.annotation.min} injection(s), " +
+                        "actual $actual in class $className",
+                )
+            }
+            if (actual > state.annotation.max) {
+                throw IllegalStateException(
+                    "@Group $groupName allows at most ${state.annotation.max} injection(s), " +
+                        "actual $actual in class $className",
+                )
+            }
+            if (state.annotation.expect >= 0 && actual != state.annotation.expect) {
+                System.err.println(
+                    "Warning: @Group $groupName expected ${state.annotation.expect} injection(s), " +
+                        "actual $actual in class $className",
+                )
+            }
+        }
+    }
+
     private fun requireAsmInjectCount(
         injectionCount: Int,
         annotation: AsmInject,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@AsmInject handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@AsmInject handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @AsmInject handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@AsmInject",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyArgCount(
         injectionCount: Int,
         annotation: ModifyArg,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyArg handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyArg handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyArg handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyArg",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyArgsCount(
         injectionCount: Int,
         annotation: ModifyArgs,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyArgs handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyArgs handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyArgs handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyArgs",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyExpressionValueCount(
         injectionCount: Int,
         annotation: ModifyExpressionValue,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyExpressionValue handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyExpressionValue handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyExpressionValue handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyExpressionValue",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyReceiverCount(
         injectionCount: Int,
         annotation: ModifyReceiver,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyReceiver handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyReceiver handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyReceiver handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyReceiver",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireWrapOperationCount(
         injectionCount: Int,
         annotation: WrapOperation,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@WrapOperation handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@WrapOperation handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @WrapOperation handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@WrapOperation",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireWrapMethodCount(
         injectionCount: Int,
         annotation: WrapMethod,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@WrapMethod handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@WrapMethod handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @WrapMethod handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@WrapMethod",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireWrapWithConditionCount(
         injectionCount: Int,
         annotation: WrapWithCondition,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@WrapWithCondition handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@WrapWithCondition handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @WrapWithCondition handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@WrapWithCondition",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyVariableCount(
         injectionCount: Int,
         annotation: ModifyVariable,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyVariable handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyVariable handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyVariable handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyVariable",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyReturnValueCount(
         injectionCount: Int,
         annotation: ModifyReturnValue,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyReturnValue handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyReturnValue handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyReturnValue handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyReturnValue",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireModifyConstantCount(
         injectionCount: Int,
         annotation: ModifyConstant,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@ModifyConstant handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@ModifyConstant handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @ModifyConstant handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@ModifyConstant",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireRedirectCount(
         injectionCount: Int,
         annotation: Redirect,
         method: Method,
         targetMethodSignature: String,
-    ): Boolean {
-        val requiredCount = if (annotation.require > 0) annotation.require else 1
-        if (injectionCount < requiredCount) {
-            throw IllegalStateException(
-                "@Redirect handler ${method.name} requires at least $requiredCount injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.allow >= 0 && injectionCount > annotation.allow) {
-            throw IllegalStateException(
-                "@Redirect handler ${method.name} allows at most ${annotation.allow} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        if (annotation.expect >= 0 && annotation.expect != 1 && injectionCount != annotation.expect) {
-            System.err.println(
-                "Warning: @Redirect handler ${method.name} expected ${annotation.expect} injection(s), " +
-                    "actual $injectionCount in target method $targetMethodSignature of class $className",
-            )
-        }
-
-        return injectionCount > 0
-    }
+    ): Boolean =
+        requireHandlerCount(
+            injectionCount,
+            "@Redirect",
+            method,
+            targetMethodSignature,
+            annotation.require,
+            annotation.allow,
+            annotation.expect,
+        )
 
     private fun requireInjectorMatched(
-        transformed: Boolean,
+        injectionCount: Int,
         annotationName: String,
         method: Method,
         targetMethodSignature: String,
     ): Boolean {
-        if (!transformed) {
+        if (recordGroupCount(method, injectionCount)) {
+            return injectionCount > 0
+        }
+        if (injectionCount <= 0) {
             throw IllegalStateException(
                 "$annotationName handler ${method.name} did not match any bytecode in " +
                     "target method $targetMethodSignature of class $className",
             )
         }
         return true
+    }
+
+    private fun requireHandlerCount(
+        injectionCount: Int,
+        annotationName: String,
+        method: Method,
+        targetMethodSignature: String,
+        require: Int,
+        allow: Int,
+        expect: Int,
+    ): Boolean {
+        val grouped = recordGroupCount(method, injectionCount)
+        val hasExplicitHandlerCount = require > 0 || allow >= 0 || expect != 1
+        if (grouped && !hasExplicitHandlerCount) {
+            return injectionCount > 0
+        }
+
+        val requiredCount = if (require > 0) require else 1
+        if (injectionCount < requiredCount) {
+            throw IllegalStateException(
+                "$annotationName handler ${method.name} requires at least $requiredCount injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (allow >= 0 && injectionCount > allow) {
+            throw IllegalStateException(
+                "$annotationName handler ${method.name} allows at most $allow injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        if (expect >= 0 && expect != 1 && injectionCount != expect) {
+            System.err.println(
+                "Warning: $annotationName handler ${method.name} expected $expect injection(s), " +
+                    "actual $injectionCount in target method $targetMethodSignature of class $className",
+            )
+        }
+
+        return injectionCount > 0
     }
 
     /**

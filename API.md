@@ -40,7 +40,7 @@ ASM 注册器，负责管理所有注册的 ASM 类。
 返回目标类匹配到的 ASM 列表。
 
 `targetClass` 使用 JVM internal name，例如 `com/example/TargetClass`。返回顺序固定为路径匹配命中的 ASM 在前、
-精确目标注册命中的 ASM 在后；同一分组内按 priority 从高到低排序，priority 相同保持注册顺序。
+精确目标注册命中的 ASM 在后；同一匹配来源内按 priority 从高到低排序，priority 相同保持注册顺序。
 注册关系变化后会清空缓存，下一次查询重新计算匹配结果。
 
 ##### `clear()`
@@ -69,11 +69,11 @@ AsmRegistry.clear()
 - `asmClass: Class<*>` - ASM 类，通常带有 `@AsmMixin`，也可由路径匹配入口显式注册
 - `targets: List<String>` - 精确匹配的目标类 internal name 列表
 - `pathMatcher: Find<String, Boolean>?` - 可选路径匹配器；返回 `true` 表示该 ASM 应用于给定目标类
-- `priority: Int = 1000` - Mixin 应用优先级；同一匹配分组内数值越高越先应用
+- `priority: Int = 1000` - Mixin 应用优先级；同一匹配来源内数值越高越先应用
 - `registrationOrder: Long = 0L` - 注册序号；同 priority 时保持注册顺序
 
 精确目标注册会填充 `targets`，并保持 `pathMatcher` 为空；路径匹配注册会填充 `pathMatcher`，并保持 `targets` 为空。
-`priority` 与 `registrationOrder` 只决定同一匹配分组内的顺序，不改变路径匹配分组先于精确目标分组的公开契约。
+`priority` 与 `registrationOrder` 只决定同一匹配来源内的顺序，不改变路径匹配来源先于精确目标来源的公开契约。
 
 ### Find
 
@@ -145,7 +145,7 @@ ASM 处理器，负责应用所有注册的 ASM 到目标类。
 - `shouldTransform(className: String): Boolean` - 仅查询 `AsmRegistry`，判断目标类是否存在匹配 ASM，不读取或解析 classfile 字节码
 
 多个 ASM 的执行顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中在前，精确目标命中在后；
-同一分组内 priority 高的 Mixin 先应用，priority 相同则保持注册顺序。任一 ASM 应用失败时会抛出
+同一匹配来源内 priority 高的 Mixin 先应用，priority 相同则保持注册顺序。任一 ASM 应用失败时会抛出
 `AsmTransformException`，本次转换不会继续写出部分改写后的字节码。
 
 **示例：**
@@ -248,7 +248,7 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 - `value: String = ""` - 单个目标类名（内部名称）
 - `targets: Array<String> = []` - 多个目标类名数组
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
-- `priority: Int = 1000` - Mixin 应用优先级；同一匹配分组内数值越高越先应用，同 priority 保持注册顺序
+- `priority: Int = 1000` - Mixin 应用优先级；同一匹配来源内数值越高越先应用，同 priority 保持注册顺序
 
 **示例：**
 
@@ -261,6 +261,42 @@ object EarlyMixin
 
 @AsmMixin(targets = ["com/example/Class1", "com/example/Class2"])
 object MultiTargetMixin
+```
+
+### @Group
+
+把同一个 Mixin 类中的多个注入、修改或重定向处理器合并为一个组级命中数契约。
+
+`@Group` 作用于处理器方法本身，不改变 Mixin 应用顺序；跨 Mixin 的顺序仍由 `@AsmMixin(priority = ...)`、
+路径匹配和注册顺序决定。它适合多版本目标字节码适配：不同版本中只有某个候选常量、调用点或字段访问存在时，
+单个处理器可以 0 命中，但整个分组必须满足最小命中数。
+
+**参数：**
+
+- `name: String` - 分组名称；同一个 Mixin 类内同名处理器共享命中数契约，不能为空白
+- `min: Int = 1` - 分组最小命中数；实际总命中数不足时转换失败
+- `max: Int = Int.MAX_VALUE` - 分组最大命中数；实际总命中数超过时转换失败
+- `expect: Int = -1` - 分组期望命中数；非负且不一致时只输出警告，不阻断转换
+
+同组处理器默认允许单个成员 0 命中；如果处理器自身显式设置 `require`、`allow` 或非默认 `expect`，
+该处理器仍会先执行自身命中数校验。未使用 `@Group` 的处理器保持原有默认契约：普通处理器默认至少命中一次。
+同一组内的 `min`、`max` 与 `expect` 必须保持一致，否则转换阶段会失败。
+
+**示例：**
+
+```kotlin
+@AsmMixin("com/example/Config")
+object VersionedConfigMixin {
+    @Group(name = "configName", min = 1, max = 1)
+    @ModifyConstant(method = "name()Ljava/lang/String;", constant = "modern-config")
+    @JvmStatic
+    fun modernName(original: String): String = "patched-config"
+
+    @Group(name = "configName", min = 1, max = 1)
+    @ModifyConstant(method = "name()Ljava/lang/String;", constant = "legacy-config")
+    @JvmStatic
+    fun legacyName(original: String): String = "patched-config"
+}
 ```
 
 ### @AsmDelete
@@ -1485,7 +1521,7 @@ AsmRegistry.register(ModifyReturnValueMixin::class.java)
 ```
 
 多个 ASM 的实际应用顺序由 `AsmRegistry.getForTarget(className)` 决定：路径匹配命中的 ASM 在前，
-精确目标注册命中的 ASM 在后；同一分组内按 `@AsmMixin(priority = ...)` 从高到低排序，
+精确目标注册命中的 ASM 在后；同一匹配来源内按 `@AsmMixin(priority = ...)` 从高到低排序，
 priority 相同时保持注册顺序。
 
 ### 内联代码注入

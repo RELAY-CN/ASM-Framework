@@ -13,6 +13,7 @@ import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.CallbackInfoReturnable
+import kim.der.asm.api.annotation.Group
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Invoker
 import kim.der.asm.api.annotation.ModifyArg
@@ -5503,6 +5504,150 @@ class FrameworkReliabilityTest {
                 .isInstanceOf(AsmTransformException::class.java)
                 .hasRootCauseMessage(
                     "Invalid @ModifyConstant slice boundary FIELD_ASSIGN target: field name must not be empty",
+                )
+        }
+    }
+
+    @Nested
+    @DisplayName("@Group 组级命中数场景")
+    inner class GroupInjectionCountScenarios {
+        @Test
+        @DisplayName("多版本候选中至少一个命中时应允许同组候选未命中")
+        fun groupedModifyConstantAllowsFallbackCandidate() {
+            // Given
+            AsmRegistry.register(GroupedConstructorFallbackMixin::class.java)
+
+            // When
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("testA0").invoke(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 当前版本构造器常量命中后，旧版本候选未命中不应阻断同组多版本适配")
+                .isEqualTo("GroupedConstructor")
+        }
+
+        @Test
+        @DisplayName("同组候选全部未命中时应按组级最小命中数失败")
+        fun groupedModifyConstantFailsWhenAllCandidatesMiss() {
+            // Given
+            AsmRegistry.register(GroupedMissingConstructorConstantsMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }
+                .`as`("Then: 目标版本漂移到所有候选都未命中时，应暴露组级最小命中数失败")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@Group constructorName requires at least 1 injection(s), actual 0 in class Test",
+                )
+        }
+
+        @Test
+        @DisplayName("同组候选显式声明 require 时应先执行单处理器命中数校验")
+        fun groupedModifyConstantWithExplicitRequireStillFailsPerHandlerCount() {
+            // Given
+            AsmRegistry.register(GroupedRequiredLegacyConstructorConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }
+                .`as`("Then: @Group 只能放宽默认候选命中，不能覆盖处理器自己声明的 require 契约")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@ModifyConstant handler legacyName requires at least 1 injection(s), " +
+                        "actual 0 in target method <init>()V of class Test",
+                )
+        }
+
+        @Test
+        @DisplayName("同组候选同时命中超过上限时应按组级最大命中数失败")
+        fun groupedModifyConstantFailsWhenMoreThanOneCandidateMatches() {
+            // Given
+            AsmRegistry.register(GroupedTooManyRuntimeNamesMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }
+                .`as`("Then: 多版本二选一补丁在当前版本同时命中多个候选时，应按组级上限阻止误改")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@Group singleRuntimeName allows at most 1 injection(s), actual 2 in class Test",
+                )
+        }
+
+        @Test
+        @DisplayName("未分组处理器仍应保持默认必须命中的旧契约")
+        fun ungroupedModifyConstantStillRequiresOwnMatch() {
+            // Given
+            AsmRegistry.register(UngroupedMissingConstructorConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }
+                .`as`("Then: @Group 只放宽同组候选，不能削弱普通处理器默认必须命中的契约")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@ModifyConstant handler modify did not match any bytecode in " +
+                        "target method <init>()V of class Test",
+                )
+        }
+
+        @Test
+        @DisplayName("未指定常量值的未分组处理器零命中时仍应失败")
+        fun ungroupedEmptyModifyConstantStillRequiresOwnMatch() {
+            // Given
+            AsmRegistry.register(UngroupedEmptyModifyConstantNoConstantTargetMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: 未指定 constant 只是表示匹配任意常量，不能让普通处理器在零命中时静默通过")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@ModifyConstant handler modify did not match any bytecode in " +
+                        "target method keep()V of class StrictTarget",
+                )
+        }
+
+        @Test
+        @DisplayName("@AsmInject 同组候选跨 RETURN 与 HEAD 轮次命中后应统一校验")
+        fun groupedAsmInjectCountsAcrossProcessingRounds() {
+            // Given
+            AsmRegistry.register(GroupedReturnAndHeadInjectMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("ReturnTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value").invoke(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: RETURN 与 HEAD 分轮处理的注入都应先累计到同组，再按组级命中数统一放行")
+                .isEqualTo("value")
+        }
+
+        @Test
+        @DisplayName("@RedirectAllMethods 同组重定向超过上限时应按组级最大命中数失败")
+        fun groupedRedirectAllMethodsFailsWhenMoreThanOneMethodMatches() {
+            // Given
+            AsmRegistry.register(GroupedRedirectAllAllowOneTrimMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("RedirectAllMultiTarget", redirectAllMultiTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: 全类重定向在多个方法同时命中时，应由 @Group(max = 1) 暴露多版本候选冲突")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@Group redirectAllTrim allows at most 1 injection(s), actual 2 in class RedirectAllMultiTarget",
                 )
         }
     }
@@ -14342,6 +14487,96 @@ class FrameworkReliabilityTest {
         fun modify(original: Int): Int = original + 1
     }
 
+    @AsmMixin("Test")
+    object GroupedConstructorFallbackMixin {
+        @Group(name = "constructorName", min = 1, max = 1)
+        @ModifyConstant(method = "<init>()V", constant = "DefaultConstructor")
+        @JvmStatic
+        fun currentName(original: String): String = "GroupedConstructor"
+
+        @Group(name = "constructorName", min = 1, max = 1)
+        @ModifyConstant(method = "<init>()V", constant = "LegacyConstructor")
+        @JvmStatic
+        fun legacyName(original: String): String = "LegacyGroupedConstructor"
+    }
+
+    @AsmMixin("Test")
+    object GroupedMissingConstructorConstantsMixin {
+        @Group(name = "constructorName", min = 1)
+        @ModifyConstant(method = "<init>()V", constant = "LegacyConstructor")
+        @JvmStatic
+        fun legacyName(original: String): String = "LegacyGroupedConstructor"
+
+        @Group(name = "constructorName", min = 1)
+        @ModifyConstant(method = "<init>()V", constant = "ExperimentalConstructor")
+        @JvmStatic
+        fun experimentalName(original: String): String = "ExperimentalGroupedConstructor"
+    }
+
+    @AsmMixin("Test")
+    object GroupedRequiredLegacyConstructorConstantMixin {
+        @Group(name = "requiredConstructorName", min = 0, max = 1)
+        @ModifyConstant(method = "<init>()V", constant = "LegacyConstructor", require = 1)
+        @JvmStatic
+        fun legacyName(original: String): String = "LegacyGroupedConstructor"
+    }
+
+    @AsmMixin("Test")
+    object GroupedTooManyRuntimeNamesMixin {
+        @Group(name = "singleRuntimeName", min = 1, max = 1)
+        @ModifyConstant(method = "<init>()V", constant = "DefaultConstructor")
+        @JvmStatic
+        fun constructorName(original: String): String = "$original-ctor"
+
+        @Group(name = "singleRuntimeName", min = 1, max = 1)
+        @ModifyConstant(method = "testB0()Ljava/lang/String;", constant = "StaticFinalString")
+        @JvmStatic
+        fun staticName(original: String): String = "$original-static"
+    }
+
+    @AsmMixin("Test")
+    object UngroupedMissingConstructorConstantMixin {
+        @ModifyConstant(method = "<init>()V", constant = "LegacyConstructor")
+        @JvmStatic
+        fun modify(original: String): String = "LegacyConstructor"
+    }
+
+    @AsmMixin("StrictTarget")
+    object UngroupedEmptyModifyConstantNoConstantTargetMixin {
+        @ModifyConstant(method = "keep()V")
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("ReturnTarget")
+    object GroupedReturnAndHeadInjectMixin {
+        @Group(name = "returnLifecycle", min = 2, max = 2)
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.RETURN)
+        @JvmStatic
+        fun returnPoint() {
+        }
+
+        @Group(name = "returnLifecycle", min = 2, max = 2)
+        @AsmInject(method = "value()Ljava/lang/String;", target = InjectionPoint.HEAD)
+        @JvmStatic
+        fun headPoint() {
+        }
+    }
+
+    @AsmMixin("RedirectAllMultiTarget")
+    @RedirectAllMethods
+    object GroupedRedirectAllAllowOneTrimMixin {
+        @Group(name = "redirectAllTrim", min = 1, max = 1)
+        @Redirect(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
+    }
+
     @AsmMixin("StrictTarget")
     class MissingShadowFieldMixin {
         @Shadow
@@ -15567,6 +15802,7 @@ class FrameworkReliabilityTest {
 
     @AsmMixin("NewInstructionTarget")
     object ClassConstantModifyMixin {
+        @Group(name = "newInstructionIsNotClassConstant", min = 0, max = 0)
         @ModifyConstant(method = "create()Ljava/lang/StringBuilder;")
         @JvmStatic
         fun modify(type: Class<*>): Class<*> = type
@@ -15574,6 +15810,7 @@ class FrameworkReliabilityTest {
 
     @AsmMixin("CastInstructionTarget")
     object CheckcastConstantModifyMixin {
+        @Group(name = "checkcastIsNotClassConstant", min = 0, max = 0)
         @ModifyConstant(method = "cast(Ljava/lang/Object;)Ljava/lang/String;")
         @JvmStatic
         fun modify(type: Class<*>): Class<*> = type
@@ -21719,6 +21956,24 @@ class FrameworkReliabilityTest {
                 }
             }
         return loader.loadClass(primaryClassName)
+    }
+
+    private fun transformAndLoadTestFixture(): Class<*> {
+        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
+        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
+        return loadClasses(
+            "Test",
+            mapOf(
+                "Test" to transformed,
+                "TestParent" to testFixtureClassBytes("TestParent"),
+                "TestInterface" to testFixtureClassBytes("TestInterface"),
+                "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
+                "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
+                "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
+                "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
+                "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
+            ),
+        )
     }
 
     private fun testFixtureClassBytes(className: String): ByteArray {

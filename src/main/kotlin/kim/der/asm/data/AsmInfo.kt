@@ -11,7 +11,7 @@ import kim.der.asm.func.Find
  *
  * 该类型是 [kim.der.asm.AsmRegistry] 写入注册表后的不可变条目，描述一个 ASM 类如何匹配目标类。
  * 精确目标注册会填充 [targets]；路径匹配注册会填充 [pathMatcher] 并保持 [targets] 为空。
- * [priority] 与 [registrationOrder] 共同决定同一匹配分组内的稳定应用顺序。
+ * [priority] 与 [registrationOrder] 共同决定同一匹配来源内的稳定应用顺序。
  *
  * @param asmClass ASM 类，通常带有 `@AsmMixin` 或由路径匹配入口显式注册
  * @param targets 精确匹配的目标类 internal name 列表
@@ -47,7 +47,7 @@ data class AsmInfo(
     /**
      * Mixin 应用优先级。
      *
-     * 同一匹配分组内数值越高越先应用；路径匹配分组和精确匹配分组仍由注册器分别排序。
+     * 同一匹配来源内数值越高越先应用；路径匹配来源和精确匹配来源仍由注册器分别排序。
      */
     val priority: Int = 1000,
 

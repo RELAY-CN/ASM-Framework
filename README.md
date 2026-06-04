@@ -23,6 +23,7 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **类似 Fabric Mixin 的注解系统** - 简洁易用的注解驱动编程，无需直接操作字节码
 - **强大的注入点支持** - HEAD, TAIL, RETURN, INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, JUMP, SWITCH, CONSTANT, THROW，满足各种场景需求
 - **注入命中数契约** - `@AsmInject`、`@ModifyArg`、`@ModifyArgs`、`@ModifyReceiver`、`@WrapOperation`、`@WrapMethod`、`@WrapWithCondition`、`@ModifyVariable`、`@ModifyReturnValue`、`@ModifyExpressionValue`、`@ModifyConstant` 与 `@Redirect` 支持 `require`、`allow` 与 `expect`，可在目标字节码漂移时快速发现补丁失效
+- **组级命中数契约** - `@Group` 可把同一 Mixin 内多个候选处理器合并为一个总命中数契约，适合多版本字节码适配中的“当前版本命中一个候选即可”场景
 - **精确定位能力** - 普通 `@AsmInject(INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`、`@Redirect`、参数/receiver/表达式/变量/返回值/常量修改与操作包裹可用 `Slice` 把候选点限制在指定 `INVOKE` 调用边界内；仅 `@ModifyConstant` 额外支持字段读写或常量文本作为切片边界；普通 `@AsmInject(LOAD/STORE)`、`@Redirect(LOAD/STORE)`、`@WrapOperation(LOAD/STORE)`、`@ModifyExpressionValue(LOAD/STORE)` 与 `@ModifyVariable` 可按局部变量槽位或调试变量名过滤
 - **丰富的转换类型** - Inject, Overwrite, Redirect, RedirectAllMethods, ModifyArg, ModifyArgs, ModifyReceiver, WrapOperation, WrapMethod, WrapWithCondition, ModifyExpressionValue, ModifyVariable, ModifyReturnValue, Unique, AddInterface, RemoveInterface, AddField, RemoveField 等十多种转换类型
 - **参数修改能力** - `@ModifyArg` 可修改入口参数、普通调用参数、构造器参数或 `invokedynamic` 调用参数；`@ModifyArgs` 可批量修改普通调用、构造器调用或 `invokedynamic` 调用参数组
@@ -53,14 +54,14 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **Injector 系统** - 各种注入器实现，处理不同类型的字节码转换
 
 框架通过注解处理器扫描 `@AsmMixin` 注解，将 Mixin 类注册到 `AsmRegistry` 中。当需要转换类时，`AsmProcessor` 会查找所有相关的
-Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转换规则；同一分组内按 `@AsmMixin(priority = ...)`
+Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转换规则；同一匹配来源内按 `@AsmMixin(priority = ...)`
 从高到低排序，priority 相同时保持注册顺序，最终生成转换后的字节码。
 
 ## 工作原理
 
 1. **注册阶段** - Mixin 类通过 `AsmRegistry` 或 `AsmScanner` 注册到框架中
-2. **匹配阶段** - 当类需要转换时，框架根据类名查找所有匹配的 Mixin（路径匹配命中在前，精确目标命中在后；同一分组内 priority 高者优先）
-3. **转换阶段** - 框架按匹配列表顺序应用 Mixin；单个 Mixin 内部的 RETURN/TAIL 注入优先于 HEAD 注入
+2. **匹配阶段** - 当类需要转换时，框架根据类名查找所有匹配的 Mixin（路径匹配命中在前，精确目标命中在后；同一匹配来源内 priority 高者优先）
+3. **转换阶段** - 框架按匹配列表顺序应用 Mixin；单个 Mixin 内部的 RETURN/TAIL 注入优先于 HEAD 注入，带 `@Group` 的处理器会在该 Mixin 全部方法级处理结束后统一校验组级命中数
 4. **生成阶段** - 将转换后的 ClassNode 写回字节码数组
 
 框架确保转换的顺序性和一致性，避免不同注入点之间的冲突，同时提供了完善的错误处理机制。

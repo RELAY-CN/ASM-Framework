@@ -84,7 +84,7 @@ AsmRegistry.registerWithPathMatcher(MyAsm::class.java) { className ->
 ```
 
 同一目标类匹配多个 Mixin 时，框架会先应用路径匹配命中的 Mixin，再应用精确目标注册命中的 Mixin；
-同一分组内按 `@AsmMixin(priority = ...)` 从高到低应用，priority 相同则保持注册顺序。未显式声明 priority 时默认 `1000`。
+同一匹配来源内按 `@AsmMixin(priority = ...)` 从高到低应用，priority 相同则保持注册顺序。未显式声明 priority 时默认 `1000`。
 
 如果需要排查哪些类已注册、被跳过或加载失败，可使用带结果的扫描入口：
 
@@ -111,6 +111,7 @@ val transformedBytes = processor.transform(
 ### 支持的注解
 
 - **@AsmMixin** - 标记 Mixin 类
+- **@Group** - 将同一 Mixin 内多个处理器合并为一个组级命中数契约
 - **@AddInterface** - 为目标类追加接口声明
 - **@RemoveInterface** - 从目标类移除接口声明
 - **@AsmInject** - 在指定位置注入代码
@@ -1542,6 +1543,25 @@ handler 先接收调用点描述符中的参数，再按需接收目标方法参
 
 `require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。
 
+多版本目标字节码适配时，可以用 `@Group` 把多个候选处理器合并为一个总命中数契约。组内单个候选默认允许 0 命中，
+但整个组必须满足 `min` / `max`；未分组处理器仍保持默认必须命中的旧契约：
+
+```kotlin
+@AsmMixin("com/example/Config")
+object VersionedConfigMixin {
+    @Group(name = "configName", min = 1, max = 1)
+    @ModifyConstant(method = "name()Ljava/lang/String;", constant = "modern-config")
+    fun modernName(original: String): String = "patched-config"
+
+    @Group(name = "configName", min = 1, max = 1)
+    @ModifyConstant(method = "name()Ljava/lang/String;", constant = "legacy-config")
+    fun legacyName(original: String): String = "patched-config"
+}
+```
+
+`@Group` 不改变 Mixin 应用顺序；如果需要调整不同 Mixin 的先后顺序，仍应使用 `@AsmMixin(priority = ...)`
+或调整注册方式。同组处理器显式声明自身 `require` / `allow` / 非默认 `expect` 时，会先校验单处理器契约，再参与组级累计。
+
 当需要把同一组重定向规则应用到目标类的所有普通方法时，使用 `@RedirectAllMethods`。它会跳过构造器和类初始化方法，并按整个目标类的总命中数校验 `require` / `allow` / `expect`；`ordinal` 和 `slice` 仍然只在单个目标方法内生效。
 
 ### 4. 错误处理
@@ -1692,8 +1712,9 @@ fun staticMethod() { }
 
 ### 多个 Mixin 冲突
 
-- 检查 Mixin 应用顺序：路径匹配命中的 Mixin 会先于精确目标注册的 Mixin；同一分组内 priority 高的 Mixin 先应用，priority 相同保持注册顺序
+- 检查 Mixin 应用顺序：路径匹配命中的 Mixin 会先于精确目标注册的 Mixin；同一匹配来源内 priority 高的 Mixin 先应用，priority 相同保持注册顺序
 - 使用 `ordinal` 参数选择第 N 个匹配点，避免同一个注入处理器命中过多返回点、调用点或指令点
+- 使用 `@Group(max = 1)` 约束多版本候选只允许一个命中；`@Group` 不会调整 Mixin 应用顺序
 - 考虑合并冲突的 Mixin
 
 ## 示例代码
