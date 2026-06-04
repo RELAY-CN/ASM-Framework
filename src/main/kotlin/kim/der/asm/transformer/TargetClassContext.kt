@@ -9,6 +9,7 @@ import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AsmInjectorFactory
 import kim.der.asm.injector.impl.DefaultReturnValueProvider
 import kim.der.asm.injector.util.InlineCodeGenerator
+import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.ClassReader
@@ -632,13 +633,13 @@ class TargetClassContext(
         handlerMethod: Method,
         annotation: ModifyConstant,
         targetMethod: MethodNode,
-    ): Boolean =
-        runCatching {
-            val candidateTypes = collectModifyConstantCandidateTypes(targetMethod, annotation)
-            candidateTypes.any { candidate ->
-                validateModifyConstantHandlerSignature(handlerMethod, targetMethod, candidate.type, candidate.nullConstant)
-            }
-        }.getOrDefault(false)
+    ): Boolean {
+        // Slice 边界属于用户配置错误时必须保留原始异常，不能降级成“目标方法不兼容”。
+        val candidateTypes = collectModifyConstantCandidateTypes(targetMethod, annotation)
+        return candidateTypes.any { candidate ->
+            validateModifyConstantHandlerSignature(handlerMethod, targetMethod, candidate.type, candidate.nullConstant)
+        }
+    }
 
     private fun collectModifyConstantCandidateTypes(
         targetMethod: MethodNode,
@@ -646,7 +647,13 @@ class TargetClassContext(
     ): List<ModifyConstantCandidate> {
         val requestedValue = annotation.constant.ifEmpty { null }
         val insns = targetMethod.instructions.toArray()
-        val (sliceStartIndex, sliceEndIndex) = resolveModifyConstantSliceRange(insns, annotation.slice)
+        val (sliceStartIndex, sliceEndIndex) =
+            SliceBoundaryResolver.resolveRange(
+                insns,
+                annotation.slice,
+                "@ModifyConstant",
+                SliceBoundaryResolver.MODIFY_CONSTANT_BOUNDARIES,
+            )
         val candidates = mutableListOf<ModifyConstantCandidate>()
 
         for ((index, insn) in insns.withIndex()) {
@@ -664,95 +671,6 @@ class TargetClassContext(
         }
 
         return candidates
-    }
-
-    private fun resolveModifyConstantSliceRange(
-        insns: Array<AbstractInsnNode>,
-        slice: Slice,
-    ): Pair<Int, Int> {
-        val startIndex =
-            if (slice.from.target.isNotEmpty()) {
-                val fromIndex = findModifyConstantSliceBoundaryIndex(insns, slice.from, 0) ?: return insns.size to insns.size
-                fromIndex + 1
-            } else {
-                0
-            }
-        val endIndex =
-            if (slice.to.target.isNotEmpty()) {
-                findModifyConstantSliceBoundaryIndex(insns, slice.to, startIndex) ?: return insns.size to insns.size
-            } else {
-                insns.size
-            }
-        return startIndex to endIndex.coerceAtLeast(startIndex)
-    }
-
-    private fun findModifyConstantSliceBoundaryIndex(
-        insns: Array<AbstractInsnNode>,
-        at: At,
-        startIndex: Int,
-    ): Int? {
-        require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @ModifyConstant: ${at.value}"
-        }
-
-        val (boundaryOwner, boundaryName, boundaryDesc) = parseModifyConstantTargetMethod(at.target)
-        if (boundaryName == null || boundaryDesc == null) {
-            throw IllegalArgumentException(
-                "Invalid ModifyConstant slice boundary method signature: ${at.target} " +
-                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
-            )
-        }
-
-        for (index in startIndex until insns.size) {
-            val insn = insns[index]
-            if (insn is MethodInsnNode && matchesModifyConstantTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
-                return index
-            }
-        }
-
-        return null
-    }
-
-    private fun parseModifyConstantTargetMethod(signature: String): Triple<String?, String?, String?> {
-        if (signature.isEmpty()) {
-            return Triple(null, null, null)
-        }
-
-        val parenIndex = signature.indexOf('(')
-        if (parenIndex < 0) {
-            return Triple(null, signature, null)
-        }
-
-        val ownerAndName = signature.substring(0, parenIndex)
-        val desc = signature.substring(parenIndex)
-        val slashIndex = ownerAndName.lastIndexOf('/')
-        val dotIndex = ownerAndName.lastIndexOf('.')
-        val separatorIndex = maxOf(slashIndex, dotIndex)
-
-        return if (separatorIndex >= 0) {
-            Triple(
-                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
-                ownerAndName.substring(separatorIndex + 1),
-                desc,
-            )
-        } else {
-            Triple(null, ownerAndName, desc)
-        }
-    }
-
-    private fun matchesModifyConstantTargetMethod(
-        insn: MethodInsnNode,
-        targetOwner: String?,
-        targetName: String,
-        targetDesc: String?,
-    ): Boolean {
-        if (targetOwner != null && insn.owner != targetOwner) {
-            return false
-        }
-        if (insn.name != targetName) {
-            return false
-        }
-        return targetDesc == null || insn.desc == targetDesc
     }
 
     private fun matchesModifyConstantValue(

@@ -1307,8 +1307,9 @@ annotation class ModifyReturnValue(
  *
  * - 第一个参数接收原始常量值，后续参数可按顺序接收目标方法的部分参数；`ACONST_NULL` 常量可由任意引用类型接收
  * - 返回类型必须与被修改常量的类型一致；当常量类型为引用或数组时，返回值可为该常量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
- * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
- *   边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
+ * - [slice] 可把候选常量限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、
+ *   [InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间；边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
+ * - 默认 [At] 表示未声明边界；一旦在 [slice] 中声明上述任一边界，[At.target] 必须非空，且字段边界必须包含字段名，避免宽匹配把切片锚到错误字段
  * - [method] 为空时会按 handler 名称、常量过滤、常量类型、返回类型和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  * - 常量文本匹配后仍会按 handler 返回类型筛选候选；同一文本对应多个 JVM 类型时，不兼容类型不会计入 [ordinal] 或命中数
  * - [require] / [allow] 可约束实际替换的常量数量，目标字节码漂移时会在转换阶段失败
@@ -1321,8 +1322,9 @@ annotation class ModifyReturnValue(
  * 方法句柄常量可使用 `owner.name(desc)`，例如 `java/lang/String.valueOf(I)Ljava/lang/String;`；
  * 动态常量可使用常量名或 `name:descriptor`，例如 `dynamicText:Ljava/lang/String;`
  * @param ordinal 匹配常量序号；`-1` 表示修改全部匹配常量，`0` 及以上表示只修改第 N 个匹配常量
- * @param slice 切片范围；当前常量修改支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * @param slice 切片范围；当前常量修改支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]、
+ * [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围；
+ * 显式声明这些边界时 [At.target] 必须非空，字段边界还必须包含字段名
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
@@ -1357,7 +1359,8 @@ annotation class ModifyConstant(
     /**
      * 常量查找切片。
      *
-     * 候选常量会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选常量会限制在 [Slice.from] 之后、[Slice.to] 之前，边界指令本身不参与匹配。
+     * 默认 [At] 表示未声明边界；显式声明边界时 [At.target] 必须非空，字段边界还必须包含字段名。
      */
     val slice: Slice = Slice(),
 

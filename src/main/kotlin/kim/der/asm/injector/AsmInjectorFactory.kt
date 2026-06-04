@@ -309,7 +309,8 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param constant 常量值过滤；为 `null` 表示仅按类型匹配
      * @param ordinal 匹配常量序号；负数表示处理全部匹配常量
-     * @param slice 切片范围；当前常量修改支持 INVOKE 边界切片
+     * @param slice 切片范围；当前常量修改支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片；
+     * 显式声明边界时目标不能为空，字段边界还必须包含字段名
      * @return ModifyConstant 注入器
      *
      * @author Dr (dr@der.kim)

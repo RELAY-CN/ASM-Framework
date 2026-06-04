@@ -287,7 +287,7 @@ annotation class At(
     /**
      * 当前定位对象对应的注入点类型。
      *
-     * 在 [Slice] 边界中当前仅支持 [InjectionPoint.INVOKE]。
+     * 在多数 [Slice] 边界中当前仅支持 [InjectionPoint.INVOKE]；[ModifyConstant] 还支持字段读写与常量边界。
      */
     val value: InjectionPoint = InjectionPoint.HEAD,
 
@@ -357,14 +357,18 @@ enum class Shift {
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组读取、数组写入值、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
  * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写改写、[ModifyReturnValue] 返回值修改，以及 [ModifyConstant] 常量修改
- * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；
+ * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；其中 [ModifyConstant] 还支持 [InjectionPoint.FIELD]、
+ * [InjectionPoint.FIELD_ASSIGN] 与 [InjectionPoint.CONSTANT] 边界；
  * 起始边界之后、结束边界之前的候选点才会参与匹配，边界指令本身不会作为候选注入点。
  * [AsmInject.ordinal] / [Redirect.ordinal] / [ModifyArg.ordinal] / [ModifyArgs.ordinal] /
  * [ModifyReceiver.ordinal] / [WrapOperation.ordinal] / [WrapWithCondition.ordinal] /
  * [ModifyExpressionValue.ordinal] / [ModifyVariable.ordinal] / [ModifyReturnValue.ordinal] /
  * [ModifyConstant.ordinal] 会在切片内重新计数。
  * [InjectionPoint.INVOKE] 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；`invokedynamic` 边界会按
- * bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+ * bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。[ModifyConstant] 的字段边界按字段
+ * owner、name 与 descriptor 匹配，其中字段名必填，owner 与 descriptor 可省略；常量边界按常量文本匹配。
+ * 默认 [At] 表示未声明边界；一旦显式声明 [InjectionPoint.INVOKE] 或 [ModifyConstant] 额外支持的字段/常量边界，
+ * [At.target] 必须非空，否则转换阶段会按配置错误失败。
  * 指定的边界未命中时，切片按空范围处理。
  *
  * @param from 起始定位条件

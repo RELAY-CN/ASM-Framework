@@ -4,11 +4,10 @@
 
 package kim.der.asm.injector.impl
 
-import kim.der.asm.api.annotation.At
-import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
@@ -35,8 +34,8 @@ import java.lang.reflect.Modifier
  *
  * @param constantValue 常量过滤值；为 `null` 表示不按值过滤
  * @param ordinal 匹配常量序号；负数表示处理全部匹配常量
- * @param slice 切片范围；当前使用 INVOKE 边界缩小常量匹配范围，边界可匹配普通方法调用、构造器调用或
- * `invokedynamic` 调用
+ * @param slice 切片范围；当前使用 INVOKE、FIELD、FIELD_ASSIGN 或 CONSTANT 边界缩小常量匹配范围；
+ * 显式声明边界时目标不能为空，字段边界还必须包含字段名
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -74,7 +73,13 @@ class ModifyConstantInjector(
         val instructions = target.instructions
         var injectionCount = 0
         val insns = instructions.toArray()
-        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        val (sliceStartIndex, sliceEndIndex) =
+            SliceBoundaryResolver.resolveRange(
+                insns,
+                slice,
+                "@ModifyConstant",
+                SliceBoundaryResolver.MODIFY_CONSTANT_BOUNDARIES,
+            )
         var matchedOrdinal = 0
 
         // 查找所有常量指令
@@ -124,180 +129,6 @@ class ModifyConstantInjector(
      * @return 未声明 ordinal 或序号一致时返回 `true`
      */
     private fun matchesOrdinal(currentOrdinal: Int): Boolean = ordinal < 0 || currentOrdinal == ordinal
-
-    /**
-     * 解析常量匹配使用的切片指令范围。
-     *
-     * `slice.from` 命中后从边界后一条指令开始匹配，`slice.to` 命中位置本身不参与匹配。
-     * 任一边界声明但无法命中时返回空范围，避免目标字节码漂移后误修改切片外常量。
-     *
-     * @param insns 目标方法指令数组
-     * @return 可遍历的半开区间 `[start, end)`
-     */
-    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
-        val startIndex =
-            if (hasSliceBoundary(slice.from)) {
-                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
-                fromIndex + 1
-            } else {
-                0
-            }
-        val endIndex =
-            if (hasSliceBoundary(slice.to)) {
-                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
-            } else {
-                insns.size
-            }
-
-        return startIndex to endIndex.coerceAtLeast(startIndex)
-    }
-
-    /**
-     * 判断切片边界是否声明了可匹配目标。
-     *
-     * @param at 切片边界注解配置
-     * @return `target` 非空时返回 `true`
-     */
-    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
-
-    /**
-     * 构造一个位于方法末尾的空切片范围。
-     *
-     * @param insns 目标方法指令数组
-     * @return 不会命中任何指令的半开区间
-     */
-    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
-
-    /**
-     * 从指定位置开始查找切片边界调用指令。
-     *
-     * 当前 `@ModifyConstant` 的切片边界只支持 [InjectionPoint.INVOKE]，
-     * 可匹配普通方法调用、构造器调用或 `invokedynamic` 调用。
-     *
-     * @param insns 目标方法指令数组
-     * @param at 切片边界配置
-     * @param startIndex 起始搜索下标
-     * @return 匹配边界的指令下标；未命中时返回 `null`
-     * @throws IllegalArgumentException 边界注入点类型或目标方法签名不合法时抛出
-     */
-    private fun findSliceBoundaryIndex(
-        insns: Array<AbstractInsnNode>,
-        at: At,
-        startIndex: Int,
-    ): Int? {
-        require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @ModifyConstant: ${at.value}"
-        }
-
-        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
-        if (boundaryName == null || boundaryDesc == null) {
-            throw IllegalArgumentException(
-                "Invalid ModifyConstant slice boundary method signature: ${at.target} " +
-                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
-            )
-        }
-
-        for (index in startIndex until insns.size) {
-            val insn = insns[index]
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
-                return index
-            }
-            if (
-                insn is InvokeDynamicInsnNode &&
-                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-        }
-
-        return null
-    }
-
-    /**
-     * 解析注解中声明的方法目标签名。
-     *
-     * 支持 `owner/name(desc)`、`owner.name(desc)` 与 `name(desc)` 形式。
-     * 未携带 owner 时只按方法名与描述符匹配；未携带描述符时返回 `null` 描述符供调用方判定非法。
-     *
-     * @param signature 注解中声明的目标签名
-     * @return `owner`、`name`、`desc` 三元组；缺失部分以 `null` 表示
-     */
-    private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {
-        if (signature.isEmpty()) {
-            return Triple(null, null, null)
-        }
-
-        val parenIndex = signature.indexOf('(')
-        if (parenIndex < 0) {
-            return Triple(null, signature, null)
-        }
-
-        val ownerAndName = signature.substring(0, parenIndex)
-        val desc = signature.substring(parenIndex)
-        val slashIndex = ownerAndName.lastIndexOf('/')
-        val dotIndex = ownerAndName.lastIndexOf('.')
-        val separatorIndex = maxOf(slashIndex, dotIndex)
-
-        return if (separatorIndex >= 0) {
-            Triple(
-                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
-                ownerAndName.substring(separatorIndex + 1),
-                desc,
-            )
-        } else {
-            Triple(null, ownerAndName, desc)
-        }
-    }
-
-    /**
-     * 判断普通方法调用是否匹配切片边界目标。
-     *
-     * @param insn 待检查的方法调用指令
-     * @param targetOwner 目标 owner；为 `null` 时不限制 owner
-     * @param targetName 目标方法名
-     * @param targetDesc 目标方法描述符；为 `null` 时不限制描述符
-     * @return 调用指令匹配目标时返回 `true`
-     */
-    private fun matchesTargetMethod(
-        insn: MethodInsnNode,
-        targetOwner: String?,
-        targetName: String,
-        targetDesc: String?,
-    ): Boolean {
-        if (targetOwner != null && insn.owner != targetOwner) {
-            return false
-        }
-        if (insn.name != targetName) {
-            return false
-        }
-        return targetDesc == null || insn.desc == targetDesc
-    }
-
-    /**
-     * 判断 `invokedynamic` 指令是否匹配切片边界目标。
-     *
-     * owner 匹配 bootstrap method owner；名称可匹配动态调用名或 bootstrap method 名。
-     *
-     * @param insn 待检查的 `invokedynamic` 指令
-     * @param targetOwner 目标 bootstrap owner；为 `null` 时不限制 owner
-     * @param targetName 目标动态调用名或 bootstrap method 名
-     * @param targetDesc 目标动态调用描述符；为 `null` 时不限制描述符
-     * @return 指令匹配目标时返回 `true`
-     */
-    private fun matchesTargetInvokeDynamic(
-        insn: InvokeDynamicInsnNode,
-        targetOwner: String?,
-        targetName: String,
-        targetDesc: String?,
-    ): Boolean {
-        if (targetOwner != null && insn.bsm.owner != targetOwner) {
-            return false
-        }
-        if (insn.name != targetName && insn.bsm.name != targetName) {
-            return false
-        }
-        return targetDesc == null || insn.desc == targetDesc
-    }
 
     /**
      * 用 handler 调用替换原始常量加载指令。

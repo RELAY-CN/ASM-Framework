@@ -52,6 +52,7 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassWriter
+import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.tree.ClassNode
 import java.io.ByteArrayOutputStream
@@ -5295,6 +5296,215 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value", String::class.java).invoke(instance, "marker")
 
         assertEquals("target:changed:target", result)
+    }
+
+    @Nested
+    @DisplayName("@ModifyConstant Slice 边界场景")
+    inner class ModifyConstantSliceBoundaryScenarios {
+        @Test
+        @DisplayName("常量边界应只修改业务片段内的目标常量")
+        fun constantBoundaryLimitsBusinessSegment() {
+            // Given
+            AsmRegistry.register(ConstantBoundaryModifyConstantMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "ConstantBoundarySliceConstantTarget",
+                    constantBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("ConstantBoundarySliceConstantTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value").invoke(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: CONSTANT 边界只应放行哨兵常量之间的业务常量，边界外重复值必须保持原样")
+                .isEqualTo("target:changed:target")
+        }
+
+        @Test
+        @DisplayName("字段边界应只修改字段读取之间的目标常量")
+        fun fieldBoundaryLimitsBusinessSegment() {
+            // Given
+            AsmRegistry.register(FieldBoundaryModifyConstantMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "FieldBoundarySliceConstantTarget",
+                    fieldBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("FieldBoundarySliceConstantTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value").invoke(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: FIELD 边界只应放行两次字段读取之间的业务常量，避免同值常量跨片段误改")
+                .isEqualTo("target:changed:target")
+        }
+
+        @Test
+        @DisplayName("字段写入边界应只修改写入之间的目标常量")
+        fun fieldAssignBoundaryLimitsBusinessSegment() {
+            // Given
+            AsmRegistry.register(FieldAssignBoundaryModifyConstantMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "FieldAssignBoundarySliceConstantTarget",
+                    fieldAssignBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("FieldAssignBoundarySliceConstantTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value").invoke(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: FIELD_ASSIGN 边界只应按 PUTFIELD/PUTSTATIC 指令位置限制业务常量")
+                .isEqualTo("target:changed:target")
+        }
+
+        @Test
+        @DisplayName("字段写入 to 边界前的写入值应按真实字节码位置参与常量修改")
+        fun fieldAssignToBoundaryValueUsesBytecodePosition() {
+            // Given
+            AsmRegistry.register(FieldAssignToValueBoundaryModifyConstantMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "FieldAssignToValueBoundarySliceConstantTarget",
+                    fieldAssignToValueBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("FieldAssignToValueBoundarySliceConstantTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value").invoke(instance)
+            val marker =
+                clazz.getDeclaredField("marker").apply {
+                    isAccessible = true
+                }.get(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 业务片段中的目标常量仍应被修改，边界后的同值常量必须保持原样")
+                .isEqualTo("target:changed:target")
+            assertThat(marker)
+                .`as`("Then: FIELD_ASSIGN 的 to 边界锚点是写入指令，位于该指令前的待写入常量按切片内候选处理")
+                .isEqualTo("changed")
+        }
+
+        @Test
+        @DisplayName("常量边界缺失时应保持空切片并触发命中数契约")
+        fun missingConstantBoundaryKeepsSliceEmpty() {
+            // Given
+            AsmRegistry.register(MissingConstantBoundaryModifyConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "ConstantBoundarySliceConstantTarget",
+                    constantBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: 目标字节码漂移导致边界常量缺失时，不应退回全方法误改同值常量")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@ModifyConstant handler modify requires at least 1 injection(s), " +
+                        "actual 0 in target method value()Ljava/lang/String; of class ConstantBoundarySliceConstantTarget",
+                )
+        }
+
+        @Test
+        @DisplayName("空常量边界目标应直接报错避免退回全方法")
+        fun emptyConstantBoundaryTargetFailsBeforeWholeMethodFallback() {
+            // Given
+            AsmRegistry.register(EmptyConstantBoundaryModifyConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "ConstantBoundarySliceConstantTarget",
+                    constantBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: 显式声明 CONSTANT 边界却遗漏 target 时，应暴露配置错误而不是扩大到全方法")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "Invalid @ModifyConstant slice boundary CONSTANT target: target must not be empty",
+                )
+        }
+
+        @Test
+        @DisplayName("省略目标方法推断时也应保留空边界配置错误")
+        fun inferredMethodKeepsEmptyBoundaryConfigurationError() {
+            // Given
+            AsmRegistry.register(InferredEmptyConstantBoundaryModifyConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "ConstantBoundarySliceConstantTarget",
+                    constantBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: method 省略时边界解析错误仍应向调用方暴露，避免被目标方法推断降级成 missing method")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "Invalid @ModifyConstant slice boundary CONSTANT target: target must not be empty",
+                )
+        }
+
+        @Test
+        @DisplayName("字段边界缺少字段名时应直接报错")
+        fun fieldBoundaryWithoutNameFailsBeforeDescriptorWideMatch() {
+            // Given
+            AsmRegistry.register(FieldBoundaryWithoutNameModifyConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "FieldBoundarySliceConstantTarget",
+                    fieldBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: FIELD 边界不能只靠 descriptor 宽匹配，否则可能把切片锚到错误字段读取")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "Invalid @ModifyConstant slice boundary FIELD target: field name must not be empty",
+                )
+        }
+
+        @Test
+        @DisplayName("字段写入边界缺少字段名时应直接报错")
+        fun fieldAssignBoundaryWithoutNameFailsBeforeDescriptorWideMatch() {
+            // Given
+            AsmRegistry.register(FieldAssignBoundaryWithoutNameModifyConstantMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "FieldAssignBoundarySliceConstantTarget",
+                    fieldAssignBoundarySliceConstantTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: FIELD_ASSIGN 边界不能只靠 descriptor 宽匹配，否则可能把切片锚到错误字段写入")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "Invalid @ModifyConstant slice boundary FIELD_ASSIGN target: field name must not be empty",
+                )
+        }
     }
 
     @Test
@@ -13793,6 +14003,169 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "changed"
     }
 
+    @AsmMixin("ConstantBoundarySliceConstantTarget")
+    object ConstantBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT, target = "start-boundary"),
+                to = At(value = InjectionPoint.CONSTANT, target = "end-boundary"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("FieldBoundarySliceConstantTarget")
+    object FieldBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = "FieldBoundarySliceConstantTarget.marker:Ljava/lang/String;"),
+                to = At(value = InjectionPoint.FIELD, target = "FieldBoundarySliceConstantTarget.marker:Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("FieldAssignBoundarySliceConstantTarget")
+    object FieldAssignBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from =
+                    At(
+                        value = InjectionPoint.FIELD_ASSIGN,
+                        target = "FieldAssignBoundarySliceConstantTarget.marker:Ljava/lang/String;",
+                    ),
+                to =
+                    At(
+                        value = InjectionPoint.FIELD_ASSIGN,
+                        target = "FieldAssignBoundarySliceConstantTarget.marker:Ljava/lang/String;",
+                    ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("FieldAssignToValueBoundarySliceConstantTarget")
+    object FieldAssignToValueBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from =
+                    At(
+                        value = InjectionPoint.FIELD_ASSIGN,
+                        target = "FieldAssignToValueBoundarySliceConstantTarget.marker:Ljava/lang/String;",
+                    ),
+                to =
+                    At(
+                        value = InjectionPoint.FIELD_ASSIGN,
+                        target = "FieldAssignToValueBoundarySliceConstantTarget.marker:Ljava/lang/String;",
+                    ),
+            ),
+            require = 2,
+            allow = 2,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("ConstantBoundarySliceConstantTarget")
+    object MissingConstantBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT, target = "missing-boundary"),
+                to = At(value = InjectionPoint.CONSTANT, target = "end-boundary"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("ConstantBoundarySliceConstantTarget")
+    object EmptyConstantBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT),
+                to = At(value = InjectionPoint.CONSTANT, target = "end-boundary"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("ConstantBoundarySliceConstantTarget")
+    object InferredEmptyConstantBoundaryModifyConstantMixin {
+        @ModifyConstant(
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT),
+                to = At(value = InjectionPoint.CONSTANT, target = "end-boundary"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun value(original: String): String = "changed"
+    }
+
+    @AsmMixin("FieldBoundarySliceConstantTarget")
+    object FieldBoundaryWithoutNameModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+                to = At(value = InjectionPoint.FIELD, target = "FieldBoundarySliceConstantTarget.marker:Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
+    @AsmMixin("FieldAssignBoundarySliceConstantTarget")
+    object FieldAssignBoundaryWithoutNameModifyConstantMixin {
+        @ModifyConstant(
+            method = "value()Ljava/lang/String;",
+            constant = "target",
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+                to =
+                    At(
+                        value = InjectionPoint.FIELD_ASSIGN,
+                        target = "FieldAssignBoundarySliceConstantTarget.marker:Ljava/lang/String;",
+                    ),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "changed"
+    }
+
     @AsmMixin("ConstantParamTarget")
     object ConstantWithTargetParamsMixin {
         @ModifyConstant(method = "value(Ljava/lang/String;I)Ljava/lang/String;", constant = "base-")
@@ -20860,6 +21233,122 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun constantBoundarySliceConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstantBoundarySliceConstantTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("start-boundary")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitLdcInsn("end-boundary")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            appendThreeStringsWithColon()
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldBoundarySliceConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldBoundarySliceConstantTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "marker", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FieldBoundarySliceConstantTarget", "marker", "Ljava/lang/String;")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "FieldBoundarySliceConstantTarget", "marker", "Ljava/lang/String;")
+            visitInsn(Opcodes.POP)
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            appendThreeStringsWithColon()
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldAssignBoundarySliceConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "FieldAssignBoundarySliceConstantTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "marker", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("start-marker")
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldAssignBoundarySliceConstantTarget", "marker", "Ljava/lang/String;")
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("end-marker")
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldAssignBoundarySliceConstantTarget", "marker", "Ljava/lang/String;")
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            appendThreeStringsWithColon()
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun fieldAssignToValueBoundarySliceConstantTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(
+            Opcodes.V11,
+            Opcodes.ACC_PUBLIC,
+            "FieldAssignToValueBoundarySliceConstantTarget",
+            null,
+            "java/lang/Object",
+            null,
+        )
+        cw.visitField(Opcodes.ACC_PRIVATE, "marker", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("start-marker")
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldAssignToValueBoundarySliceConstantTarget", "marker", "Ljava/lang/String;")
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("target")
+            visitFieldInsn(Opcodes.PUTFIELD, "FieldAssignToValueBoundarySliceConstantTarget", "marker", "Ljava/lang/String;")
+            visitLdcInsn("target")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            appendThreeStringsWithColon()
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 4)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun constantParamTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ConstantParamTarget", null, "java/lang/Object", null)
@@ -21131,6 +21620,19 @@ class FrameworkReliabilityTest {
         cw.visitEnd()
         return cw.toByteArray()
     }
+
+    private fun MethodVisitor.appendThreeStringsWithColon() {
+        visitVarInsn(Opcodes.ALOAD, 1)
+        visitLdcInsn(":")
+        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+        visitVarInsn(Opcodes.ALOAD, 2)
+        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+        visitLdcInsn(":")
+        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+        visitVarInsn(Opcodes.ALOAD, 3)
+        visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+    }
+
     private fun syncTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SyncTarget", null, "java/lang/Object", null)
