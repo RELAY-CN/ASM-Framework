@@ -150,6 +150,65 @@ class FrameworkReliabilityTest {
         assertEquals(true, "package kim.der.asm.injector.impl" in defaultValueSource.second)
     }
 
+    @Nested
+    @DisplayName("Redirection 迁移文档场景")
+    inner class RedirectionMigrationDocumentationScenarios {
+        @Test
+        @DisplayName("迁移说明应把旧替换意图映射到注解式 API")
+        fun redirectionMigrationGuideMapsLegacyIntentsToAnnotationApis() {
+            // Given
+            val migration = Files.readString(Path.of("REDIRECTION_MIGRATION.md"))
+            val migrationTable =
+                migration
+                    .substringAfter("## 迁移对照")
+                    .substringBefore("### 1. 旧的调用替换逻辑")
+            val parameterAndReceiverSection =
+                migration
+                    .substringAfter("### 3. 参数与 receiver 迁移")
+                    .substringBefore("### 4. 整方法迁移")
+            val wholeMethodSection =
+                migration
+                    .substringAfter("### 4. 整方法迁移")
+                    .substringBefore("### 5. 旧的目标方法描述")
+
+            // Then
+            assertThat(migration)
+                .`as`("Then: 迁移文档应为参数、receiver 与整方法迁移提供独立说明，避免旧 API 用户误用监听点替换数据")
+                .contains(
+                    "### 3. 参数与 receiver 迁移",
+                    "### 4. 整方法迁移",
+                    "### 5. 旧的目标方法描述",
+                )
+            assertThat(migrationTable)
+                .`as`("Then: 迁移对照表应按旧业务意图指向具体注解，而不是只列出替换/监听两类旧 API")
+                .contains(
+                    "| 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` |",
+                    "| 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` |",
+                    "| 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` |",
+                    "| 包裹整个目标方法并按需调用原方法 | `@WrapMethod` |",
+                    "| 把整类方法替换为默认返回值 | `@ReplaceAllMethods` |",
+                )
+            assertThat(parameterAndReceiverSection)
+                .`as`("Then: 参数与 receiver 迁移段应说明 INVOKE_STRING 只是观察点，参数值和 receiver 应走专用注解")
+                .contains(
+                    "只改单个调用参数时使用 `@ModifyArg`",
+                    "批量改写参数组时使用 `@ModifyArgs`",
+                    "`INVOKE_STRING` 只用于观察直接字符串常量实参调用点",
+                    "替换字符串实参时使用 `@ModifyArg` 或 `@ModifyArgs`",
+                    "只替换实例调用或实例字段访问 receiver 时使用 `@ModifyReceiver`",
+                    "需要保留可调用原操作句柄时使用 `@WrapOperation`",
+                )
+            assertThat(wholeMethodSection)
+                .`as`("Then: 整方法迁移段应区分 WrapMethod 原方法句柄与 ReplaceAllMethods 默认返回值")
+                .contains(
+                    "整方法仍需要调用原方法时使用 `@WrapMethod`",
+                    "`Operation`",
+                    "只想让整类方法返回默认值时使用 `@ReplaceAllMethods`",
+                    "不再经由旧 Redirection manager 分派",
+                )
+        }
+    }
+
     @Test
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
