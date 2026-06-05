@@ -865,10 +865,10 @@ annotation class WrapMethod(
  * 条件包裹注解。
  *
  * 用于在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段读取、字段写入、简单数组元素读取、
- * 数组元素写入、数组长度读取、局部变量读取/写入、常量加载、条件跳转或抛异常点插入条件判断（语义参考
+ * 数组元素写入、数组长度读取、局部变量读取/写入、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件判断（语义参考
  * Mixin Extras 的 `@WrapWithCondition`）。handler 返回 `true` 时继续执行原调用、写入、按原分支结果跳转或继续原抛出，
  * 返回 `false` 时跳过原指令、原跳转或原抛出；非 `void` 方法调用、`invokedynamic` 调用、字段读取、
- * 数组元素读取、数组长度读取、局部变量读取和常量加载会留下对应类型的默认值。
+ * 数组元素读取、数组长度读取、局部变量读取、类型判断和常量加载会留下对应类型的默认值。
  * 相比 [Redirect]，该注解不替换原逻辑，只决定原指令、原跳转或原抛出是否继续执行，更适合“按条件跳过副作用调用、写入、分支跳转或异常抛出”的场景。
  *
  * [InjectionPoint.INVOKE] 模式支持普通方法调用和 `invokedynamic` 调用。
@@ -897,6 +897,9 @@ annotation class WrapMethod(
  * 返回 `true` 时保留原读取值，返回 `false` 时用该值类型的默认值替换本次读取结果，不回写原槽位。
  * [InjectionPoint.STORE] 模式匹配局部变量写入，不使用 [At.target]；可通过同样的槽位或名称过滤指定候选。
  * handler 先接收 `xSTORE` 消费前的待写入值；返回 `true` 时执行原写入，返回 `false` 时丢弃该值并跳过原写入。
+ * [InjectionPoint.INSTANCEOF] 模式匹配类型判断，类型目标支持 internal name 或 binary name。
+ * handler 先接收原始 `Boolean` 判断结果；返回 `true` 时保留原判断结果，返回 `false` 时把本次判断替换为 `false`。
+ * 省略 [At.target] 时会按 handler 签名匹配切片内全部兼容类型判断，不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.JUMP] 模式匹配条件跳转，handler 先接收原始分支结果 `Boolean`，
  * 返回 `true` 时保留原分支结果，返回 `false` 时跳过原跳转；`GOTO` 与 `JSR` 不支持条件包裹。
  * [InjectionPoint.CONSTANT] 模式匹配常量加载指令。转换会保留原常量加载，并在其后插入 LOAD 风格条件包裹；
@@ -906,9 +909,9 @@ annotation class WrapMethod(
  * [InjectionPoint.THROW] 模式匹配 `ATHROW` 前即将抛出的 [Throwable]，handler 先接收该异常对象，
  * 返回 `true` 时恢复原异常并继续原 `ATHROW`，返回 `false` 时跳过原抛出；指定 [At.target] 时只匹配直接构造后抛出的同类型异常。
  * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、
- * [InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * 模式可使用 [slice] 把候选调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
- * 局部变量读取、局部变量写入、条件跳转、常量加载或抛异常点
+ * 局部变量读取、局部变量写入、类型判断、条件跳转、常量加载或抛异常点
  * 限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
  *
  * ASM 方法要求：
@@ -925,23 +928,24 @@ annotation class WrapMethod(
  * - 数组长度读取的 handler 参数先接收 `Int` 长度值，不接收数组引用
  * - 局部变量读取的 handler 先接收 `xLOAD` 读取出的栈顶表达式值
  * - 局部变量写入的 handler 先接收 `xSTORE` 消费前的待写入值
+ * - 类型判断的 handler 先接收原始 `Boolean` 判断结果
  * - 常量加载的 handler 先接收原常量值
  * - 条件跳转的 handler 先接收原始分支结果 `Boolean`
  * - 抛异常点的 handler 先接收即将抛出的 [Throwable]
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
- * - [At.target] 可指定要匹配的方法调用、动态调用、字段签名、跳转操作码、常量文本或异常类型；[InjectionPoint.INVOKE]、
- *   [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]
+ * - [At.target] 可指定要匹配的方法调用、动态调用、字段签名、类型、跳转操作码、常量文本或异常类型；[InjectionPoint.INVOKE]、
+ *   [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]
  *   与 [InjectionPoint.THROW] 可省略 [At.target]，按 handler 签名筛选兼容候选；
  *   [InjectionPoint.LOAD] / [InjectionPoint.STORE] 不使用 [At.target]，通过 [At.args] 过滤局部变量读写候选
  * - [method] 为空时会按 handler 名称、条件包裹操作点和 handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
  * @param method 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * 模式支持 INVOKE 边界切片
  * @param require 最小命中数；大于 0 时实际条件包裹数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
@@ -963,7 +967,7 @@ annotation class WrapWithCondition(
     /**
      * 条件包裹操作点定位。
      *
-     * 支持普通方法调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、局部变量读取/写入、条件跳转、常量加载和抛异常点。
+     * 支持普通方法调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、局部变量读取/写入、类型判断、条件跳转、常量加载和抛异常点。
      */
     val at: At = At(value = InjectionPoint.INVOKE),
 

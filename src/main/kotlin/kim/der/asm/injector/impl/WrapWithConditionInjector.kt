@@ -33,12 +33,12 @@ import java.lang.reflect.Modifier
  * WrapWithCondition 注入器。
  *
  * 该注入器会匹配目标方法内的普通方法调用、任意返回值的 `invokedynamic` 调用、字段读取、字段写入、
- * 简单数组元素读取、数组元素写入、数组长度读取、局部变量读取或写入、常量加载、条件跳转或抛异常点，
+ * 简单数组元素读取、数组元素写入、数组长度读取、局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点，
  * 并在原指令前后插入 boolean handler。
  * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段读取值、字段写入值、数组读取值、
- * 数组写入栈参数、数组长度值、局部变量读取值或待写入值、常量值、原条件跳转分支结果或原异常对象并继续执行原指令。
+ * 数组写入栈参数、数组长度值、局部变量读取值或待写入值、类型判断结果、常量值、原条件跳转分支结果或原异常对象并继续执行原指令。
  * handler 返回 `false` 时跳过原指令、原条件跳转或原抛出；非 `void` 普通方法调用与非 `void` `invokedynamic`
- * 调用、字段读取、数组元素读取、数组长度读取、局部变量读取以及常量加载会压入对应类型的默认值。
+ * 调用、字段读取、数组元素读取、数组长度读取、局部变量读取、类型判断以及常量加载会压入对应类型的默认值。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或
  * `invokedynamic` 调用；构造器和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 首参和 boolean 返回类型筛选兼容字段读取；
@@ -51,16 +51,18 @@ import java.lang.reflect.Modifier
  * 过滤局部变量读取，handler 首参接收本次 `xLOAD` 读取出的表达式值；返回 `false` 时仅替换本次读取结果，不回写槽位。
  * [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
  * 过滤局部变量写入，handler 首参接收本次 `xSTORE` 即将消费的待写入值。
+ * [InjectionPoint.INSTANCEOF] 使用 [At.target] 类型 internal name 或 binary name 过滤，省略时匹配切片内全部兼容类型判断；
+ * handler 首参接收原始 boolean 判断结果，返回 `false` 时把本次判断替换为 `false`。
  * [InjectionPoint.CONSTANT] 使用 [At.target] 常量文本过滤，省略时按 handler 首参和 boolean 返回类型筛选兼容常量。
  * [InjectionPoint.JUMP] 未指定跳转目标时会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持条件包裹。
  * [InjectionPoint.THROW] 未指定异常类型目标时会匹配切片内全部 `ATHROW`；指定目标时只匹配前一条真实指令为同类型 `<init>` 的直接构造异常。
  * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
  * 条件包裹使用
  * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
@@ -75,11 +77,11 @@ class WrapWithConditionInjector(
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
-     * 局部变量读取或写入、常量加载、条件跳转或抛异常点插入条件包裹逻辑。
+     * 局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件包裹逻辑。
      *
      * @param target 目标方法
      * @return 至少包裹一个调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
-     * 局部变量读取或写入点、常量加载点、条件跳转点或抛异常点时返回 `true`
+     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点或抛异常点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -88,11 +90,11 @@ class WrapWithConditionInjector(
 
     /**
      * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
-     * 局部变量读取或写入、常量加载、条件跳转或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
+     * 局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
      * @return 实际包裹的调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
-     * 局部变量读取或写入点、常量加载点、条件跳转点或抛异常点数量
+     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点或抛异常点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -119,11 +121,12 @@ class WrapWithConditionInjector(
                 }
             InjectionPoint.LOAD -> injectLoad(target)
             InjectionPoint.STORE -> injectStore(target)
+            InjectionPoint.INSTANCEOF -> injectInstanceof(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.JUMP -> injectJump(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, CONSTANT, JUMP and THROW injection points",
+                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, INSTANCEOF, CONSTANT, JUMP and THROW injection points",
             )
         }
     }
@@ -750,6 +753,68 @@ class WrapWithConditionInjector(
         target: MethodNode,
         constantType: Type,
     ): Boolean = runCatching { validateConstantHandlerSignature(target, constantType) }.isSuccess
+
+    /**
+     * 在匹配的 `INSTANCEOF` 类型判断后插入条件 handler。
+     *
+     * 显式声明类型目标时按 internal name 或 binary name 匹配；省略目标时按 handler 签名筛选兼容判断点。
+     * handler 返回 `false` 时把本次类型判断结果替换为 `false`，返回 `true` 时恢复原判断结果。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的类型判断数量
+     * @throws IllegalArgumentException handler 签名不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun injectInstanceof(target: MethodNode): Int {
+        val typeTarget = at.target.replace('.', '/')
+        val inferTarget = typeTarget.isEmpty()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.INSTANCEOF) {
+                continue
+            }
+            if (!inferTarget && insn.desc != typeTarget) {
+                continue
+            }
+            if (inferTarget && !isInstanceofHandlerCompatible(target)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateInstanceofHandlerSignature(target)
+            val il = buildInstanceofConditionWrapper(target, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 判断 handler 是否兼容候选类型判断。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @return handler 可条件包裹该类型判断时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun isInstanceofHandlerCompatible(target: MethodNode): Boolean =
+        runCatching { validateInstanceofHandlerSignature(target) }.isSuccess
 
     /**
      * 解析常量加载条件包裹使用的表达式类型。
@@ -1382,6 +1447,24 @@ class WrapWithConditionInjector(
     ): InsnList = buildLoadConditionWrapper(target, constantType, targetParamCount)
 
     /**
+     * 构造 `INSTANCEOF` 类型判断条件包裹的后置指令序列。
+     *
+     * `INSTANCEOF` 已经在栈顶留下 boolean 结果，因此可复用表达式值条件包裹的栈形状：
+     * 暂存原判断结果，调用 handler；handler 返回 `false` 时压入 boolean 默认值 `false`。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到原 `INSTANCEOF` 后的条件包裹指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun buildInstanceofConditionWrapper(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList = buildLoadConditionWrapper(target, Type.BOOLEAN_TYPE, targetParamCount)
+
+    /**
      * 构造局部变量写入条件包裹的前置指令序列。
      *
      * 序列会暂存 `xSTORE` 即将消费的栈顶值，调用 boolean handler；
@@ -2005,6 +2088,64 @@ class WrapWithConditionInjector(
             throw IllegalArgumentException(
                 "@WrapWithCondition handler ${asmMethod.name} parameter #0 mismatch: " +
                     "expected $constantType, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    /**
+     * 校验 `INSTANCEOF` 类型判断条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收原始类型判断结果；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、原判断结果参数或追加目标参数不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun validateInstanceofHandlerSignature(target: MethodNode): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition INSTANCEOF handler ${asmMethod.name} must receive original boolean result",
+            )
+        }
+        if (!isHandlerParameterCompatible(Type.BOOLEAN_TYPE, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition INSTANCEOF handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected ${Type.BOOLEAN_TYPE}, actual ${actualParams[0]}",
             )
         }
 

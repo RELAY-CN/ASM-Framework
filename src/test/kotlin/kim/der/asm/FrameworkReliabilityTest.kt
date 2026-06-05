@@ -5471,6 +5471,185 @@ class FrameworkReliabilityTest {
     }
 
     @Nested
+    @DisplayName("@WrapWithCondition INSTANCEOF 类型判断场景")
+    inner class WrapWithConditionInstanceofScenarios {
+        @Test
+        @DisplayName("handler 放行时应保留原始类型判断结果")
+        fun wrapWithConditionAtInstanceofKeepsOriginalResultWhenTrue() {
+            // Given
+            AsmRegistry.register(WrapConditionInstanceofAllowMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("InstanceofTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType)
+
+            // Then
+            assertThat(method.invoke(instance, "raw", false))
+                .`as`("Then: handler 返回 true 时应保留 String 的原始 INSTANCEOF=true")
+                .isEqualTo(true)
+            assertThat(method.invoke(instance, 42, false))
+                .`as`("Then: handler 返回 true 时也应保留非 String 的原始 INSTANCEOF=false")
+                .isEqualTo(false)
+        }
+
+        @Test
+        @DisplayName("handler 拒绝时应把类型判断结果替换为 false")
+        fun wrapWithConditionAtInstanceofForcesFalseWhenHandlerReturnsFalse() {
+            // Given
+            AsmRegistry.register(WrapConditionInstanceofDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("InstanceofTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType)
+
+            // Then
+            assertThat(method.invoke(instance, "raw", false))
+                .`as`("Then: 即使原始 INSTANCEOF=true，handler 返回 false 也应让业务分支看到 false")
+                .isEqualTo(false)
+            assertThat(method.invoke(instance, 42, false))
+                .`as`("Then: 原始 INSTANCEOF=false 时拒绝结果仍保持 false")
+                .isEqualTo(false)
+        }
+
+        @Test
+        @DisplayName("省略 target 时应匹配方法内兼容的类型判断")
+        fun wrapWithConditionAtInstanceofWithoutTargetWrapsCompatibleChecks() {
+            // Given
+            AsmRegistry.register(WrapConditionAnyInstanceofDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("MultiInstanceofTarget", multiInstanceofTargetBytes(), javaClass.classLoader)
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "isString" && it.desc == "(Ljava/lang/Object;Ljava/lang/Object;)Z" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionAnyInstanceofDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("MultiInstanceofTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("isString", Any::class.java, Any::class.java)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: 省略 target 时两个 INSTANCEOF 都应作为兼容候选被条件包裹")
+                .isEqualTo(2)
+            assertThat(method.invoke(instance, StringBuilder("ignored"), "raw"))
+                .`as`("Then: 最终 String 判断被 handler 拒绝后应返回 false，而不是继续返回原始 true")
+                .isEqualTo(false)
+        }
+
+        @Test
+        @DisplayName("显式 target 应只包裹指定类型判断")
+        fun wrapWithConditionAtInstanceofHonorsExplicitTargetFilter() {
+            // Given
+            AsmRegistry.register(WrapConditionTargetedStringInstanceofDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("MultiInstanceofTarget", multiInstanceofTargetBytes(), javaClass.classLoader)
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "isString" && it.desc == "(Ljava/lang/Object;Ljava/lang/Object;)Z" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionTargetedStringInstanceofDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("MultiInstanceofTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("isString", Any::class.java, Any::class.java)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: target=java.lang.String 时只应包裹 String 判断，不能误包裹 StringBuilder 判断")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance, StringBuilder("ignored"), "raw"))
+                .`as`("Then: StringBuilder 判断未被拒绝，但最终 String 判断被拒绝后应返回 false")
+                .isEqualTo(false)
+        }
+
+        @Test
+        @DisplayName("handler 可追加接收目标方法参数前缀")
+        fun wrapWithConditionAtInstanceofCanUseTargetMethodParameters() {
+            // Given
+            AsmRegistry.register(WrapConditionInstanceofTargetParamsMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("InstanceofTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("isString", Any::class.java, Boolean::class.javaPrimitiveType)
+
+            // Then
+            assertThat(method.invoke(instance, "raw", true))
+                .`as`("Then: handler 同时收到原始 boolean、业务对象和 force 参数时应允许保留 true")
+                .isEqualTo(true)
+            assertThat(method.invoke(instance, "raw", false))
+                .`as`("Then: force=false 时 handler 可拒绝原始 true 并让结果变为 false")
+                .isEqualTo(false)
+            assertThat(method.invoke(instance, StringBuilder("raw"), true))
+                .`as`("Then: 原始类型判断为 false 时 handler 放行也只能保留 false")
+                .isEqualTo(false)
+        }
+
+        @Test
+        @DisplayName("Slice 应只包裹边界内的类型判断")
+        fun wrapWithConditionAtInstanceofRespectsSliceBoundary() {
+            // Given
+            AsmRegistry.register(WrapConditionInstanceofSliceDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform(
+                "SliceInstanceofExpressionValueTarget",
+                sliceInstanceofExpressionValueTargetBytes(),
+                javaClass.classLoader,
+            )
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "isSelected" && it.desc == "(Ljava/lang/Object;)Z" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionInstanceofSliceDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("SliceInstanceofExpressionValueTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("isSelected", Any::class.java)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: Slice 边界内只有第二个 String INSTANCEOF，应只插入一次条件包裹")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance, "raw"))
+                .`as`("Then: 边界内判断被拒绝后应返回 false，边界外 POP 掉的判断不应影响结果")
+                .isEqualTo(false)
+        }
+
+        @Test
+        @DisplayName("handler 首参不是 boolean 时应暴露签名错误")
+        fun mismatchedWrapWithConditionAtInstanceofFailsWithClearMessage() {
+            // Given
+            AsmRegistry.register(MismatchedWrapConditionInstanceofMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("InstanceofTarget", instanceofTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: INSTANCEOF 条件包裹必须显式接收原始 boolean 判断结果，避免误把待判断对象当首参")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@WrapWithCondition INSTANCEOF handler shouldKeep parameter #0 mismatch: " +
+                        "expected Z, actual Ljava/lang/String;",
+                )
+        }
+    }
+
+    @Nested
     @DisplayName("@ModifyConstant Slice 边界场景")
     inner class ModifyConstantSliceBoundaryScenarios {
         @Test
@@ -11552,6 +11731,119 @@ class FrameworkReliabilityTest {
             skipOriginalThrow.toString()
             return allowThrow
         }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object WrapConditionInstanceofAllowMixin {
+        @WrapWithCondition(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java.lang.String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: Boolean): Boolean {
+            original.toString()
+            return true
+        }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object WrapConditionInstanceofDenyMixin {
+        @WrapWithCondition(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: Boolean): Boolean {
+            original.toString()
+            return false
+        }
+    }
+
+    @AsmMixin("MultiInstanceofTarget")
+    object WrapConditionAnyInstanceofDenyMixin {
+        @WrapWithCondition(
+            method = "isString(Ljava/lang/Object;Ljava/lang/Object;)Z",
+            at = At(value = InjectionPoint.INSTANCEOF),
+            require = 2,
+            allow = 2,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            original: Boolean,
+            ignored: Any,
+            raw: Any,
+        ): Boolean {
+            original.toString()
+            ignored.hashCode()
+            raw.hashCode()
+            return false
+        }
+    }
+
+    @AsmMixin("MultiInstanceofTarget")
+    object WrapConditionTargetedStringInstanceofDenyMixin {
+        @WrapWithCondition(
+            method = "isString(Ljava/lang/Object;Ljava/lang/Object;)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java.lang.String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: Boolean): Boolean {
+            original.toString()
+            return false
+        }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object WrapConditionInstanceofTargetParamsMixin {
+        @WrapWithCondition(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            original: Boolean,
+            value: Any,
+            force: Boolean,
+        ): Boolean = original && value is String && force
+    }
+
+    @AsmMixin("SliceInstanceofExpressionValueTarget")
+    object WrapConditionInstanceofSliceDenyMixin {
+        @WrapWithCondition(
+            method = "isSelected(Ljava/lang/Object;)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: Boolean): Boolean {
+            original.toString()
+            return false
+        }
+    }
+
+    @AsmMixin("InstanceofTarget")
+    object MismatchedWrapConditionInstanceofMixin {
+        @WrapWithCondition(
+            method = "isString(Ljava/lang/Object;Z)Z",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: String): Boolean = original.isNotEmpty()
     }
 
     @AsmMixin("ExpressionValueTarget")
