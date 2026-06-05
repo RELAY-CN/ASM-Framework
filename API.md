@@ -1099,12 +1099,19 @@ fun setFinalField(value: String) {
 
 标记字段为最终（添加 `final` 修饰符）。
 
+当 `@Final` 与 `@Shadow` 一起使用时，框架会按 `@Shadow("targetName")` 或 `shadow_` 前缀解析出的真实目标字段名添加
+`final`，而不是只按 ASM 侧字段名查找目标字段。这样可以在 ASM 侧使用别名字段，同时保持字段修饰符变更落到真实目标成员上。
+
 **示例：**
 
 ```kotlin
 @Final
 @Shadow()
 private val field: String? = null
+
+@Final
+@Shadow("actualField")
+private val aliasField: String? = null
 ```
 
 ## 工具类

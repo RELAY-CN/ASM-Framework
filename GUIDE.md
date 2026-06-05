@@ -1133,7 +1133,8 @@ class AccessMixin {
 `@Shadow("shadow_privateField")` 会匹配目标成员 `privateField`。
 Shadow 字段/方法会沿可加载父类查找可继承成员；字段还会查找可加载接口中的 `public static` 字段，
 方法还会查找可加载接口中的默认方法。无论用于 Shadow 字段还是 Accessor setter，`@Mutable`
-都只会改写目标类自身字段的 `final` 标志。
+都只会改写目标类自身字段的 `final` 标志。`@Final` 与 `@Shadow` 同用时也会按 Shadow 解析后的真实目标字段名添加
+`final`，因此 ASM 侧字段可使用别名而不影响目标字段修饰符变更。
 
 `@Accessor` 可按方法形态生成 getter 或 setter。getter 必须无参数并返回字段类型，
 setter 必须接收一个字段类型参数并返回 `void`。

@@ -385,7 +385,7 @@ class TargetClassContext(
             }
 
             if (mutableAnnotation != null || finalAnnotation != null) {
-                if (applyFieldModifiers(field, mutableAnnotation != null, finalAnnotation != null)) {
+                if (applyFieldModifiers(field, shadowAnnotation, mutableAnnotation != null, finalAnnotation != null)) {
                     transformed = true
                 }
             }
@@ -548,10 +548,13 @@ class TargetClassContext(
      */
     private fun applyFieldModifiers(
         field: java.lang.reflect.Field,
+        shadowAnnotation: Shadow?,
         mutable: Boolean,
         final: Boolean,
     ): Boolean {
-        val targetField = classNode.fields.find { it.name == field.name }
+        // 字段修饰符必须与 Shadow 的目标名解析保持一致，避免别名字段只完成校验却没有修改真实目标字段。
+        val targetFieldName = resolveShadowTargetName(shadowAnnotation?.method.orEmpty(), field.name)
+        val targetField = classNode.fields.find { it.name == targetFieldName }
         var transformed = false
 
         if (targetField != null) {

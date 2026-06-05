@@ -28,6 +28,7 @@ import kim.der.asm.api.annotation.Operation
 import kim.der.asm.api.annotation.Redirect
 import kim.der.asm.api.annotation.RedirectAllMethods
 import kim.der.asm.api.annotation.Copy
+import kim.der.asm.api.annotation.Final
 import kim.der.asm.api.annotation.Overwrite
 import kim.der.asm.api.annotation.ReplaceAllMethods
 import kim.der.asm.api.annotation.RemoveField
@@ -7252,6 +7253,23 @@ class FrameworkReliabilityTest {
         val field = classNode.fields.single { it.name == "name" }
 
         assertEquals(false, (field.access and Opcodes.ACC_FINAL) != 0)
+    }
+
+    @Test
+    @DisplayName("@Final 标记 Shadow 别名字段时应修改真实目标字段")
+    fun finalShadowAliasAddsFinalToTargetField() {
+        // Given
+        AsmRegistry.register(FinalShadowAliasFieldMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val field = classNode.fields.single { it.name == "name" }
+
+        // Then
+        assertThat(field.access and Opcodes.ACC_FINAL)
+            .`as`("Then: @Shadow(\"name\") 的别名字段上标记 @Final 时，应该修改真实目标字段 name")
+            .isNotZero()
     }
 
     @Nested
@@ -16708,6 +16726,13 @@ class FrameworkReliabilityTest {
         @Shadow
         @Mutable
         private val name: String? = null
+    }
+
+    @AsmMixin("FieldTarget")
+    class FinalShadowAliasFieldMixin {
+        @Shadow("name")
+        @Final
+        private val aliasName: String? = null
     }
 
     @AsmMixin("FinalAccessorSetterTarget")

@@ -1774,6 +1774,8 @@ annotation class Mutable
  * 最终字段标记注解。
  *
  * 标记字段为最终（为目标字段添加 `final` 修饰符）。
+ * 与 [Shadow] 一起使用时，会按 [Shadow.method] 或 `shadow_` 前缀解析出的真实目标字段名生效，
+ * 适合 ASM 侧字段名需要避开目标类成员名冲突的场景。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
