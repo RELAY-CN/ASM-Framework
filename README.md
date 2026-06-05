@@ -30,7 +30,7 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **receiver 改写能力** - `@ModifyReceiver` 可替换实例方法调用、实例字段读取与实例字段写入的 receiver，保留原参数、字段值与原操作逻辑
 - **实用的重定向能力** - `@Redirect` 可替换方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、简单数组元素读写、数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、`tableswitch` / `lookupswitch` selector、常量加载或即将抛出的异常，并支持追加目标方法参数前缀；`@RedirectAllMethods` 可把同一组重定向规则应用到目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
 - **可控的操作包裹能力** - `@WrapOperation` 可替换匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、`tableswitch` / `lookupswitch` selector、常量读取或即将抛出的异常，并通过 `Operation` 按需调用、跳过或多次执行原操作
-- **整方法包裹能力** - `@WrapMethod` 可把整个目标方法体迁移为原方法句柄，并用 handler 统一决定是否调用、改写参数或多次执行原方法
+- **整方法包裹能力** - `@WrapMethod` 可把整个目标方法体迁移为 `private synthetic` 原方法句柄，并用 handler 统一决定是否调用、改写参数或多次执行原方法；生成的 wrapper 会保留 `synchronized`、`varargs` 等 JVM 方法契约
 - **实用的条件包裹能力** - `@WrapWithCondition` 可按条件跳过普通方法调用、`invokedynamic` 调用，或在调用完成后条件保留返回值，也可条件保留字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、对象构造结果、局部变量读取或写入、类型转换、类型判断、常量加载/常量值、条件跳转、switch selector 或即将抛出的异常，适合保留原逻辑但控制副作用、调用返回值、构造表达式结果、局部状态、类型转换结果、类型判断结果、分支流向、switch 分派与异常抛出
 - **表达式改写能力** - `@ModifyExpressionValue` 可改写普通调用或 `invokedynamic` 调用返回值、字段读取值、字段写入值、数组元素读取值、数组元素待写入值、数组长度、对象构造结果、类型转换结果、类型判断结果、局部变量读取或待写入表达式值、条件跳转分支结果、`tableswitch` / `lookupswitch` selector、常量表达式值或即将抛出的异常
 - **常量替换能力** - `@ModifyConstant`、`@Redirect(CONSTANT)`、`@ModifyExpressionValue(CONSTANT)` 与 `@WrapOperation(CONSTANT)` 可基于原常量值修改常量；`@ModifyConstant` 的 `Slice` 支持调用、字段读写与常量文本边界；普通 `@AsmInject(CONSTANT, shift = Shift.REPLACE)` 可直接用 handler 返回值替换匹配常量加载

@@ -386,6 +386,47 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持 WrapMethod 访问标志契约一致")
+    fun documentationContractsKeepWrapMethodAccessFlagsAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val readme = Files.readString(Path.of("README.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val apiWrapMethodSection =
+            api
+                .substringAfter("### @WrapMethod")
+                .substringBefore("### @WrapWithCondition")
+        val guideWrapMethodSection =
+            guide
+                .substringAfter("`@WrapMethod` 用于")
+                .substringBefore("`@WrapWithCondition` 用于")
+        val wrapMethodKDocSection =
+            asmMixinKDoc
+                .substringAfter("* 用于把整个目标方法体替换为 handler 调用")
+                .substringBefore("annotation class WrapMethod")
+        val readmeWrapMethodFeature =
+            readme
+                .substringAfter("- **整方法包裹能力**")
+                .substringBefore("- **条件包裹能力**")
+
+        // Then
+        assertThat(apiWrapMethodSection)
+            .`as`("Then: API 应说明 WrapMethod wrapper 与迁移原方法的访问标志契约，便于迁移 synchronized/varargs 方法")
+            .contains("private synthetic", "static", "synchronized", "strictfp", "varargs")
+        assertThat(guideWrapMethodSection)
+            .`as`("Then: GUIDE 应告诉使用者整方法包裹不会丢失常见 JVM 方法契约")
+            .contains("private synthetic", "static", "synchronized", "strictfp", "varargs")
+        assertThat(wrapMethodKDocSection)
+            .`as`("Then: @WrapMethod KDoc 应同步 IDE 用户能看到的访问标志契约")
+            .contains("private synthetic", "static", "synchronized", "strictfp", "varargs")
+        assertThat(readmeWrapMethodFeature)
+            .`as`("Then: README 能力摘要应提示 WrapMethod 会保留常用 JVM 方法契约")
+            .contains("synchronized", "varargs")
+    }
+
+    @Test
     fun removeSynchronizedRemovesBlockMonitorInstructions() {
         AsmRegistry.register(RemoveBlockSynchronizedMixin::class.java)
 
@@ -4771,6 +4812,56 @@ class FrameworkReliabilityTest {
                 .invoke(instance, "raw", 7)
 
         assertEquals("instance:RAW8-wrapped", result)
+    }
+
+    @Test
+    @DisplayName("@WrapMethod 应保留同步与可变参数目标方法的 JVM 契约")
+    fun wrapMethodPreservesSynchronizedAndVarargsAccess() {
+        // Given
+        AsmRegistry.register(SynchronizedVarargsWrapMethodMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform(
+                "SynchronizedVarargsWrapMethodTarget",
+                synchronizedVarargsWrapMethodTargetBytes(),
+                javaClass.classLoader,
+            )
+        val classNode = readClass(transformed)
+        val wrapperMethod =
+            classNode.methods.single { it.name == "combine" && it.desc == "([Ljava/lang/String;)Ljava/lang/String;" }
+        val migratedOriginal =
+            classNode.methods.single {
+                it.name.startsWith("\$asm\$wrapMethod\$original\$combine\$") &&
+                    it.desc == "([Ljava/lang/String;)Ljava/lang/String;"
+            }
+        val clazz = loadClass("SynchronizedVarargsWrapMethodTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val reflectMethod = clazz.getMethod("combine", Array<String>::class.java)
+        val result = reflectMethod.invoke(instance, arrayOf("raw", "input") as Any)
+
+        // Then
+        assertThat(result)
+            .`as`("目标 varargs 方法应仍能通过 WrapMethod handler 调用迁移后的原方法并返回业务结果")
+            .isEqualTo("left-right:raw+input")
+        assertThat(wrapperMethod.access and Opcodes.ACC_SYNCHRONIZED)
+            .`as`("@WrapMethod 生成的公开 wrapper 应保留 synchronized 标志，避免并发语义漂移")
+            .isNotZero()
+        assertThat(wrapperMethod.access and Opcodes.ACC_VARARGS)
+            .`as`("@WrapMethod 生成的公开 wrapper 应保留 varargs 标志，避免反射调用契约漂移")
+            .isNotZero()
+        assertThat(reflectMethod.isVarArgs)
+            .`as`("反射看到的目标方法仍应是 varargs，兼容按可变参数发现方法的调用方")
+            .isTrue()
+        assertThat(java.lang.reflect.Modifier.isSynchronized(reflectMethod.modifiers))
+            .`as`("反射看到的目标方法仍应是 synchronized，兼容依赖方法修饰符的调用方")
+            .isTrue()
+        assertThat(migratedOriginal.access and Opcodes.ACC_PRIVATE)
+            .`as`("迁移后的原方法应降为 private，避免暴露额外公共 API")
+            .isNotZero()
+        assertThat(migratedOriginal.access and Opcodes.ACC_SYNTHETIC)
+            .`as`("迁移后的原方法应标记 synthetic，避免普通反射枚举误判为业务方法")
+            .isNotZero()
     }
 
     @Test
@@ -15375,6 +15466,16 @@ class FrameworkReliabilityTest {
         ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
     }
 
+    @AsmMixin("SynchronizedVarargsWrapMethodTarget")
+    object SynchronizedVarargsWrapMethodMixin {
+        @WrapMethod(method = "combine([Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun combine(
+            values: Array<String>,
+            operation: Operation<String>,
+        ): String = "${operation.call(arrayOf("left", "right") as Any)}:${values.joinToString("+")}"
+    }
+
     @AsmMixin("WrapMethodAssignabilityTarget")
     object WrapMethodAssignabilityTargetMixin {
         @WrapMethod(method = "value(Ljava/lang/String;)Ljava/lang/String;")
@@ -20704,6 +20805,35 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun synchronizedVarargsWrapMethodTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SynchronizedVarargsWrapMethodTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_SYNCHRONIZED or Opcodes.ACC_VARARGS,
+            "combine",
+            "([Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitLdcInsn("-")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "java/lang/String",
+                "join",
+                "(Ljava/lang/CharSequence;[Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
             visitEnd()
         }
         cw.visitEnd()

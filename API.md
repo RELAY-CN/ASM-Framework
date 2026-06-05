@@ -596,7 +596,9 @@ handler 参数必须先按目标方法声明顺序接收原方法参数；当原
 `method` 为空时，框架会先按 handler 名称与精确描述符推断目标方法；若 handler 使用父类型参数或 `Any` / `Object`
 泛型引用返回导致精确描述符不一致，会继续按参数与返回类型兼容规则匹配唯一同名目标方法。存在多个兼容重载时需要显式填写 `method`。
 
-转换时，框架会把原方法体迁移到私有 synthetic 方法，再用原方法名与原描述符生成 wrapper。`@WrapMethod`
+转换时，框架会把原方法体迁移到 `private synthetic` 方法，再用原方法名与原描述符生成 wrapper。
+wrapper 会保留原目标方法的 `static`、`final`、`synchronized`、`strictfp` 与 `varargs` 等 JVM
+方法契约；迁移后的原方法仅作为 `Operation` 调用目标，不额外暴露公共 API。`@WrapMethod`
 不支持构造器 `<init>`、类初始化器 `<clinit>`、abstract 方法或 native 方法。
 
 `@WrapMethod` 会按被包裹的目标方法数量计数；单个精确方法签名通常命中 1 次。显式设置 `require` /

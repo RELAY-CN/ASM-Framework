@@ -807,7 +807,9 @@ annotation class WrapOperation(
  *
  * 用于把整个目标方法体替换为 handler 调用（语义参考 Mixin Extras 的 `@WrapMethod`）。
  * handler 会接收目标方法参数与 [Operation]，可选择调用原方法、跳过原方法或多次调用原方法。
- * 转换时，原方法体会被迁移到私有 synthetic 方法，原方法名与原描述符会保留给新的 wrapper。
+ * 转换时，原方法体会被迁移到 private synthetic 方法，原方法名与原描述符会保留给新的 wrapper。
+ * wrapper 会保留原目标方法的 `static`、`final`、`synchronized`、`strictfp` 与 `varargs` 等 JVM 方法契约；
+ * 迁移后的原方法仅作为 [Operation] 调用目标，不额外暴露公共 API。
  *
  * ASM 方法要求：
  *
