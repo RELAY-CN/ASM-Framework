@@ -5471,6 +5471,127 @@ class FrameworkReliabilityTest {
     }
 
     @Nested
+    @DisplayName("@WrapWithCondition CAST 类型转换场景")
+    inner class WrapWithConditionCastScenarios {
+        @Test
+        @DisplayName("handler 放行时应保留 CHECKCAST 后的引用")
+        fun wrapWithConditionAtCastKeepsCastedValueWhenTrue() {
+            // Given
+            AsmRegistry.register(WrapConditionCastAllowMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("CastInstructionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("cast", Any::class.java)
+
+            // Then
+            assertThat(method.invoke(instance, "raw"))
+                .`as`("Then: handler 返回 true 时 CAST 条件包裹应恢复原始转换后的 String 引用")
+                .isEqualTo("raw")
+        }
+
+        @Test
+        @DisplayName("handler 拒绝时应把转换表达式替换为 null")
+        fun wrapWithConditionAtCastUsesNullWhenHandlerReturnsFalse() {
+            // Given
+            AsmRegistry.register(WrapConditionCastDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("CastInstructionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("cast", Any::class.java)
+
+            // Then
+            assertThat(method.invoke(instance, "raw"))
+                .`as`("Then: CAST 是引用表达式，handler 返回 false 时应留下默认值 null")
+                .isNull()
+        }
+
+        @Test
+        @DisplayName("省略 target 时应只包裹 handler 兼容的 CHECKCAST")
+        fun wrapWithConditionAtCastWithoutTargetSkipsIncompatibleCheckcasts() {
+            // Given
+            AsmRegistry.register(WrapConditionAnyCastDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("MultiCastInstructionTarget", multiCastInstructionTargetBytes(), javaClass.classLoader)
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "cast" && it.desc == "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionAnyCastDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("MultiCastInstructionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("cast", Any::class.java, Any::class.java)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: handler 首参为 String 时不应包裹 StringBuilder 的 CHECKCAST 候选")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance, StringBuilder("ignored"), "raw"))
+                .`as`("Then: 唯一兼容的 String CAST 被拒绝后，方法应返回 null")
+                .isNull()
+        }
+
+        @Test
+        @DisplayName("Slice 应只包裹边界内的类型转换")
+        fun wrapWithConditionAtCastRespectsSliceBoundary() {
+            // Given
+            AsmRegistry.register(WrapConditionCastSliceDenyMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "SliceCastInstructionTarget",
+                    sliceCastInstructionTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "castSelected" && it.desc == "(Ljava/lang/Object;)Ljava/lang/String;" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionCastSliceDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("SliceCastInstructionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("castSelected", Any::class.java)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: Slice 边界内只有第二个 String CHECKCAST，应只插入一次条件包裹")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance, "raw"))
+                .`as`("Then: 边界内 CAST 被拒绝后应返回 null，边界外 POP 掉的 CAST 不应被包裹")
+                .isNull()
+        }
+
+        @Test
+        @DisplayName("handler 首参类型不兼容时应暴露签名错误")
+        fun mismatchedWrapWithConditionAtCastFailsWithClearMessage() {
+            // Given
+            AsmRegistry.register(MismatchedWrapConditionCastMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("CastInstructionTarget", castInstructionTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: CAST 条件包裹必须接收转换后的引用类型，不能用不兼容的基本类型误接")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@WrapWithCondition CAST handler shouldKeep parameter #0 mismatch: " +
+                        "expected Ljava/lang/String;, actual I",
+                )
+        }
+    }
+
+    @Nested
     @DisplayName("@WrapWithCondition INSTANCEOF 类型判断场景")
     inner class WrapWithConditionInstanceofScenarios {
         @Test
@@ -12788,6 +12909,82 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 1
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object WrapConditionCastAllowMixin {
+        @WrapWithCondition(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            original: String,
+            input: Any,
+        ): Boolean = original === input
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object WrapConditionCastDenyMixin {
+        @WrapWithCondition(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: String): Boolean {
+            original.length
+            return false
+        }
+    }
+
+    @AsmMixin("MultiCastInstructionTarget")
+    object WrapConditionAnyCastDenyMixin {
+        @WrapWithCondition(
+            method = "cast(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: String): Boolean {
+            original.length
+            return false
+        }
+    }
+
+    @AsmMixin("SliceCastInstructionTarget")
+    object WrapConditionCastSliceDenyMixin {
+        @WrapWithCondition(
+            method = "castSelected(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: String): Boolean {
+            original.length
+            return false
+        }
+    }
+
+    @AsmMixin("CastInstructionTarget")
+    object MismatchedWrapConditionCastMixin {
+        @WrapWithCondition(
+            method = "cast(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: Int): Boolean = original > 0
     }
 
     @AsmMixin("CastInstructionTarget")
