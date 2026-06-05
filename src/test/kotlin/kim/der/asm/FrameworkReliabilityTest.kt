@@ -404,6 +404,37 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应把表达式注入不处理的参数组与 receiver 场景引导到专用注解")
+    fun documentationContractsRouteExpressionGapsToDedicatedAnnotations() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val apiModifyExpressionValueSection =
+            api
+                .substringAfter("### @ModifyExpressionValue")
+                .substringBefore("### @ModifyVariable")
+        val guideInstructionPointSummary =
+            guide
+                .substringAfter("指令点注入默认不会替换原始指令")
+                .substringBefore("\n\n原调用必须执行但返回表达式")
+
+        // Then
+        assertThat(apiModifyExpressionValueSection)
+            .`as`("Then: API 应说明表达式改写不接收 receiver，receiver 改写必须迁移到 ModifyReceiver")
+            .contains(
+                "字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler",
+                "若需要改写 receiver 应使用 `@ModifyReceiver`",
+            )
+        assertThat(guideInstructionPointSummary)
+            .`as`("Then: GUIDE 的普通指令点总结应把参数组和 receiver 场景指向专用注解")
+            .contains(
+                "如果需要一次改写多个调用参数，应使用 `@ModifyArgs`",
+                "如果需要替换实例方法调用或实例字段访问 receiver，应使用 `@ModifyReceiver`",
+                "如果需要替换方法调用本身，应使用 `@Redirect` 或 `@WrapOperation`",
+            )
+    }
+
+    @Test
     @DisplayName("公开文档应保持 Copy 访问标志契约一致")
     fun documentationContractsKeepCopyAccessFlagsAligned() {
         // Given
