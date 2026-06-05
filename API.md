@@ -965,6 +965,11 @@ fun create(value: String): Any = throw UnsupportedOperationException()
 
 将 Mixin 方法复制到目标类中作为新方法。
 
+普通 `@Copy` 会把复制后的方法作为 `public` 方法写入目标类；若源 ASM 方法是 `@JvmStatic` / Java static、
+`synchronized`、`strictfp` 或 `varargs` 方法，框架会保留对应 `static`、`synchronized`、`strictfp` 与 `varargs`
+JVM 标志，避免调用点和反射契约漂移。与 `@Unique` 配合并发生同签名冲突时，复制方法会改名为唯一的
+`private synthetic` 方法，但仍保留这些 JVM 调用契约。
+
 **参数：**
 
 - `method: String = ""` - 目标方法签名

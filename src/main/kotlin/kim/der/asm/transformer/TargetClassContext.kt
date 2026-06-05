@@ -2896,17 +2896,26 @@ class TargetClassContext(
         unique: Boolean,
     ): Int {
         if (!unique) {
-            // 普通 @Copy 方法仍对目标类公开，但必须保留 static 调用契约，避免已改写的 INVOKESTATIC 调用失配。
-            var access = Opcodes.ACC_PUBLIC
-            if (Modifier.isStatic(method.modifiers)) {
-                access = access or Opcodes.ACC_STATIC
-            }
-            return access
+            // 普通 @Copy 方法仍对目标类公开，但必须保留 static/varargs 等 JVM 调用契约，避免调用点或反射语义漂移。
+            return Opcodes.ACC_PUBLIC or copyMethodJvmContractAccess(method)
         }
 
-        var access = Opcodes.ACC_PRIVATE or Opcodes.ACC_SYNTHETIC
+        return Opcodes.ACC_PRIVATE or Opcodes.ACC_SYNTHETIC or copyMethodJvmContractAccess(method)
+    }
+
+    private fun copyMethodJvmContractAccess(method: Method): Int {
+        var access = 0
         if (Modifier.isStatic(method.modifiers)) {
             access = access or Opcodes.ACC_STATIC
+        }
+        if (Modifier.isSynchronized(method.modifiers)) {
+            access = access or Opcodes.ACC_SYNCHRONIZED
+        }
+        if (Modifier.isStrict(method.modifiers)) {
+            access = access or Opcodes.ACC_STRICT
+        }
+        if (method.isVarArgs) {
+            access = access or Opcodes.ACC_VARARGS
         }
         return access
     }

@@ -35,7 +35,9 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **表达式改写能力** - `@ModifyExpressionValue` 可改写普通调用或 `invokedynamic` 调用返回值、字段读取值、字段写入值、数组元素读取值、数组元素待写入值、数组长度、对象构造结果、类型转换结果、类型判断结果、局部变量读取或待写入表达式值、条件跳转分支结果、`tableswitch` / `lookupswitch` selector、常量表达式值或即将抛出的异常
 - **常量替换能力** - `@ModifyConstant`、`@Redirect(CONSTANT)`、`@ModifyExpressionValue(CONSTANT)` 与 `@WrapOperation(CONSTANT)` 可基于原常量值修改常量；`@ModifyConstant` 的 `Slice` 支持调用、字段读写与常量文本边界；普通 `@AsmInject(CONSTANT, shift = Shift.REPLACE)` 可直接用 handler 返回值替换匹配常量加载
 - **访问器与调用器能力** - `@Accessor` 可生成字段 getter/setter；final 字段 setter 需要配合 `@Mutable`，接口字段只支持 getter；`@Invoker` 可生成私有方法桥接和构造器工厂方法
-- **唯一辅助方法能力** - `@Unique` 可配合 `@Copy` 在目标类已有同签名方法时自动复制为私有 synthetic 方法，并改写同一 Mixin 内 `@Overwrite`、`@Copy` 与 inline `@AsmInject` 方法体中的调用点
+- **唯一辅助方法能力** - `@Copy` 会复制 helper 并保留 `static`、`synchronized` 与 `varargs` 等 JVM 契约；
+  `@Unique` 可配合 `@Copy` 在目标类已有同签名方法时自动复制为私有 synthetic 方法，
+  并改写同一 Mixin 内 `@Overwrite`、`@Copy` 与 inline `@AsmInject` 方法体中的调用点
 - **影子引用能力** - `@Shadow` 可校验并引用目标字段/方法，支持声明名、`shadow_` 前缀和显式目标名
 - **高性能** - 基于 ASM 9.9 的高效字节码转换，最小化运行时开销
 - **类型安全** - 完善的 Kotlin 类型系统支持，编译时类型检查

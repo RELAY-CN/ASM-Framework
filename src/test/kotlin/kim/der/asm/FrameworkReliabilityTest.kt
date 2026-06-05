@@ -345,6 +345,47 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持 Copy 访问标志契约一致")
+    fun documentationContractsKeepCopyAccessFlagsAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val readme = Files.readString(Path.of("README.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val apiCopySection =
+            api
+                .substringAfter("### @Copy")
+                .substringBefore("### @RemoveMethod")
+        val guideCopySection =
+            guide
+                .substringAfter("`@Copy` 可把")
+                .substringBefore("### 场景 6")
+        val copyKDocSection =
+            asmMixinKDoc
+                .substringAfter("* 复制方法注解。")
+                .substringBefore("@Target(AnnotationTarget.FUNCTION)")
+        val readmeUniqueFeature =
+            readme
+                .substringAfter("- **唯一辅助方法能力**")
+                .substringBefore("- **影子引用能力**")
+
+        // Then
+        assertThat(apiCopySection)
+            .`as`("Then: API 应说明普通 Copy 和 Unique Copy 的访问级别，以及保留的 JVM 调用契约")
+            .contains("public", "private synthetic", "static", "synchronized", "varargs")
+        assertThat(guideCopySection)
+            .`as`("Then: GUIDE 应把 Copy helper 的访问标志语义讲给迁移用户")
+            .contains("public", "private synthetic", "static", "synchronized", "varargs")
+        assertThat(copyKDocSection)
+            .`as`("Then: @Copy KDoc 应同步 IDE 用户能看到的访问标志契约")
+            .contains("public", "static", "synchronized", "varargs")
+        assertThat(readmeUniqueFeature)
+            .`as`("Then: README 能力摘要应提示 Copy 会保留常用 JVM helper 契约")
+            .contains("static", "synchronized", "varargs")
+    }
+
+    @Test
     fun removeSynchronizedRemovesBlockMonitorInstructions() {
         AsmRegistry.register(RemoveBlockSynchronizedMixin::class.java)
 
@@ -8724,6 +8765,32 @@ class FrameworkReliabilityTest {
         assertThat(result)
             .`as`("目标方法应通过复制后的静态 helper 返回业务值")
             .isEqualTo("copied")
+    }
+
+    @Test
+    @DisplayName("@Copy 应保留同步与可变参数辅助方法的 JVM 契约")
+    fun copyHelperPreservesSynchronizedAndVarargsAccess() {
+        // Given
+        AsmRegistry.register(SynchronizedVarargsCopyMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val copiedMethod = classNode.methods.single { it.name == "copied" && it.desc == "([Ljava/lang/String;)Ljava/lang/String;" }
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("目标方法应能继续调用复制后的 vararg helper 组合业务值")
+            .isEqualTo("left-right")
+        assertThat(copiedMethod.access and Opcodes.ACC_SYNCHRONIZED)
+            .`as`("@Copy 复制 @Synchronized helper 时应保留 synchronized 标志，避免反射和并发语义漂移")
+            .isNotZero()
+        assertThat(copiedMethod.access and Opcodes.ACC_VARARGS)
+            .`as`("@Copy 复制 vararg helper 时应保留 varargs 标志，避免公开辅助方法的反射契约漂移")
+            .isNotZero()
     }
 
     @Test
@@ -17950,6 +18017,18 @@ class FrameworkReliabilityTest {
         @Copy("copied()Ljava/lang/String;")
         @JvmStatic
         fun copied(): String = "copied"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object SynchronizedVarargsCopyMixin {
+        @Overwrite("value()Ljava/lang/String;")
+        @JvmStatic
+        fun value(): String = copied("left", "right")
+
+        @Copy("copied([Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        @Synchronized
+        fun copied(vararg parts: String): String = parts.joinToString("-")
     }
 
     @AsmMixin("AccessorConflictTarget")

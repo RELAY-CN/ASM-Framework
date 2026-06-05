@@ -307,6 +307,8 @@ annotation class Overwrite(
  *
  * 用于将 ASM 方法复制到目标类中作为一个新方法。
  * 与 [Overwrite] 不同，[Copy] 不会覆盖同名同签名的方法；当目标方法已存在时会跳过并输出 warning。
+ * 普通复制方法会作为 `public` 方法写入目标类，同时保留 ASM 方法的 `static`、`synchronized`、`strictfp`
+ * 与 `varargs` 等 JVM 调用契约。
  *
  * @param method 目标方法签名；为空时使用 ASM 方法名与描述符
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
@@ -338,6 +340,8 @@ annotation class Copy(
  * 用于标记 ASM 成员在复制到目标类时避免与目标类已有成员冲突（语义参考 Mixin 的 `@Unique`）。
  * 当前实现支持与 [Copy] 配合使用：当目标类已存在同名同描述符方法时，会把被复制方法重命名为私有 synthetic 方法，
  * 并同步改写同一个 ASM 类中 [Overwrite]、[Copy] 与 inline [AsmInject] 方法体内对该 [Copy] 方法的调用。
+ * `@Unique @Copy` 会把访问级别调整为 `private synthetic`，但仍保留 `static`、`synchronized` 与 `varargs`
+ * 这类 JVM 调用契约。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
