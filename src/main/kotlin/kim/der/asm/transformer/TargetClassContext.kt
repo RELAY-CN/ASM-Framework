@@ -2896,7 +2896,12 @@ class TargetClassContext(
         unique: Boolean,
     ): Int {
         if (!unique) {
-            return Opcodes.ACC_PUBLIC
+            // 普通 @Copy 方法仍对目标类公开，但必须保留 static 调用契约，避免已改写的 INVOKESTATIC 调用失配。
+            var access = Opcodes.ACC_PUBLIC
+            if (Modifier.isStatic(method.modifiers)) {
+                access = access or Opcodes.ACC_STATIC
+            }
+            return access
         }
 
         var access = Opcodes.ACC_PRIVATE or Opcodes.ACC_SYNTHETIC

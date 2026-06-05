@@ -8704,6 +8704,29 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@Copy 应保留 @JvmStatic 辅助方法的静态访问标志")
+    fun copyJvmStaticHelperPreservesStaticAccessAndRewritesCall() {
+        // Given
+        AsmRegistry.register(JvmStaticCopyMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val copiedMethod = classNode.methods.single { it.name == "copied" && it.desc == "()Ljava/lang/String;" }
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(copiedMethod.access and Opcodes.ACC_STATIC)
+            .`as`("@Copy 复制 @JvmStatic helper 时应保留 static 标志，否则改写后的 INVOKESTATIC 调用会在运行期失败")
+            .isNotZero()
+        assertThat(result)
+            .`as`("目标方法应通过复制后的静态 helper 返回业务值")
+            .isEqualTo("copied")
+    }
+
+    @Test
     fun accessorMethodConflictFailsDuringTransform() {
         AsmRegistry.register(ConflictingAccessorMixin::class.java)
 
@@ -17916,6 +17939,17 @@ class FrameworkReliabilityTest {
         fun copied(): String = helper()
 
         fun helper(): String = "helper"
+    }
+
+    @AsmMixin("ReturnTarget")
+    object JvmStaticCopyMixin {
+        @Overwrite("value()Ljava/lang/String;")
+        @JvmStatic
+        fun value(): String = copied()
+
+        @Copy("copied()Ljava/lang/String;")
+        @JvmStatic
+        fun copied(): String = "copied"
     }
 
     @AsmMixin("AccessorConflictTarget")
