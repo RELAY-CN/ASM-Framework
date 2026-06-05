@@ -7,6 +7,7 @@ package kim.der.asm.injector.impl
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Operation
+import kim.der.asm.api.annotation.Shift
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
@@ -3856,12 +3857,18 @@ class WrapOperationInjector(
     }
 
     /**
-     * 判断切片边界是否声明了可匹配目标。
+     * 判断切片边界是否显式声明。
      *
      * @param at 切片边界注解配置
-     * @return `target` 非空时返回 `true`
+     * @return 不是默认 [At] 配置时返回 `true`
      */
-    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+    private fun hasSliceBoundary(at: At): Boolean =
+        // 默认 At() 才表示未声明边界；显式 INVOKE 空 target 必须进入解析并作为配置错误暴露。
+        at.value != InjectionPoint.HEAD ||
+            at.target.isNotEmpty() ||
+            at.shift != Shift.BEFORE ||
+            at.by != 0 ||
+            at.args.isNotEmpty()
 
     /**
      * 构造一个位于方法末尾的空切片范围。

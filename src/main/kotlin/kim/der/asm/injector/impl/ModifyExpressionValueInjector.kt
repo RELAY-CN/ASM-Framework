@@ -6,6 +6,7 @@ package kim.der.asm.injector.impl
 
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Shift
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
@@ -35,7 +36,7 @@ import java.lang.reflect.Modifier
  * ModifyExpressionValue 注入器。
  *
  * 该注入器会匹配目标方法内的指定普通方法调用、`invokedynamic` 调用、字段读取、字段写入值、数组元素读取、数组元素写入值、数组长度、对象构造、类型转换、
- * `INSTANCEOF` 判断、局部变量读取值、局部变量写入值、条件跳转、`tableswitch` / `lookupswitch` selector 或 `ATHROW` 抛异常指令，
+ * `INSTANCEOF` 判断、局部变量读取值、局部变量写入值、条件跳转、`tableswitch` / `lookupswitch` selector、常量表达式值或 `ATHROW` 抛异常指令，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
  * 对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object` 接收。
@@ -45,7 +46,7 @@ import java.lang.reflect.Modifier
  * 指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
- * [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
+ * [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
  * 可匹配字段读取值，省略字段目标时会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`；
  * [InjectionPoint.FIELD_ASSIGN] 可匹配 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，省略字段目标时会按 handler 首参与返回类型筛选兼容字段写入；
  * [InjectionPoint.FIELD] 也可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值；
@@ -64,12 +65,13 @@ import java.lang.reflect.Modifier
  * handler 返回的新值交给原 `xSTORE` 继续写入槽位，
  * [InjectionPoint.JUMP] 匹配条件跳转的原始分支结果，handler 接收 `Boolean` 并返回新的分支结果；`GOTO` 与 `JSR` 不支持表达式改写，
  * [InjectionPoint.SWITCH] 匹配 `tableswitch` 或 `lookupswitch` 消费前的 `Int` selector，handler 返回的新 selector 会继续交给原 switch 指令分派，
+ * [InjectionPoint.CONSTANT] 匹配常量加载后的表达式值，省略常量目标时会按 handler 首参与返回类型筛选兼容常量，
  * [InjectionPoint.THROW] 匹配 `ATHROW` 前即将抛出的 `Throwable`，handler 可返回 `Throwable` 或其子类；
  * 指定类型目标时，只会匹配前一条真实指令为同类型 `<init>` 的直接构造异常
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组元素读取、数组元素写入值、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围，
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围，
  * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -1825,12 +1827,18 @@ class ModifyExpressionValueInjector(
     }
 
     /**
-     * 判断切片边界是否声明了可匹配目标。
+     * 判断切片边界是否显式声明。
      *
      * @param at 切片边界注解配置
-     * @return `target` 非空时返回 `true`
+     * @return 不是默认 [At] 配置时返回 `true`
      */
-    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
+    private fun hasSliceBoundary(at: At): Boolean =
+        // 默认 At() 才表示未声明边界；显式 INVOKE 空 target 必须进入解析并作为配置错误暴露。
+        at.value != InjectionPoint.HEAD ||
+            at.target.isNotEmpty() ||
+            at.shift != Shift.BEFORE ||
+            at.by != 0 ||
+            at.args.isNotEmpty()
 
     /**
      * 构造一个位于方法末尾的空切片范围。

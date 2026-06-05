@@ -694,7 +694,7 @@ handler 先接收 `Int` 长度值，不接收数组引用，后续可继续接�
 
 ### @ModifyExpressionValue
 
-修改目标方法内匹配表达式产生的值。当前实现支持修改普通方法调用或 `invokedynamic` 调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、`PUTFIELD` / `PUTSTATIC` 字段待写入值、数组元素读取值、`xASTORE` 数组元素待写入值、数组长度值、`NEW` 对象构造完成后的实例、`CHECKCAST` 类型转换完成后的对象值、`INSTANCEOF` 判断后的 boolean 结果、局部变量读取表达式值、局部变量待写入表达式值、条件跳转的分支结果、`tableswitch` / `lookupswitch` 的 `Int` selector，以及 `ATHROW` 前即将抛出的异常对象，适合保留原操作逻辑、只调整表达式结果的场景。
+修改目标方法内匹配表达式产生的值。当前实现支持修改普通方法调用或 `invokedynamic` 调用完成后的非 `void` 返回值、`GETFIELD` / `GETSTATIC` 字段读取值、`PUTFIELD` / `PUTSTATIC` 字段待写入值、数组元素读取值、`xASTORE` 数组元素待写入值、数组长度值、`NEW` 对象构造完成后的实例、`CHECKCAST` 类型转换完成后的对象值、`INSTANCEOF` 判断后的 boolean 结果、局部变量读取表达式值、局部变量待写入表达式值、条件跳转的分支结果、`tableswitch` / `lookupswitch` 的 `Int` selector、常量表达式值，以及 `ATHROW` 前即将抛出的异常对象，适合保留原操作逻辑、只调整表达式结果的场景。
 
 **参数：**
 
@@ -851,7 +851,7 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、重定向点和签名兼容规则推断唯一同名目标方法
 - `target: String = ""` - 要重定向的方法调用、动态调用、构造器调用、字段访问、构造类型、类型签名、跳转操作码、常量文本或直接构造异常类型；`LOAD` / `STORE` / `SWITCH` 不使用该参数
-- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=set"]` / `["array=length"]` 可匹配数组元素访问或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，`LOAD` / `STORE` 时按局部变量读取或待写入值语义匹配且不使用 `At.target`，可用 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 过滤槽位或 LocalVariableTable 变量名，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配，`JUMP` 时按条件跳转语义匹配，`SWITCH` 时按 switch selector 语义匹配且不使用 `At.target`，`CONSTANT` 时按常量加载语义匹配，`THROW` 时按抛异常点语义匹配
+- `at: At = At()` - 注入位置；`at.value = InjectionPoint.INVOKE` 时匹配普通方法调用、构造器调用或 `invokedynamic` 调用，省略 `at.target` 时按 handler 签名筛选兼容调用点；`FIELD` 时按字段读取语义匹配，配合 `at.args = ["array=get"]` / `["array=length"]` 可匹配数组元素读取或数组长度读取，`FIELD_ASSIGN` 时按字段写入语义匹配，配合 `at.args = ["array=set"]` 可匹配数组元素写入，`LOAD` / `STORE` 时按局部变量读取或待写入值语义匹配且不使用 `At.target`，可用 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 过滤槽位或 LocalVariableTable 变量名，`NEW` 时按构造类型匹配，`CAST` 时按类型转换语义匹配，`INSTANCEOF` 时按类型判断语义匹配，`JUMP` 时按条件跳转语义匹配，`SWITCH` 时按 switch selector 语义匹配且不使用 `At.target`，`CONSTANT` 时按常量加载语义匹配，`THROW` 时按抛异常点语义匹配
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向中生效
 - `slice: Slice = Slice()` - 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际重定向数必须不少于该值

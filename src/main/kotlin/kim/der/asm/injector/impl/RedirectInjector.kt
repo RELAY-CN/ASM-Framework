@@ -41,8 +41,9 @@ import java.lang.reflect.Modifier
  * 方法调用和 `invokedynamic` 调用目标使用 `owner.name(desc)` 或 `name(desc)` 格式；`invokedynamic`
  * 会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。字段读取目标使用
  * `owner.field:desc`、`field:desc` 或 `field` 格式。字段写入目标格式与字段读取相同，
- * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素访问与数组长度使用 [InjectionPoint.FIELD]
- * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get`、`array=set` 或 `array=length` 区分读取、写入与长度读取。
+ * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素读取和数组长度使用 [InjectionPoint.FIELD]
+ * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get` 或 `array=length` 区分；数组元素写入使用
+ * [InjectionPoint.FIELD_ASSIGN] 与 `array=set`。
  * 构造器重定向可通过 [InjectionPoint.INVOKE] 与 `<init>` 目标匹配，也可通过 [InjectionPoint.NEW]
  * 与构造类型 internal name 或 binary name 匹配。类型转换使用 [InjectionPoint.CAST] 与类型 internal name 或 binary name 匹配；
  * 未指定类型目标时，会按 handler 返回类型筛选兼容的 `CHECKCAST` 候选。类型判断使用 [InjectionPoint.INSTANCEOF]
@@ -479,19 +480,34 @@ class RedirectInjector(
     /**
      * 解析数组访问重定向模式。
      *
-     * `args` 中声明 `array=get`、`array=set` 或 `array=length` 时进入数组读取、写入或长度重定向。
+     * `array=get` / `array=length` 必须配合字段读取语义，`array=set` 必须配合字段写入语义。
+     * 这里尽早拒绝旧的 `FIELD + array=set` 写法，避免数组写入被误描述成字段读取。
      *
      * @return 数组访问模式；未声明数组模式时返回 `null`
      * @throws IllegalArgumentException 声明了不支持的数组访问模式时抛出
      */
     private fun arrayAccessMode(): ArrayAccessMode? {
         val arrayArg = args.firstOrNull { it.trim().startsWith("array=") } ?: return null
-        return when (arrayArg.substringAfter('=').trim().lowercase()) {
-            "get" -> ArrayAccessMode.GET
-            "set" -> ArrayAccessMode.SET
-            "length" -> ArrayAccessMode.LENGTH
-            else -> throw IllegalArgumentException("Unsupported Redirect array access mode: $arrayArg")
+        val mode =
+            when (arrayArg.substringAfter('=').trim().lowercase()) {
+                "get" -> ArrayAccessMode.GET
+                "set" -> ArrayAccessMode.SET
+                "length" -> ArrayAccessMode.LENGTH
+                else -> throw IllegalArgumentException("Unsupported Redirect array access mode: $arrayArg")
+            }
+
+        when (mode) {
+            ArrayAccessMode.SET -> require(injectionPoint == InjectionPoint.FIELD_ASSIGN) {
+                "@Redirect array=set requires FIELD_ASSIGN injection point"
+            }
+            ArrayAccessMode.GET,
+            ArrayAccessMode.LENGTH,
+            -> require(injectionPoint == InjectionPoint.FIELD) {
+                "@Redirect array=${mode.name.lowercase()} requires FIELD injection point"
+            }
         }
+
+        return mode
     }
 
     /**

@@ -244,8 +244,9 @@ enum class InjectionPoint {
  *   [Redirect] 的 THROW 接收即将抛出的 [Throwable] 并返回替换后的 [Throwable]，原 `ATHROW` 仍会继续抛出；
  *   [WrapWithCondition] 的 THROW 接收即将抛出的 [Throwable]，handler 返回 `true` 保留原抛出，返回 `false` 跳过原抛出。
  * - 除普通 CONSTANT 外，REPLACE 对指令点注入当前按 BEFORE 处理，不删除原始指令。
- * - [Redirect] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
- *   把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取；
+ * - [Redirect] 可通过 [InjectionPoint.FIELD] 与 `array=get` / `array=length`
+ *   把数组字段目标解释为数组元素读取或数组长度读取，通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`
+ *   把数组字段目标解释为数组元素写入；
  *   也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 与 `index=N`、`var=N`
  *   或 `name=localName` 重定向指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值或待写入值。
  * - [WrapOperation] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，

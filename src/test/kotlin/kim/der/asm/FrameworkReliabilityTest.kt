@@ -157,10 +157,24 @@ class FrameworkReliabilityTest {
         val guide = Files.readString(Path.of("GUIDE.md"))
         val asmMixinKDoc =
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val asmInjectKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
         val redirectArraySection =
             api
                 .substringAfter("`@Redirect` 可在")
                 .substringBefore("`@WrapOperation`")
+        val redirectParameterSection =
+            api
+                .substringAfter("### @Redirect")
+                .substringBefore("### @RedirectAllMethods")
+        val redirectKDocSection =
+            asmMixinKDoc
+                .substringAfter("* 重定向方法调用、")
+                .substringBefore("annotation class Redirect")
+        val atRedirectArraySection =
+            asmInjectKDoc
+                .substringAfter("* - [Redirect] 可通过")
+                .substringBefore("* - [WrapOperation]")
         val wrapOperationSupportIntro =
             asmMixinKDoc
                 .substringAfter("* 包裹原始操作注解。")
@@ -177,6 +191,28 @@ class FrameworkReliabilityTest {
             .`as`("Then: @Redirect 数组写入必须绑定 FIELD_ASSIGN，避免把 array=set 误导为 FIELD 定位")
             .contains("`FIELD_ASSIGN` 目标上使用 `args = [\"array=set\"]`")
             .doesNotContain("`FIELD` 目标上使用 `args = [\"array=get\"]`、`args = [\"array=set\"]`")
+        assertThat(redirectParameterSection)
+            .`as`("Then: @Redirect 参数说明也必须区分 FIELD 数组读取/长度与 FIELD_ASSIGN 数组写入")
+            .contains(
+                "`FIELD` 时按字段读取语义匹配，配合 `at.args = [\"array=get\"]` / `[\"array=length\"]` 可匹配数组元素读取或数组长度读取",
+                "`FIELD_ASSIGN` 时按字段写入语义匹配，配合 `at.args = [\"array=set\"]` 可匹配数组元素写入",
+            )
+            .doesNotContain("`FIELD` 时按字段读取语义匹配，配合 `at.args = [\"array=get\"]` / `[\"array=set\"]`")
+        assertThat(redirectKDocSection)
+            .`as`("Then: @Redirect KDoc 应避免把 array=set 描述成 FIELD 数组定位")
+            .contains(
+                "数组元素读取与数组长度重定向通过 [InjectionPoint.FIELD] 与",
+                "`array=get` / `array=length` 指定",
+                "数组元素写入重定向通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`",
+            )
+            .doesNotContain("`array=get`、`array=set` 或 `array=length` 区分读取、写入与长度读取")
+        assertThat(atRedirectArraySection)
+            .`as`("Then: At KDoc 的 Redirect 数组 args 说明应保持同一归属")
+            .contains(
+                "[InjectionPoint.FIELD] 与 `array=get` / `array=length`",
+                "[InjectionPoint.FIELD_ASSIGN] 与 `array=set`",
+            )
+            .doesNotContain("把 [InjectionPoint.FIELD] 目标解释为数组元素读取、写入或数组长度读取")
         assertThat(wrapOperationSupportIntro)
             .`as`("Then: @WrapOperation KDoc 的支持范围首段应覆盖当前全部可包裹表达式")
             .contains(
@@ -264,6 +300,47 @@ class FrameworkReliabilityTest {
         assertThat(atKDocSection)
             .`as`("Then: 通用 At KDoc 只说明显式 target 格式，不应覆盖 ModifyReceiver 的省略推断例外")
             .contains("FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。")
+    }
+
+    @Test
+    @DisplayName("公开文档应保持 ModifyExpressionValue 常量表达式契约一致")
+    fun documentationContractsKeepModifyExpressionValueConstantSupportAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val injectorKDoc =
+            Files.readString(
+                Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "impl", "ModifyExpressionValueInjector.kt"),
+            )
+        val apiModifyExpressionValueIntro =
+            api
+                .substringAfter("### @ModifyExpressionValue")
+                .substringBefore("**参数：**")
+        val injectorIntro =
+            injectorKDoc
+                .substringAfter("* ModifyExpressionValue 注入器。")
+                .substringBefore("* @param at")
+        val injectorAtParameter =
+            injectorKDoc
+                .substringAfter("* @param at 表达式定位；")
+                .substringBefore("* @param ordinal")
+        val injectorSliceParameter =
+            injectorKDoc
+                .substringAfter("* @param slice 切片范围；")
+                .substringBefore("* @author Dr")
+
+        // Then
+        assertThat(apiModifyExpressionValueIntro)
+            .`as`("Then: API 首段应列出 CONSTANT 产生的常量表达式值，避免公开能力与实现支持脱节")
+            .contains("常量表达式值")
+        assertThat(injectorIntro)
+            .`as`("Then: 注入器 KDoc 总述应把常量加载纳入表达式改写范围")
+            .contains("常量表达式值")
+        assertThat(injectorAtParameter)
+            .`as`("Then: 注入器 at 参数 KDoc 应显式列出 CONSTANT 定位点")
+            .contains("[InjectionPoint.CONSTANT]")
+        assertThat(injectorSliceParameter)
+            .`as`("Then: 注入器 slice 参数 KDoc 应说明 CONSTANT 也支持 INVOKE 边界切片")
+            .contains("[InjectionPoint.CONSTANT]")
     }
 
     @Test
@@ -2922,6 +2999,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ModifyExpressionValue 显式 INVOKE 空 Slice 边界应快速失败")
+    fun modifyExpressionValueEmptyInvokeSliceBoundaryFailsFast() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueEmptyInvokeSliceBoundaryMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("SliceExpressionValueTarget", sliceExpressionValueTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 显式声明 Slice INVOKE 边界但遗漏 target 时，应暴露配置错误而不是扩大到全方法")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "Invalid ModifyExpressionValue slice boundary method signature:  " +
+                    "(parsed: owner=null, name=null, desc=null)",
+            )
+    }
+
+    @Test
     fun modifyExpressionValueFieldSliceLimitsFieldReadsBetweenFromAndTo() {
         AsmRegistry.register(ModifyExpressionValueFieldSliceMixin::class.java)
 
@@ -4805,6 +4900,24 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("pre-raw:inside-wrapped:outside-raw", result)
+    }
+
+    @Test
+    @DisplayName("WrapOperation 显式 INVOKE 空 Slice 边界应快速失败")
+    fun wrapOperationEmptyInvokeSliceBoundaryFailsFast() {
+        // Given
+        AsmRegistry.register(WrapOperationEmptyInvokeSliceBoundaryMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("SliceWrapOperationTarget", sliceWrapOperationTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 显式声明 WrapOperation Slice INVOKE 边界但遗漏 target 时，应暴露配置错误而不是扩大到全方法")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "Invalid WrapOperation slice boundary method signature:  " +
+                    "(parsed: owner=null, name=null, desc=null)",
+            )
     }
 
     @Test
@@ -8978,6 +9091,27 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("省略 JUMP target 时应替换兼容条件跳转结果")
+    fun redirectAtJumpWithoutTargetReplacesBranchDecision() {
+        // Given
+        AsmRegistry.register(UntargetedJumpRedirectMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("JumpOperationTarget", jumpOperationTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("JumpOperationTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        // Then
+        assertThat(method.invoke(instance, 5, false))
+            .`as`("Then: 正数原本不跳转，省略 target 的 JUMP redirect 取反后应进入 negative 分支")
+            .isEqualTo("negative")
+        assertThat(method.invoke(instance, -1, false))
+            .`as`("Then: 负数原本跳转，取反后应继续走 positive 分支")
+            .isEqualTo("positive")
+    }
+
+    @Test
     fun redirectAtJumpSupportsKotlinObjectHandler() {
         AsmRegistry.register(ObjectInstanceJumpRedirectMixin::class.java)
 
@@ -9197,6 +9331,21 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("readName", Int::class.javaPrimitiveType).invoke(instance, 0)
 
         assertEquals("written-raw", result)
+    }
+
+    @Test
+    @DisplayName("数组写入重定向必须使用 FIELD_ASSIGN，旧的 FIELD + array=set 应快速失败")
+    fun redirectArraySetRequiresFieldAssignInjectionPoint() {
+        // Given
+        AsmRegistry.register(FieldArraySetRedirectMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: FIELD + array=set 会把写入误描述成字段读取，应在转换阶段暴露配置错误")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@Redirect array=set requires FIELD_ASSIGN injection point")
     }
 
     @Test
@@ -12894,6 +13043,23 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "$original-changed"
     }
 
+    @AsmMixin("SliceExpressionValueTarget")
+    object ModifyExpressionValueEmptyInvokeSliceBoundaryMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-changed"
+    }
+
     @AsmMixin("SliceFieldReadTarget")
     object ModifyExpressionValueFieldSliceMixin {
         @ModifyExpressionValue(
@@ -13977,6 +14143,26 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("JumpOperationTarget")
+    object UntargetedJumpRedirectMixin {
+        @Redirect(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            original: Boolean,
+            value: Int,
+            forceNegative: Boolean,
+        ): Boolean {
+            value.hashCode()
+            forceNegative.hashCode()
+            return !original
+        }
+    }
+
+    @AsmMixin("JumpOperationTarget")
     object ObjectInstanceJumpRedirectMixin {
         @Redirect(
             method = "choose(IZ)Ljava/lang/String;",
@@ -14931,6 +15117,27 @@ class FrameworkReliabilityTest {
             value.length
             return operation.call(target, "-wrapped")
         }
+    }
+
+    @AsmMixin("SliceWrapOperationTarget")
+    object WrapOperationEmptyInvokeSliceBoundaryMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: String,
+            value: String,
+            operation: Operation<String>,
+        ): String = operation.call(target, value)
     }
 
     @AsmMixin("SliceFieldReadTarget")
@@ -17639,7 +17846,7 @@ class FrameworkReliabilityTest {
         @Redirect(
             method = "writeName(ILjava/lang/String;)V",
             at = At(
-                value = InjectionPoint.FIELD,
+                value = InjectionPoint.FIELD_ASSIGN,
                 target = "ArrayAccessTarget.names:[Ljava/lang/String;",
                 args = ["array=set"],
             ),
@@ -17651,6 +17858,26 @@ class FrameworkReliabilityTest {
             value: String,
         ) {
             array[index] = "written-$value"
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object FieldArraySetRedirectMixin {
+        @Redirect(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "ArrayAccessTarget.names:[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ) {
+            array[index] = "legacy-$value"
         }
     }
 
@@ -17676,7 +17903,7 @@ class FrameworkReliabilityTest {
         @Redirect(
             method = "writeScore(II)V",
             at = At(
-                value = InjectionPoint.FIELD,
+                value = InjectionPoint.FIELD_ASSIGN,
                 target = "PrimitiveArrayAccessTarget.scores:[I",
                 args = ["array=set"],
             ),
@@ -17926,7 +18153,7 @@ class FrameworkReliabilityTest {
         @Redirect(
             method = "writeSelected()Ljava/lang/String;",
             at = At(
-                value = InjectionPoint.FIELD,
+                value = InjectionPoint.FIELD_ASSIGN,
                 target = "SliceWrapConditionArrayTarget.names:[Ljava/lang/String;",
                 args = ["array=set"],
             ),

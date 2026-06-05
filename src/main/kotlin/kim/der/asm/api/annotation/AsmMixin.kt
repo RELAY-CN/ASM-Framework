@@ -1486,8 +1486,9 @@ annotation class ModifyConstant(
  * 不兼容候选不计入 [ordinal] 或命中数。
  * 字段读取重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，并通过 [At.target] 指定
  * `owner.field:desc`、`field:desc` 或 `field`；字段写入重定向通过 [At.value] 指定
- * [InjectionPoint.FIELD_ASSIGN]，目标格式相同。数组元素访问与数组长度重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，
- * [At.target] 指定产生数组引用的字段，并通过 [At.args] 中的 `array=get`、`array=set` 或 `array=length` 区分读取、写入与长度读取。
+ * [InjectionPoint.FIELD_ASSIGN]，目标格式相同。数组元素读取与数组长度重定向通过 [InjectionPoint.FIELD] 与
+ * `array=get` / `array=length` 指定，数组元素写入重定向通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`
+ * 指定；[At.target] 指向产生数组引用的字段。
  * 局部变量读取重定向通过 [At.value] 指定 [InjectionPoint.LOAD]，不使用 [At.target]；可通过 [At.args] 中的
  * `index=N`、`var=N` 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。
  * handler 返回值只替换这一次 `xLOAD` 读取结果，不写回原槽位。
