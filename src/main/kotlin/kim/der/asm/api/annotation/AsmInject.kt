@@ -151,6 +151,9 @@ annotation class AsmInject(
  * [INVOKE_STRING] 只匹配目标方法调用实参中的直接 `LDC String`，不会追踪局部变量、字符串拼接或方法返回值。
  * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
  * [CONSTANT] 搭配 [Shift.REPLACE] 时可用 handler 返回值替换原常量加载。
+ * 普通 [AsmInject] 的 [STORE] 只表示 `xSTORE` 指令位置；
+ * [kim.der.asm.api.annotation.ModifyExpressionValue]、[Redirect]、[WrapOperation] 与 [WrapWithCondition] 的 [STORE] 表示 `xSTORE` 消费前的待写入值；
+ * [ModifyVariable] 的 [STORE] 表示 `xSTORE` 已写入槽位后，再读取同一槽位、调用 handler 并写回。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -183,7 +186,7 @@ enum class InjectionPoint {
     /** 局部变量读取前 */
     LOAD,
 
-    /** 局部变量写入后 */
+    /** 局部变量写入相关指令点 */
     STORE,
 
     /** NEW 操作前 */
@@ -227,7 +230,7 @@ enum class InjectionPoint {
  *   指定直接字符串常量实参。它只观察调用点，不接收或替换该字符串，不匹配局部变量、拼接字符串、`invokedynamic` 或方法返回值。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
- * - NEW 支持 Slice 缩小候选范围，只支持 BEFORE 或 REPLACE，且不支持 by；AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
+ * - NEW 支持 Slice 缩小候选范围，不支持 AFTER 与 by；REPLACE 仍按匹配前观察插入处理。AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
  *   当前实现会拒绝该配置。
  * - CAST 目标为 `CHECKCAST` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。
  * - INSTANCEOF 目标为 `INSTANCEOF` 的类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`。

@@ -435,6 +435,71 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应区分普通指令点替换范围与 STORE 写入时序")
+    fun documentationContractsSeparateInstructionReplaceScopeAndStoreTiming() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val asmInjectKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
+        val apiAsmInjectSection =
+            api
+                .substringAfter("### @AsmInject")
+                .substringBefore("### @Overwrite")
+        val guideAsmInjectSection =
+            guide
+                .substringAfter("普通 `@AsmInject` handler 首参可以是 `CallbackInfo`")
+                .substringBefore("### 场景 2: 修改参数与局部变量")
+        val guideModifyExpressionSection =
+            guide
+                .substringAfter("`@ModifyExpressionValue` 用于保留原调用")
+                .substringBefore("`@ModifyVariable` 支持")
+        val guideModifyVariableSection =
+            guide
+                .substringAfter("`@ModifyVariable` 支持")
+                .substringBefore("`@ModifyVariable.name` 中的名称")
+        val injectionPointSection =
+            asmInjectKDoc
+                .substringAfter("* 注入点枚举。")
+                .substringBefore("enum class InjectionPoint")
+        val injectionPointEnumBody =
+            asmInjectKDoc
+                .substringAfter("enum class InjectionPoint")
+                .substringBefore("/**\n * 调用点定位信息。")
+
+        // Then
+        assertThat(apiAsmInjectSection)
+            .`as`("Then: API 应说明普通指令点 REPLACE 只有 CONSTANT 会真正删除并替换原指令")
+            .contains(
+                "普通指令点的 `Shift.REPLACE` 只有 `CONSTANT` 会删除并替换匹配指令",
+                "`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH` 与 `THROW` 仍只按观察插入处理",
+            )
+        assertThat(guideAsmInjectSection)
+            .`as`("Then: GUIDE 应避免让迁移用户误以为 FIELD/STORE 等普通指令点 REPLACE 会替换原操作")
+            .contains(
+                "普通指令点的 `Shift.REPLACE` 只有 `CONSTANT` 会删除并替换匹配指令",
+                "如果需要替换字段、局部变量、类型判断、switch 或异常表达式，应改用 `@Redirect`、`@ModifyExpressionValue`、`@WrapOperation` 或 `@WrapWithCondition`",
+            )
+        assertThat(injectionPointSection)
+            .`as`("Then: InjectionPoint KDoc 应把 STORE 描述成按注解语义分流的写入相关指令点")
+            .contains(
+                "普通 [AsmInject] 的 [STORE] 只表示 `xSTORE` 指令位置",
+                "[kim.der.asm.api.annotation.ModifyExpressionValue]、[Redirect]、[WrapOperation] 与 [WrapWithCondition] 的 [STORE] 表示 `xSTORE` 消费前的待写入值",
+                "[ModifyVariable] 的 [STORE] 表示 `xSTORE` 已写入槽位后，再读取同一槽位、调用 handler 并写回",
+            )
+        assertThat(injectionPointEnumBody)
+            .`as`("Then: STORE 枚举短注释不应简化成写入后，避免覆盖表达式类 STORE 的写入前语义")
+            .contains("/** 局部变量写入相关指令点 */")
+            .doesNotContain("/** 局部变量写入后 */")
+        assertThat(guideModifyExpressionSection)
+            .`as`("Then: 表达式改写 STORE 应说明 handler 接收的是 xSTORE 消费前的待写入栈顶值")
+            .contains("`STORE` 模式同样不使用 `At.target`", "handler 接收 `xSTORE` 消费前的待写入栈顶值")
+        assertThat(guideModifyVariableSection)
+            .`as`("Then: ModifyVariable STORE 应说明它处理的是写入后的槽位状态，而不是写入前栈值")
+            .contains("`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位")
+    }
+
+    @Test
     @DisplayName("公开文档应保持 Copy 访问标志契约一致")
     fun documentationContractsKeepCopyAccessFlagsAligned() {
         // Given
