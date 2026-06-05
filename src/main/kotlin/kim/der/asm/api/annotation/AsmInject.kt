@@ -254,11 +254,13 @@ enum class InjectionPoint {
  *   包裹指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值，
  *   handler 返回值只替换这一次读取结果，不写回槽位；通过 [InjectionPoint.STORE] 与同样的槽位或名称过滤包裹本次待写入值，
  *   handler 返回值会交给原 `xSTORE` 继续写入槽位。
- * - [WrapWithCondition] 可通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD]
- *   目标解释为数组元素读取或数组长度读取；通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`
- *   把数组字段目标解释为数组元素写入；也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE]
- *   与 `index=N`、`var=N` 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名
- *   过滤本次局部变量读取或写入，并由 handler 决定是否保留原读取值或原写入。
+ * - [WrapWithCondition] 可通过 [InjectionPoint.INVOKE_ASSIGN] 在调用完成后条件保留返回值；
+ *   通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取或数组长度读取；
+ *   通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set` 把数组字段目标解释为数组元素写入；
+ *   也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 与 `index=N`、`var=N` 或 `name=localName`
+ *   按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤本次局部变量读取或写入；
+ *   [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.SWITCH]
+ *   分别表示构造结果、类型转换结果、类型判断结果与 switch selector 的条件保留。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [InjectionPoint.FIELD_ASSIGN] 改写字段待写入值；
  *   也可通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式，
  *   通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set` 把数组字段目标解释为数组元素写入前的待写入元素值；
@@ -358,9 +360,10 @@ enum class Shift {
  * [WrapOperation] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、
  * [InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 操作包裹、
- * [WrapWithCondition] 的 [InjectionPoint.INVOKE] / [InjectionPoint.FIELD] /
- * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.CONSTANT]、
- * [InjectionPoint.JUMP] 与 [InjectionPoint.THROW] 条件包裹，
+ * [WrapWithCondition] 的 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
+ * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、
+ * [InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、
+ * [InjectionPoint.SWITCH] 与 [InjectionPoint.THROW] 条件包裹，
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组读取、数组写入值、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
  * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
