@@ -21,9 +21,11 @@ import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
 import org.objectweb.asm.tree.LabelNode
 import org.objectweb.asm.tree.LdcInsnNode
+import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.MethodInsnNode
 import org.objectweb.asm.tree.MethodNode
+import org.objectweb.asm.tree.TableSwitchInsnNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
 import java.lang.reflect.Method
@@ -33,12 +35,12 @@ import java.lang.reflect.Modifier
  * WrapWithCondition 注入器。
  *
  * 该注入器会匹配目标方法内的普通方法调用、任意返回值的 `invokedynamic` 调用、字段读取、字段写入、
- * 简单数组元素读取、数组元素写入、数组长度读取、局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点，
+ * 简单数组元素读取、数组元素写入、数组长度读取、局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点，
  * 并在原指令前后插入 boolean handler。
  * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段读取值、字段写入值、数组读取值、
- * 数组写入栈参数、数组长度值、局部变量读取值或待写入值、类型判断结果、常量值、原条件跳转分支结果或原异常对象并继续执行原指令。
+ * 数组写入栈参数、数组长度值、局部变量读取值或待写入值、类型判断结果、常量值、原条件跳转分支结果、switch selector 或原异常对象并继续执行原指令。
  * handler 返回 `false` 时跳过原指令、原条件跳转或原抛出；非 `void` 普通方法调用与非 `void` `invokedynamic`
- * 调用、字段读取、数组元素读取、数组长度读取、局部变量读取、类型判断以及常量加载会压入对应类型的默认值。
+ * 调用、字段读取、数组元素读取、数组长度读取、局部变量读取、类型判断、常量加载以及 switch selector 会压入对应类型的默认值。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或
  * `invokedynamic` 调用；构造器和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 首参和 boolean 返回类型筛选兼容字段读取；
@@ -55,14 +57,15 @@ import java.lang.reflect.Modifier
  * handler 首参接收原始 boolean 判断结果，返回 `false` 时把本次判断替换为 `false`。
  * [InjectionPoint.CONSTANT] 使用 [At.target] 常量文本过滤，省略时按 handler 首参和 boolean 返回类型筛选兼容常量。
  * [InjectionPoint.JUMP] 未指定跳转目标时会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持条件包裹。
+ * [InjectionPoint.SWITCH] 不支持 [At.target]，handler 首参接收 `tableswitch` / `lookupswitch` 消费前的 `Int` selector。
  * [InjectionPoint.THROW] 未指定异常类型目标时会匹配切片内全部 `ATHROW`；指定目标时只匹配前一条真实指令为同类型 `<init>` 的直接构造异常。
  * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * 条件包裹使用
  * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
@@ -81,7 +84,7 @@ class WrapWithConditionInjector(
      *
      * @param target 目标方法
      * @return 至少包裹一个调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
-     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点或抛异常点时返回 `true`
+     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -90,11 +93,11 @@ class WrapWithConditionInjector(
 
     /**
      * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
-     * 局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
+     * 局部变量读取或写入、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
      * @return 实际包裹的调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
-     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点或抛异常点数量
+     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -124,9 +127,10 @@ class WrapWithConditionInjector(
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.JUMP -> injectJump(target)
+            InjectionPoint.SWITCH -> injectSwitch(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, INSTANCEOF, CONSTANT, JUMP and THROW injection points",
+                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, INSTANCEOF, CONSTANT, JUMP, SWITCH and THROW injection points",
             )
         }
     }
@@ -817,6 +821,50 @@ class WrapWithConditionInjector(
         runCatching { validateInstanceofHandlerSignature(target) }.isSuccess
 
     /**
+     * 在匹配的 switch selector 前插入条件 handler。
+     *
+     * `tableswitch` 与 `lookupswitch` 都只消费一个 `Int` selector；handler 返回 `true` 时保留原 selector，
+     * 返回 `false` 时用 `Int` 默认值 `0` 交给原 switch 指令继续分派。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的 switch 数量
+     * @throws IllegalArgumentException 声明了 [At.target] 或 handler 签名不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun injectSwitch(target: MethodNode): Int {
+        if (at.target.isNotEmpty()) {
+            throw IllegalArgumentException("@WrapWithCondition SWITCH does not support at.target")
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is TableSwitchInsnNode && insn !is LookupSwitchInsnNode) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateSwitchHandlerSignature(target)
+            val il = buildSwitchConditionWrapper(target, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
      * 解析常量加载条件包裹使用的表达式类型。
      *
      * `ICONST_0` / `ICONST_1` 在用户按 `true` / `false` 过滤，或 handler 首参声明为 boolean 时按 boolean 处理；
@@ -1463,6 +1511,24 @@ class WrapWithConditionInjector(
         target: MethodNode,
         targetParamCount: Int,
     ): InsnList = buildLoadConditionWrapper(target, Type.BOOLEAN_TYPE, targetParamCount)
+
+    /**
+     * 构造 switch selector 条件包裹的前置指令序列。
+     *
+     * switch 指令执行前 selector 已经位于栈顶，因此可复用表达式值条件包裹的栈形状：
+     * 暂存原 selector，调用 handler；handler 返回 `false` 时压入 `Int` 默认值 `0`。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到原 switch 前的条件包裹指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun buildSwitchConditionWrapper(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList = buildLoadConditionWrapper(target, Type.INT_TYPE, targetParamCount)
 
     /**
      * 构造局部变量写入条件包裹的前置指令序列。
@@ -2201,6 +2267,64 @@ class WrapWithConditionInjector(
             throw IllegalArgumentException(
                 "@WrapWithCondition handler ${asmMethod.name} parameter #0 mismatch: " +
                     "expected ${Type.BOOLEAN_TYPE}, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    /**
+     * 校验 switch selector 条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收原始 `Int` selector；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、selector 参数或追加目标参数不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun validateSwitchHandlerSignature(target: MethodNode): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition SWITCH handler ${asmMethod.name} must receive original selector",
+            )
+        }
+        if (!isHandlerParameterCompatible(Type.INT_TYPE, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition SWITCH handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected ${Type.INT_TYPE}, actual ${actualParams[0]}",
             )
         }
 

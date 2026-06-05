@@ -5650,6 +5650,109 @@ class FrameworkReliabilityTest {
     }
 
     @Nested
+    @DisplayName("@WrapWithCondition SWITCH 分支选择场景")
+    inner class WrapWithConditionSwitchScenarios {
+        @Test
+        @DisplayName("table switch handler 放行时保留原 selector，拒绝时使用默认 selector")
+        fun wrapWithConditionAtSwitchControlsTableSwitchSelector() {
+            // Given
+            AsmRegistry.register(WrapConditionSwitchDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("SwitchSelectorTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+            // Then
+            assertThat(method.invoke(instance, 1, false))
+                .`as`("Then: handler 返回 true 时 table switch 应继续使用业务传入的 selector=1")
+                .isEqualTo("one")
+            assertThat(method.invoke(instance, 2, true))
+                .`as`("Then: handler 返回 false 时 table switch 应使用 Int 默认值 0 并进入 zero 分支")
+                .isEqualTo("zero")
+        }
+
+        @Test
+        @DisplayName("lookup switch handler 拒绝时默认 selector 应进入 fallback")
+        fun wrapWithConditionAtSwitchControlsLookupSwitchSelector() {
+            // Given
+            AsmRegistry.register(WrapConditionLookupSwitchDenyMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "LookupSwitchSelectorTarget",
+                    lookupSwitchSelectorTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("LookupSwitchSelectorTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+            // Then
+            assertThat(method.invoke(instance, 20, false))
+                .`as`("Then: handler 返回 true 时 lookup switch 应继续进入原始 twenty 分支")
+                .isEqualTo("twenty")
+            assertThat(method.invoke(instance, 30, true))
+                .`as`("Then: handler 返回 false 时 lookup switch 使用默认 selector=0，目标表无 0 时应进入 fallback")
+                .isEqualTo("fallback")
+        }
+
+        @Test
+        @DisplayName("Slice 应只包裹边界内的 switch selector")
+        fun wrapWithConditionAtSwitchRespectsSliceBoundary() {
+            // Given
+            AsmRegistry.register(WrapConditionSwitchSliceDenyMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "SliceSwitchSelectorTarget",
+                    sliceSwitchSelectorTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "choose" && it.desc == "(IZ)Ljava/lang/String;" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionSwitchSliceDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("SliceSwitchSelectorTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: Slice 边界内只有第二个 switch，应只插入一次条件包裹")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance, 1, false))
+                .`as`("Then: handler 放行时边界内外 switch 都应保留 selector=1")
+                .isEqualTo("one:one")
+            assertThat(method.invoke(instance, 1, true))
+                .`as`("Then: handler 拒绝时只应把边界内 switch selector 替换为 0，边界外结果保持 one")
+                .isEqualTo("one:zero")
+        }
+
+        @Test
+        @DisplayName("SWITCH 指令不允许声明 target")
+        fun wrapWithConditionAtSwitchRejectsTargetFilter() {
+            // Given
+            AsmRegistry.register(TargetedWrapConditionSwitchMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: switch selector 没有 owner/name/desc，声明 target 应作为配置错误暴露")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage("@WrapWithCondition SWITCH does not support at.target")
+        }
+    }
+
+    @Nested
     @DisplayName("@ModifyConstant Slice 边界场景")
     inner class ModifyConstantSliceBoundaryScenarios {
         @Test
@@ -12939,6 +13042,82 @@ class FrameworkReliabilityTest {
             value.hashCode()
             return if (forceThirty) 30 else selector + 10
         }
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
+    object WrapConditionSwitchDenyMixin {
+        @WrapWithCondition(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            selector: Int,
+            value: Int,
+            forceDefault: Boolean,
+        ): Boolean {
+            selector.hashCode()
+            value.hashCode()
+            return !forceDefault
+        }
+    }
+
+    @AsmMixin("LookupSwitchSelectorTarget")
+    object WrapConditionLookupSwitchDenyMixin {
+        @WrapWithCondition(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            selector: Int,
+            value: Int,
+            forceDefault: Boolean,
+        ): Boolean {
+            selector.hashCode()
+            value.hashCode()
+            return !forceDefault
+        }
+    }
+
+    @AsmMixin("SliceSwitchSelectorTarget")
+    object WrapConditionSwitchSliceDenyMixin {
+        @WrapWithCondition(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            selector: Int,
+            value: Int,
+            forceDefault: Boolean,
+        ): Boolean {
+            selector.hashCode()
+            value.hashCode()
+            return !forceDefault
+        }
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
+    object TargetedWrapConditionSwitchMixin {
+        @WrapWithCondition(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH, target = "0"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(selector: Int): Boolean = selector >= 0
     }
 
     @AsmMixin("InstanceofTarget")
@@ -21431,6 +21610,67 @@ class FrameworkReliabilityTest {
             visitInsn(Opcodes.ARETURN)
             visitLabel(fallback)
             visitLdcInsn("fallback")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceSwitchSelectorTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceSwitchSelectorTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "choose", "(IZ)Ljava/lang/String;", null, null).apply {
+            val firstZero = org.objectweb.asm.Label()
+            val firstOne = org.objectweb.asm.Label()
+            val firstFallback = org.objectweb.asm.Label()
+            val afterFirst = org.objectweb.asm.Label()
+            val secondZero = org.objectweb.asm.Label()
+            val secondOne = org.objectweb.asm.Label()
+            val secondFallback = org.objectweb.asm.Label()
+            val afterSecond = org.objectweb.asm.Label()
+            visitCode()
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitTableSwitchInsn(0, 1, firstFallback, firstZero, firstOne)
+            visitLabel(firstZero)
+            visitLdcInsn("zero")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitJumpInsn(Opcodes.GOTO, afterFirst)
+            visitLabel(firstOne)
+            visitLdcInsn("one")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitJumpInsn(Opcodes.GOTO, afterFirst)
+            visitLabel(firstFallback)
+            visitLdcInsn("fallback")
+            visitVarInsn(Opcodes.ASTORE, 3)
+            visitLabel(afterFirst)
+            visitLdcInsn("start-boundary")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitTableSwitchInsn(0, 1, secondFallback, secondZero, secondOne)
+            visitLabel(secondZero)
+            visitLdcInsn("zero")
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitJumpInsn(Opcodes.GOTO, afterSecond)
+            visitLabel(secondOne)
+            visitLdcInsn("one")
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitJumpInsn(Opcodes.GOTO, afterSecond)
+            visitLabel(secondFallback)
+            visitLdcInsn("fallback")
+            visitVarInsn(Opcodes.ASTORE, 4)
+            visitLabel(afterSecond)
+            visitLdcInsn("end-boundary")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ALOAD, 3)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 4)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(0, 0)
             visitEnd()
