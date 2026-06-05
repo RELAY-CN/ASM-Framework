@@ -61,7 +61,17 @@ class ModifyVariableInjector(
     private val slice: Slice = Slice(),
     private val argsOnly: Boolean = false,
 ) : AbstractAsmInjector(method, asmInfo) {
-    private val requestedVariableNames = variableNames.filterTo(linkedSetOf()) { it.isNotBlank() }
+    private val requestedVariableNames = normalizeVariableNames(variableNames)
+
+    // 空白变量名不能静默丢弃，否则精确过滤会退化成全变量匹配。
+    private fun normalizeVariableNames(variableNames: Array<String>): Set<String> =
+        variableNames.mapTo(linkedSetOf()) { name ->
+            name.trim().also { trimmed ->
+                require(trimmed.isNotEmpty()) {
+                    "@ModifyVariable ${injectionPoint.name} local variable name filter must not be blank"
+                }
+            }
+        }
 
     /**
      * 在目标方法入口、变量读取点前或变量写入点后修改指定局部变量槽位。

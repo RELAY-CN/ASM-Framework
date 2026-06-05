@@ -736,7 +736,7 @@ handler 先接收 `Int` 长度值，不接收数组引用，后续可继续接�
 - `method: String = ""` - 目标方法签名；为空时按 handler 名称、变量类型、返回类型、`index` / `name` / `ordinal`、`slice` 限定后的实际读写候选和追加目标参数兼容规则推断唯一同名目标方法
 - `at: At = At(value = InjectionPoint.HEAD)` - 修改位置；当前支持 `HEAD`、`LOAD` 与 `STORE`
 - `index: Int = -1` - JVM 局部变量槽位索引；大于等于 0 时优先使用
-- `name: Array<String> = []` - 局部变量名筛选；非空时只匹配 LocalVariableTable 名称在列表中的变量，目标字节码缺少调试变量表时不会命中
+- `name: Array<String> = []` - 局部变量名筛选；非空时只匹配 LocalVariableTable 名称在列表中的变量，名称会先去除首尾空白，空白名称会在转换阶段失败且不会退化为无变量名过滤，目标字节码缺少调试变量表时不会命中
 - `ordinal: Int = -1` - 未指定 `index` 时，同类型入口参数、读取点或写入点的序号；`HEAD` 模式同类型入口参数唯一时可保持默认值
 - `slice: Slice = Slice()` - 切片范围；当前 `LOAD` / `STORE` 模式支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 要求的最小命中数；`0` 表示使用默认至少 1 次的显式契约语义
@@ -747,7 +747,7 @@ handler 先接收 `Int` 长度值，不接收数组引用，后续可继续接�
 
 `@ModifyVariable` 的 `LOAD` / `STORE` 模式可用 `slice.from` / `slice.to` 把候选 `xLOAD` 读取点或 `xSTORE` 写入点限制在一段 `INVOKE` 边界之间；边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。`HEAD` 当前不使用 `slice`。
 
-`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象/数组变量或追加的目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，框架会尽量通过目标方法参数、局部变量表与相邻字节码用途保留真实槽位类型再写回，避免把局部变量栈图退化为 `Object`。返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。未指定 `index` 时，框架仍按 handler 第一个参数类型筛选入口参数、读取点或写入点，因此需要用实际变量类型参与匹配。`argsOnly = true` 会把候选限制为目标方法声明参数槽位，适合只想改参数但目标方法内部有同类型临时变量的场景；若显式 `index` 指向非参数槽位，候选会被过滤掉并按命中数契约失败。`name` 是额外筛选条件，可与 `index`、`argsOnly`、类型和 `ordinal` 组合使用；它依赖目标 class 的 LocalVariableTable，若目标被去除调试信息，应改用槽位、`argsOnly` 或 `ordinal`。`HEAD` 模式下若同类型入口参数唯一，可省略 `ordinal`；存在多个同类型入口参数时仍需用 `ordinal` 明确选择。省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个签名、变量筛选条件、实际读写候选与追加目标参数均兼容的同名目标方法；`LOAD` / `STORE` 会用 `index`、`name`、`argsOnly`、`ordinal` 与 `slice` 过滤后的真实 `xLOAD` / `xSTORE` 候选参与重载推断，`name` 可用于区分保留 LocalVariableTable 的重载方法，存在多个兼容重载时需要显式写出目标方法签名。
+`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象/数组变量或追加的目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，框架会尽量通过目标方法参数、局部变量表与相邻字节码用途保留真实槽位类型再写回，避免把局部变量栈图退化为 `Object`。返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。未指定 `index` 时，框架仍按 handler 第一个参数类型筛选入口参数、读取点或写入点，因此需要用实际变量类型参与匹配。`argsOnly = true` 会把候选限制为目标方法声明参数槽位，适合只想改参数但目标方法内部有同类型临时变量的场景；若显式 `index` 指向非参数槽位，候选会被过滤掉并按命中数契约失败。`name` 是额外筛选条件，可与 `index`、`argsOnly`、类型和 `ordinal` 组合使用；它依赖目标 class 的 LocalVariableTable，空白名称会快速失败，不会退化为无变量名过滤；若目标被去除调试信息，应改用槽位、`argsOnly` 或 `ordinal`。`HEAD` 模式下若同类型入口参数唯一，可省略 `ordinal`；存在多个同类型入口参数时仍需用 `ordinal` 明确选择。省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个签名、变量筛选条件、实际读写候选与追加目标参数均兼容的同名目标方法；`LOAD` / `STORE` 会用 `index`、`name`、`argsOnly`、`ordinal` 与 `slice` 过滤后的真实 `xLOAD` / `xSTORE` 候选参与重载推断，`name` 可用于区分保留 LocalVariableTable 的重载方法，存在多个兼容重载时需要显式写出目标方法签名。
 
 `@ModifyVariable` 会统计实际写入变量修改逻辑的数量。`HEAD` 模式最多命中 1 次；`LOAD` / `STORE`
 模式按匹配读取点或写入点数量计数。显式设置 `require` / `allow` / 非默认 `expect` 时按实际变量修改数量校验契约，

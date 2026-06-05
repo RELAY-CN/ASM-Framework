@@ -427,6 +427,39 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持 ModifyVariable 变量名过滤配置错误契约一致")
+    fun documentationContractsKeepModifyVariableNameValidationAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val apiModifyVariableSection =
+            api
+                .substringAfter("### @ModifyVariable")
+                .substringBefore("### @ModifyReturnValue")
+        val guideModifyVariableSection =
+            guide
+                .substringAfter("`@ModifyVariable` 支持")
+                .substringBefore("应使用 `@ModifyVariable`。")
+        val modifyVariableKDocSection =
+            asmMixinKDoc
+                .substringAfter("* 修改局部变量注解。")
+                .substringBefore("annotation class ModifyVariable")
+
+        // Then
+        assertThat(apiModifyVariableSection)
+            .`as`("Then: API 应说明空白变量名会失败，避免用户误以为会被安全忽略")
+            .contains("空白", "不会退化为无变量名过滤")
+        assertThat(guideModifyVariableSection)
+            .`as`("Then: GUIDE 应提醒迁移用户空白 name 是配置错误")
+            .contains("空白", "不会退化为无变量名过滤")
+        assertThat(modifyVariableKDocSection)
+            .`as`("Then: @ModifyVariable KDoc 应同步 IDE 用户能看到的 name 校验规则")
+            .contains("空白", "不会退化为无变量名过滤")
+    }
+
+    @Test
     fun removeSynchronizedRemovesBlockMonitorInstructions() {
         AsmRegistry.register(RemoveBlockSynchronizedMixin::class.java)
 
@@ -8288,6 +8321,21 @@ class FrameworkReliabilityTest {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
         assertEquals(Array<String>::class.java, methods["name"]?.returnType)
+    }
+
+    @Test
+    @DisplayName("@ModifyVariable 空白变量名过滤应快速失败")
+    fun modifyVariableBlankNameFilterFailsFastInsteadOfDroppingFilter() {
+        // Given
+        AsmRegistry.register(BlankNameModifyVariableMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 空白 name 不能静默退化成无变量名过滤，否则会扩大补丁命中范围")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@ModifyVariable STORE local variable name filter must not be blank")
     }
 
     @Test
@@ -17636,6 +17684,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "stored-$original"
+    }
+
+    @AsmMixin("StoreVariableTarget")
+    object BlankNameModifyVariableMixin {
+        @ModifyVariable(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE),
+            name = [" "],
+        )
+        @JvmStatic
+        fun modify(original: String): String = "blank-$original"
     }
 
     @AsmMixin("StoreVariableTarget")

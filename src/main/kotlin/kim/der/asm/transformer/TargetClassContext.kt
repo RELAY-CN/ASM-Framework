@@ -2505,7 +2505,7 @@ class TargetClassContext(
         targetMethod: MethodNode,
         handlerVariableType: Type,
     ): Type {
-        val requestedNames = annotation.name.filterTo(linkedSetOf()) { it.isNotBlank() }
+        val requestedNames = normalizeModifyVariableNames(annotation)
         val variables = collectModifyVariableHeadParameters(targetMethod)
         val variable =
             if (annotation.index >= 0) {
@@ -2525,6 +2525,16 @@ class TargetClassContext(
                     "ordinal=${annotation.ordinal}, type=$handlerVariableType",
             )
     }
+
+    // HEAD 自动推断也必须保留同样的 name 校验，避免省略 method 时绕过配置错误。
+    private fun normalizeModifyVariableNames(annotation: ModifyVariable): Set<String> =
+        annotation.name.mapTo(linkedSetOf()) { name ->
+            name.trim().also { trimmed ->
+                require(trimmed.isNotEmpty()) {
+                    "@ModifyVariable ${annotation.at.value.name} local variable name filter must not be blank"
+                }
+            }
+        }
 
     private fun collectModifyVariableHeadParameters(targetMethod: MethodNode): List<ModifyVariableHeadVariable> {
         val isStatic = (targetMethod.access and Opcodes.ACC_STATIC) != 0

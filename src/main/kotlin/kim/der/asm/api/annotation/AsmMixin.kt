@@ -1193,7 +1193,8 @@ annotation class ModifyExpressionValue(
  * @param method 目标方法签名；为空时按 handler 名称、变量筛选条件、实际读写候选和签名兼容规则推断唯一同名目标方法
  * @param at 修改位置；当前支持 [InjectionPoint.HEAD]、[InjectionPoint.LOAD] 与 [InjectionPoint.STORE]
  * @param index 要修改的局部变量槽位索引
- * @param name 要匹配的局部变量名列表；为空时不按名称过滤，非空时依赖目标方法的 LocalVariableTable
+ * @param name 要匹配的局部变量名列表；为空时不按名称过滤，非空时依赖目标方法的 LocalVariableTable；
+ * 名称会先去除首尾空白，空白名称会在转换阶段失败，不会退化为无变量名过滤
  * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号；HEAD 模式同类型入口参数唯一时可保持默认值
  * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写与 [InjectionPoint.STORE] 局部变量写入改写
  * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
@@ -1232,7 +1233,8 @@ annotation class ModifyVariable(
     /**
      * 局部变量名过滤列表。
      *
-     * 非空时依赖目标方法的 LocalVariableTable；缺少调试变量表时不会命中。
+     * 非空时依赖目标方法的 LocalVariableTable；名称会先去除首尾空白，
+     * 空白名称会在转换阶段失败，不会退化为无变量名过滤；缺少调试变量表时不会命中。
      */
     val name: Array<String> = [],
 

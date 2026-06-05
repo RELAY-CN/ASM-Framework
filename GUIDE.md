@@ -980,6 +980,8 @@ switch 模式通过 `SWITCH` 指定，handler 先接收原始 `Int` selector，�
 
 `@ModifyVariable` 支持 `HEAD` 入口参数改写、`LOAD` 局部变量读取前改写和 `STORE` 局部变量写入后改写。`HEAD` 适合在方法体执行前重写参数值；`LOAD` 会在匹配的 `xLOAD` 指令前读取当前局部变量，调用 handler，并写回同一槽位；`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位。`LOAD` / `STORE` 模式可用 `Slice` 限制读取点或写入点匹配范围；`from` 边界之后、`to` 边界之前的读取或写入才会参与匹配，边界调用本身不会被修改，`ordinal` 会在切片内重新计数。`@ModifyVariable` handler 第一个参数接收原变量值并返回同类型的新值；显式指定 `index` 时，对象或数组变量可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，框架会尽量保留真实槽位类型再写回，避免局部变量栈图退化为 `Object`。返回值对引用类型可为原变量类型的可赋值子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原变量类型，基础类型仍需精确匹配。后续参数可继续接收目标方法参数前缀；对象或数组目标方法参数同样可声明为原值类型的父类、接口、`Any` 或 `Object`。`@ModifyVariable.index` 使用 JVM 局部变量槽位索引，实例方法槽位 0 是 `this`，第一个参数从槽位 1 开始；静态方法第一个参数从槽位 0 开始。`argsOnly = true` 会把候选限制为目标方法参数槽位，适合只想改参数但方法体内部有同类型临时变量的场景；显式 `index` 指向非参数槽位时不会命中，并会按 `require` / 默认命中数契约失败。`@ModifyVariable.name` 可按 LocalVariableTable 中的变量名继续过滤候选，能与 `index`、`argsOnly`、类型和 `ordinal` 组合使用；目标 class 缺少调试变量表时，名称筛选不会命中，应改用槽位、`argsOnly` 或序号。未指定 `index` 时，会按 handler 第一个参数类型筛选入口参数、读取点或写入点；`HEAD` 模式同类型入口参数唯一时可自动推断，存在多个同类型入口参数或在 `LOAD` / `STORE` 模式选择同类型读写点时，用 `ordinal` 选择第 N 个同类型匹配项，因此应使用实际变量类型参与自动匹配。省略 `method` 时，handler 名称必须与目标方法名一致，框架会按变量类型、返回类型、`index` / `name` / `argsOnly` / `ordinal`、`slice` 限定后的实际读写候选和追加目标参数匹配唯一同名目标方法；`LOAD` / `STORE` 会用真实 `xLOAD` / `xSTORE` 候选参与重载推断，`name` 可用于区分保留 LocalVariableTable 的重载方法，多个兼容重载仍需要显式指定完整方法签名。关键变量补丁可设置 `require` / `allow` / `expect`，`HEAD` 按入口改写计 1 次，`LOAD` / `STORE` 按实际改写的读写点数量计数。`HEAD` 当前不使用 `slice`。
 
+`@ModifyVariable.name` 中的名称会先去除首尾空白，空白名称会在转换阶段失败，不会退化为无变量名过滤。
+
 普通 `@AsmInject` 也可以使用 `InjectionPoint.LOAD` 或 `InjectionPoint.STORE` 在局部变量读取前或写入后插入
 无参 handler，适合记录日志、打点或触发旁路逻辑。普通注入不会把局部变量值传给 handler，也不会写回变量；
 可以用 `Slice` 把候选读写指令限制在一段 `INVOKE` 边界内，也可以用
