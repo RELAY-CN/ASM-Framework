@@ -6,6 +6,7 @@ package kim.der.asm.injector.util
 
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
+import kim.der.asm.api.annotation.Shift
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.utils.transformer.BytecodeUtil
 import org.objectweb.asm.Opcodes
@@ -26,6 +27,11 @@ import org.objectweb.asm.tree.MethodInsnNode
  * @date 2026-06-05
  */
 internal object SliceBoundaryResolver {
+    /**
+     * 绝大多数注解只允许用 INVOKE 作为切片边界。
+     */
+    val INVOKE_BOUNDARIES: Set<InjectionPoint> = setOf(InjectionPoint.INVOKE)
+
     /**
      * `@ModifyConstant` 支持的切片边界类型。
      */
@@ -72,7 +78,13 @@ internal object SliceBoundaryResolver {
         return startIndex to endIndex.coerceAtLeast(startIndex)
     }
 
-    private fun isBoundaryDeclared(at: At): Boolean = at.value != InjectionPoint.HEAD || at.target.isNotEmpty()
+    private fun isBoundaryDeclared(at: At): Boolean =
+        // 只有完全默认的 At() 表示未声明边界；显式写出的空 INVOKE 必须作为配置错误暴露。
+        at.value != InjectionPoint.HEAD ||
+            at.target.isNotEmpty() ||
+            at.shift != Shift.BEFORE ||
+            at.by != 0 ||
+            at.args.isNotEmpty()
 
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
 

@@ -7,10 +7,10 @@ package kim.der.asm.injector.impl
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Operation
-import kim.der.asm.api.annotation.Shift
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
@@ -3838,93 +3838,13 @@ class WrapOperationInjector(
      * @param insns 目标方法指令数组
      * @return 可遍历的半开区间 `[start, end)`
      */
-    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
-        val startIndex =
-            if (hasSliceBoundary(slice.from)) {
-                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
-                fromIndex + 1
-            } else {
-                0
-            }
-        val endIndex =
-            if (hasSliceBoundary(slice.to)) {
-                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
-            } else {
-                insns.size
-            }
-
-        return startIndex to endIndex.coerceAtLeast(startIndex)
-    }
-
-    /**
-     * 判断切片边界是否显式声明。
-     *
-     * @param at 切片边界注解配置
-     * @return 不是默认 [At] 配置时返回 `true`
-     */
-    private fun hasSliceBoundary(at: At): Boolean =
-        // 默认 At() 才表示未声明边界；显式 INVOKE 空 target 必须进入解析并作为配置错误暴露。
-        at.value != InjectionPoint.HEAD ||
-            at.target.isNotEmpty() ||
-            at.shift != Shift.BEFORE ||
-            at.by != 0 ||
-            at.args.isNotEmpty()
-
-    /**
-     * 构造一个位于方法末尾的空切片范围。
-     *
-     * @param insns 目标方法指令数组
-     * @return 不会命中任何指令的半开区间
-     */
-    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
-
-    /**
-     * 从指定位置开始查找切片边界调用指令。
-     *
-     * 当前 `@WrapOperation` 的切片边界只支持 [InjectionPoint.INVOKE]，
-     * 可匹配普通方法调用、构造器调用或 `invokedynamic` 调用。
-     *
-     * @param insns 目标方法指令数组
-     * @param at 切片边界配置
-     * @param startIndex 起始搜索下标
-     * @return 匹配边界的指令下标；未命中时返回 `null`
-     * @throws IllegalArgumentException 边界注入点类型或目标方法签名不合法时抛出
-     */
-    private fun findSliceBoundaryIndex(
-        insns: Array<AbstractInsnNode>,
-        at: At,
-        startIndex: Int,
-    ): Int? {
-        require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @WrapOperation: ${at.value}"
-        }
-
-        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
-        if (boundaryName == null || boundaryDesc == null) {
-            throw IllegalArgumentException(
-                "Invalid WrapOperation slice boundary method signature: ${at.target} " +
-                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
-            )
-        }
-
-        for (index in startIndex until insns.size) {
-            val insn = insns[index]
-            if (
-                insn is MethodInsnNode &&
-                matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-            if (
-                insn is InvokeDynamicInsnNode &&
-                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-        }
-
-        return null
-    }
+    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> =
+        SliceBoundaryResolver.resolveRange(
+            insns,
+            slice,
+            "@WrapOperation",
+            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+        )
 
     /**
      * 解析注解中声明的方法目标签名。

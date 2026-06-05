@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
@@ -315,86 +316,13 @@ class RedirectInjector(
      * @param insns 目标方法指令数组
      * @return 左闭右开的指令范围
      */
-    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
-        val startIndex =
-            if (hasSliceBoundary(slice.from)) {
-                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
-                fromIndex + 1
-            } else {
-                0
-            }
-        val endIndex =
-            if (hasSliceBoundary(slice.to)) {
-                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
-            } else {
-                insns.size
-            }
-
-        return startIndex to endIndex.coerceAtLeast(startIndex)
-    }
-
-    /**
-     * 判断切片边界是否已声明目标。
-     *
-     * @param at 切片边界定位点
-     * @return `target` 非空时返回 `true`
-     */
-    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
-
-    /**
-     * 构造位于方法末尾的空切片范围。
-     *
-     * @param insns 目标方法指令数组
-     * @return 左右边界都等于指令数量的空范围
-     */
-    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
-
-    /**
-     * 查找切片边界方法调用在指令数组中的位置。
-     *
-     * 当前只支持 `INVOKE` 边界，可匹配普通方法调用或 `invokedynamic` 调用。
-     *
-     * @param insns 目标方法指令数组
-     * @param at 切片边界定位点
-     * @param startIndex 开始查找的指令下标
-     * @return 边界指令下标；未命中时返回 `null`
-     * @throws IllegalArgumentException 边界类型不是 [InjectionPoint.INVOKE] 或目标签名不完整时抛出
-     */
-    private fun findSliceBoundaryIndex(
-        insns: Array<AbstractInsnNode>,
-        at: At,
-        startIndex: Int,
-    ): Int? {
-        require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @Redirect: ${at.value}"
-        }
-
-        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
-        if (boundaryName == null || boundaryDesc == null) {
-            throw IllegalArgumentException(
-                "Invalid Redirect slice boundary method signature: ${at.target} " +
-                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
-            )
-        }
-
-        for (index in startIndex until insns.size) {
-            val insn = insns[index]
-            if (
-                insn is MethodInsnNode &&
-                matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-            if (
-                insn is InvokeDynamicInsnNode &&
-                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-        }
-
-        return null
-    }
+    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> =
+        SliceBoundaryResolver.resolveRange(
+            insns,
+            slice,
+            "@Redirect",
+            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+        )
 
     /**
      * 判断当前配置是否按字段读取语义重定向。

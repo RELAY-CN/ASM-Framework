@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -258,84 +259,13 @@ class ModifyArgInjector(
      * @param insns 目标方法指令快照
      * @return 左闭右开的候选扫描下标范围
      */
-    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> {
-        val startIndex =
-            if (hasSliceBoundary(slice.from)) {
-                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
-                fromIndex + 1
-            } else {
-                0
-            }
-        val endIndex =
-            if (hasSliceBoundary(slice.to)) {
-                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
-            } else {
-                insns.size
-            }
-
-        return startIndex to endIndex.coerceAtLeast(startIndex)
-    }
-
-    /**
-     * 判断切片边界是否声明了可匹配目标。
-     *
-     * @param at 切片边界注入点
-     * @return 边界 `target` 非空时返回 `true`
-     */
-    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
-
-    /**
-     * 构造空切片范围。
-     *
-     * @param insns 目标方法指令快照
-     * @return 位于指令末尾的空范围
-     */
-    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
-
-    /**
-     * 查找 `Slice` 边界调用点下标。
-     *
-     * 当前 `@ModifyArg(INVOKE)` 只支持以 [InjectionPoint.INVOKE] 作为切片边界，
-     * 边界可匹配普通方法调用、构造器调用或 `invokedynamic`。
-     *
-     * @param insns 目标方法指令快照
-     * @param at 切片边界声明
-     * @param startIndex 起始扫描下标
-     * @return 边界命中的指令下标；未找到时返回 `null`
-     * @throws IllegalArgumentException 边界不是 `INVOKE` 或目标签名不完整时抛出
-     */
-    private fun findSliceBoundaryIndex(
-        insns: Array<AbstractInsnNode>,
-        at: At,
-        startIndex: Int,
-    ): Int? {
-        require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @ModifyArg(INVOKE): ${at.value}"
-        }
-
-        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
-        if (boundaryName == null || boundaryDesc == null) {
-            throw IllegalArgumentException(
-                "Invalid ModifyArg slice boundary method signature: ${at.target} " +
-                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
-            )
-        }
-
-        for (index in startIndex until insns.size) {
-            val insn = insns[index]
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
-                return index
-            }
-            if (
-                insn is InvokeDynamicInsnNode &&
-                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-        }
-
-        return null
-    }
+    private fun resolveSliceRange(insns: Array<AbstractInsnNode>): Pair<Int, Int> =
+        SliceBoundaryResolver.resolveRange(
+            insns,
+            slice,
+            "@ModifyArg(INVOKE)",
+            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+        )
 
     /**
      * 构造调用点参数改写指令。

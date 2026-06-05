@@ -5,7 +5,6 @@
 package kim.der.asm.injector.impl
 
 import kim.der.asm.api.annotation.AsmInject
-import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Shift
@@ -13,6 +12,7 @@ import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.injector.util.AsmMethodCallGenerator
+import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -157,84 +157,13 @@ class InvokeInjector(
     private fun resolveSliceRange(
         insns: Array<AbstractInsnNode>,
         slice: Slice,
-    ): Pair<Int, Int> {
-        val startIndex =
-            if (hasSliceBoundary(slice.from)) {
-                val fromIndex = findSliceBoundaryIndex(insns, slice.from, 0) ?: return emptySlice(insns)
-                fromIndex + 1
-            } else {
-                0
-            }
-        val endIndex =
-            if (hasSliceBoundary(slice.to)) {
-                findSliceBoundaryIndex(insns, slice.to, startIndex) ?: return emptySlice(insns)
-            } else {
-                insns.size
-            }
-
-        return startIndex to endIndex.coerceAtLeast(startIndex)
-    }
-
-    /**
-     * 判断切片边界是否声明了可匹配目标。
-     *
-     * @param at 切片边界注入点
-     * @return 边界 `target` 非空时返回 `true`
-     */
-    private fun hasSliceBoundary(at: At): Boolean = at.target.isNotEmpty()
-
-    /**
-     * 构造空切片范围。
-     *
-     * @param insns 目标方法指令快照
-     * @return 位于指令末尾的空范围
-     */
-    private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
-
-    /**
-     * 查找 `Slice` 边界调用点下标。
-     *
-     * 当前调用点注入只支持以 [InjectionPoint.INVOKE] 作为切片边界，
-     * 边界可匹配普通方法调用、构造器调用或 `invokedynamic`。
-     *
-     * @param insns 目标方法指令快照
-     * @param at 切片边界声明
-     * @param startIndex 起始扫描下标
-     * @return 边界命中的指令下标；未找到时返回 `null`
-     * @throws IllegalArgumentException 边界不是 `INVOKE` 或目标签名不完整时抛出
-     */
-    private fun findSliceBoundaryIndex(
-        insns: Array<AbstractInsnNode>,
-        at: At,
-        startIndex: Int,
-    ): Int? {
-        require(at.value == InjectionPoint.INVOKE) {
-            "Only INVOKE slice boundaries are supported for @AsmInject(INVOKE/INVOKE_ASSIGN): ${at.value}"
-        }
-
-        val (boundaryOwner, boundaryName, boundaryDesc) = parseTargetMethod(at.target)
-        if (boundaryName == null || boundaryDesc == null) {
-            throw IllegalArgumentException(
-                "Invalid slice boundary method signature: ${at.target} " +
-                    "(parsed: owner=$boundaryOwner, name=$boundaryName, desc=$boundaryDesc)",
-            )
-        }
-
-        for (index in startIndex until insns.size) {
-            val insn = insns[index]
-            if (insn is MethodInsnNode && matchesTargetMethod(insn, boundaryOwner, boundaryName, boundaryDesc)) {
-                return index
-            }
-            if (
-                insn is InvokeDynamicInsnNode &&
-                matchesTargetInvokeDynamic(insn, boundaryOwner, boundaryName, boundaryDesc)
-            ) {
-                return index
-            }
-        }
-
-        return null
-    }
+    ): Pair<Int, Int> =
+        SliceBoundaryResolver.resolveRange(
+            insns,
+            slice,
+            "@AsmInject(INVOKE/INVOKE_ASSIGN)",
+            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+        )
 
     /**
      * 判断当前匹配序号是否满足 `ordinal` 过滤。
