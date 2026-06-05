@@ -371,21 +371,21 @@ object RemoveInterfacesMixin
 - `target: InjectionPoint = InjectionPoint.HEAD` - 注入点位置
 - `cancellable: Boolean = false` - 是否允许 handler 调用 `CallbackInfo.cancel()` 或通过 `CallbackInfo.setReturnValue(...)` 触发取消；当前 `HEAD`、`TAIL` 与普通 `INVOKE` / `INVOKE_ASSIGN` 的 `BEFORE` / `AFTER` 注入会据此生成提前返回分支
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
-- `at: At = At()` - 精确注入位置；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可通过 `["name=localName"]` 按 LocalVariableTable 变量名过滤
+- `at: At = At()` - 精确注入位置；普通 `INVOKE_STRING` 必须且只能通过一个 `at.args = ["ldc=value"]` 或 `["string=value"]` 过滤直接字符串常量实参；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可通过 `["name=localName"]` 按 LocalVariableTable 变量名过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
-- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
+- `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
 - `inline: Boolean = false` - 是否内联代码
 
 handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 `CallbackInfoReturnable<T>` 标注返回值类型。
-普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
+普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
 指令点注入，可在回调参数后按顺序接收目标方法参数前缀。
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入和 `INVOKE_ASSIGN` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入；`invokedynamic` 调用没有 receiver，handler 参数来自动态调用点描述符。
 `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。普通 `INVOKE_ASSIGN` 默认在调用完成后插入；需要调用前插入时使用普通 `INVOKE`。`Shift.REPLACE` 对普通 `INVOKE` 按替换原调用处理，
-handler 参数对应原调用参数，返回值需要与原调用返回类型兼容；对普通 `CONSTANT` 按替换原常量加载处理，handler 返回值需要与原常量类型兼容，且不接收原常量值。
+handler 参数对应原调用参数，返回值需要与原调用返回类型兼容；普通 `INVOKE_STRING` 使用 `At.target` 匹配普通方法调用，并用唯一一个 `at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用实参中的直接 `LDC String`，它不接收或替换该字符串，也不追踪局部变量、字符串拼接、方法返回值或 `invokedynamic`；对普通 `CONSTANT` 按替换原常量加载处理，handler 返回值需要与原常量类型兼容，且不接收原常量值。
 除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD` / `TAIL` / `RETURN`、`INVOKE` 的 `BEFORE` / `AFTER`、`INVOKE_ASSIGN`
 以及普通非替换指令点注入的 handler 返回值不会参与目标方法结果，框架会在调用后丢弃该返回值以保持栈平衡。
 省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容注入点的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。
@@ -399,13 +399,13 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 `@AsmInject` 会统计实际命中的注入点数量。默认至少需要 1 次命中；`require` 可提高最小命中数，`allow`
 可限制最大命中数，违反时会在转换阶段失败。`expect` 用于调试期望值，设置为非默认值且与实际命中数不一致时只输出警告。
 
-普通 `@AsmInject(target = InjectionPoint.INVOKE / INVOKE_ASSIGN)`、普通 `@AsmInject(target = InjectionPoint.FIELD / FIELD_ASSIGN)`、
+普通 `@AsmInject(target = InjectionPoint.INVOKE / INVOKE_ASSIGN / INVOKE_STRING)`、普通 `@AsmInject(target = InjectionPoint.FIELD / FIELD_ASSIGN)`、
 普通 `@AsmInject(target = InjectionPoint.LOAD / STORE)` 与普通 `@AsmInject(target = InjectionPoint.NEW / CAST / INSTANCEOF / JUMP / SWITCH / CONSTANT / THROW)`
 支持 `slice.from` / `slice.to` 为 `InjectionPoint.INVOKE` 的切片边界。框架只在起始边界之后、
-结束边界之前查找目标调用、字段读写指令、局部变量读写指令、对象创建、类型转换、类型判断、跳转、switch、常量或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
+结束边界之前查找目标调用、带直接字符串常量实参的目标调用、字段读写指令、局部变量读写指令、对象创建、类型转换、类型判断、跳转、switch、常量或抛异常指令；边界调用本身不会作为候选注入点，`ordinal`
 也会在切片内重新计数。指定的边界未命中时，切片按空范围处理，不会回退到全方法查找。
 
-`FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 属于指令点注入。它们默认会在匹配指令附近插入 handler，不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、switch selector、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位，也可用 `["name=localName"]` 只匹配 LocalVariableTable 作用域内的同名变量；目标 class 缺少调试变量表时名称过滤不会命中，应改用槽位或 `ordinal`。普通 `JUMP` 可省略 `At.target` 匹配所有跳转，或使用 `IFEQ`、`IF_ICMPGT`、数字操作码等只匹配指定跳转指令，但不会改变控制流；普通 `SWITCH` 匹配 `tableswitch` 与 `lookupswitch`，不支持 `At.target`，也不会改变 selector；普通 `CONSTANT` 可省略 `At.target` 匹配所有常量，或使用字符串、数字、`null`、类名、方法描述符等常量文本过滤；`Shift.REPLACE` 会用 handler 返回值替换匹配常量加载，`BEFORE` / `AFTER` 仍只观察常量位置；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但仍不会把异常对象传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `INSTANCEOF` 只观察类型判断位置，不接收也不改写 boolean 结果；需要改写类型判断结果时使用 `@ModifyExpressionValue`。普通 `THROW` 只观察抛异常位置；需要直接替换异常对象时使用 `@Redirect(THROW)`，需要保留原指令并改写异常对象时使用 `@ModifyExpressionValue(THROW)`，需要保留可调用原异常对象的操作句柄时使用 `@WrapOperation(THROW)`，只需要按条件决定是否保留原抛出时使用 `@WrapWithCondition(THROW)`。普通 `NEW` 不支持 `At.by`，且只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
+`INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 属于指令点注入。它们默认会在匹配指令附近插入 handler，不会自动把调用字符串实参、栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、switch selector、常量值或异常对象传给 handler。普通 `INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数向前或向后移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `INVOKE_STRING` 只作为直接字符串常量实参观察 hook，`At.target` 必须指向普通方法调用，`At.args` 必须提供 `ldc=<string>` 或 `string=<string>`，不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic`；普通 `LOAD` / `STORE` 只作为观察 hook，可用 `at.args = ["index=N"]` 或 `["var=N"]` 只匹配指定 JVM 局部变量槽位，也可用 `["name=localName"]` 只匹配 LocalVariableTable 作用域内的同名变量；目标 class 缺少调试变量表时名称过滤不会命中，应改用槽位或 `ordinal`。普通 `JUMP` 可省略 `At.target` 匹配所有跳转，或使用 `IFEQ`、`IF_ICMPGT`、数字操作码等只匹配指定跳转指令，但不会改变控制流；普通 `SWITCH` 匹配 `tableswitch` 与 `lookupswitch`，不支持 `At.target`，也不会改变 selector；普通 `CONSTANT` 可省略 `At.target` 匹配所有常量，或使用字符串、数字、`null`、类名、方法描述符等常量文本过滤；`Shift.REPLACE` 会用 handler 返回值替换匹配常量加载，`BEFORE` / `AFTER` 仍只观察常量位置；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但仍不会把异常对象传给 handler；需要读取并写回变量值时使用 `@ModifyVariable`。普通 `INSTANCEOF` 只观察类型判断位置，不接收也不改写 boolean 结果；需要改写类型判断结果时使用 `@ModifyExpressionValue`。普通 `THROW` 只观察抛异常位置；需要直接替换异常对象时使用 `@Redirect(THROW)`，需要保留原指令并改写异常对象时使用 `@ModifyExpressionValue(THROW)`，需要保留可调用原异常对象的操作句柄时使用 `@WrapOperation(THROW)`，只需要按条件决定是否保留原抛出时使用 `@WrapWithCondition(THROW)`。普通 `NEW` 不支持 `At.by`，且只支持 `Shift.BEFORE` 与 `Shift.REPLACE`，避免在未初始化对象仍位于栈顶时插入普通方法调用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -1381,6 +1381,7 @@ fun wrapLoad(operation: Operation<String>): String {
 - `RETURN` - 返回前（每个 RETURN 之前）
 - `INVOKE` - 方法调用前
 - `INVOKE_ASSIGN` - 方法调用后
+- `INVOKE_STRING` - 带直接字符串常量实参的方法调用前
 - `FIELD` - 字段访问前
 - `FIELD_ASSIGN` - 字段赋值前
 - `LOAD` - 局部变量读取前
@@ -1395,6 +1396,7 @@ fun wrapLoad(operation: Operation<String>): String {
 
 普通 `@AsmInject(INVOKE_ASSIGN)` 复用调用点注入器，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，但默认在匹配调用完成后插入 handler；如果需要调用前注入，应使用普通 `@AsmInject(INVOKE)`。
 `invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+普通 `@AsmInject(INVOKE_STRING)` 使用指令点注入器，只观察普通方法调用实参中的直接 `LDC String`，必须通过 `At.target` 指定普通方法调用，并通过 `args = ["ldc=value"]` 或 `["string=value"]` 指定字符串常量；它不会接收或替换该字符串，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic`。
 `@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”；省略调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；把
 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
 完成后的元素值”，当 `args = ["array=length"]` 时解释为“匹配数组长度值”，把 `FIELD_ASSIGN` 解释为“匹配字段写入前的待写入值”，当 `FIELD_ASSIGN + args = ["array=set"]` 时解释为“匹配数组元素写入前的待写入元素值”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
@@ -1406,11 +1408,13 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 `@WrapWithCondition` 会把 `INVOKE` 解释为“匹配普通方法调用或 `invokedynamic` 调用前的条件判断”，把 `FIELD`
 解释为“匹配字段读取结果后的条件判断”；当 `FIELD + args = ["array=get"]` 时解释为“匹配数组元素读取结果后的条件判断”，
 当 `FIELD + args = ["array=length"]` 时解释为“匹配数组长度读取结果后的条件判断”，把 `FIELD_ASSIGN`
-解释为“匹配字段写入或数组元素写入前的条件判断”，把 `LOAD` 解释为“匹配局部变量读取结果后的条件判断”，把 `STORE` 解释为“匹配局部变量写入前的条件判断”，把 `CONSTANT` 解释为“匹配常量加载结果后的条件判断”，把 `JUMP` 解释为“匹配条件跳转分支结果前的条件判断”，把 `THROW` 解释为“匹配即将抛出的异常前的条件判断”。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`
+解释为“匹配字段写入或数组元素写入前的条件判断”，把 `LOAD` 解释为“匹配局部变量读取结果后的条件判断”，把 `STORE` 解释为“匹配局部变量写入前的条件判断”，把 `CONSTANT` 解释为“匹配常量加载结果后的条件判断”，把 `JUMP` 解释为“匹配条件跳转分支结果前的条件判断”，把 `THROW` 解释为“匹配即将抛出的异常前的条件判断”。普通 `@AsmInject(INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`
 使用指令点注入器，支持 `Shift.BEFORE` 与 `Shift.AFTER`，并支持 `At.by` 按真实字节码指令数移动插入锚点；
 普通 `@AsmInject(NEW)` 只支持
-`Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 可用 `Slice`
-把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
+`Shift.BEFORE` 与 `Shift.REPLACE`，且不支持 `At.by`。普通 `@AsmInject(INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 可用 `Slice`
+把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(INVOKE_STRING)` 只作为直接字符串常量实参调用点附近的观察 hook，
+不会把字符串实参传给 handler，也可以用
+`at.args = ["ldc=value"]` 或 `["string=value"]` 按调用实参中的直接 `LDC String` 过滤。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
 不会把局部变量值传给 handler，也可以用
 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。需要只替换本次读取表达式值时使用 `@ModifyExpressionValue(LOAD)`，需要改写本次写入前栈值并让原 `xSTORE` 继续写入时使用 `@ModifyExpressionValue(STORE)`，需要保留可调用原读取值的操作句柄时使用 `@WrapOperation(LOAD)`，需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时使用 `@WrapOperation(STORE)`，需要读取并写回变量值时使用 `@ModifyVariable`。
 普通 `@AsmInject(INSTANCEOF)` 只在匹配类型判断指令前后插入 handler，不接收也不修改 boolean 结果；需要替换类型判断时使用 `@Redirect`，需要按需调用原判断时使用 `@WrapOperation`，只需要改写类型判断结果时使用
@@ -1425,14 +1429,15 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `value: InjectionPoint = InjectionPoint.HEAD` - 注入点类型
 - `target: String = ""` - 目标方法、字段或类型签名
 - `shift: Shift = Shift.BEFORE` - 偏移方向
-- `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 支持按真实字节码指令数正负移动锚点
+- `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)` 支持按真实字节码指令数正负移动锚点
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`、
   `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapWithCondition` 当前支持 `array=get`、`array=length`、`array=set` 与 `LOAD` / `STORE` 的 `index=N`、`var=N`、`name=localName` 局部变量过滤，其中 `array=get` / `array=length` 需配合 `FIELD`，`array=set` 需配合 `FIELD_ASSIGN`；`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
-  与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=set` 需配合 `FIELD_ASSIGN`；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
+  与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=set` 需配合 `FIELD_ASSIGN`；普通 `@AsmInject(INVOKE_STRING)` 当前必须且只能声明一个 `ldc=<string>` 或 `string=<string>` 直接字符串常量实参过滤；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
 
 **`target` 格式：**
 
 - `INVOKE`: `owner.name(desc)` 或 `name(desc)`，例如 `java/lang/String.trim()Ljava/lang/String;`
+- `INVOKE_STRING`: `owner.name(desc)`，并通过唯一一个 `args = ["ldc=value"]` 或 `["string=value"]` 匹配调用实参中的直接字符串常量；只支持普通方法调用，owner 必填
 - `FIELD`: `owner.field:desc`、`field:desc` 或 `field`，例如 `com/example/Target.name:Ljava/lang/String;`
 - `FIELD_ASSIGN`: 与 `FIELD` 相同，但只匹配 `PUTFIELD` / `PUTSTATIC`
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
@@ -1451,6 +1456,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 `@ModifyExpressionValue` 可在 `FIELD_ASSIGN` 目标上改写 `PUTFIELD` / `PUTSTATIC` 消费前的字段待写入值。也可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；在 `FIELD_ASSIGN` 目标上使用 `args = ["array=set"]`，改写紧随目标数组字段后的 `xASTORE` 待写入元素值；或使用 `args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。`@ModifyExpressionValue(LOAD)` 可用 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 改写指定槽位或 LocalVariableTable 变量名的本次 `xLOAD` 读取表达式值，不写回局部变量槽位；`@ModifyExpressionValue(STORE)` 可用同样的槽位或名称过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。
 普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
 的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会把槽位值传入 handler，也不会写回槽位。
+普通 `@AsmInject(INVOKE_STRING)` 必须且只能使用一个 `args = ["ldc=value"]` 或 `args = ["string=value"]`，只在目标调用的实参栈来源包含直接 `LDC String` 时插入 handler；它不会追踪先保存到局部变量再传入的同值字符串，也不会追踪拼接字符串、方法返回值或 `invokedynamic` 生成的字符串。
 
 **示例：**
 
@@ -1474,7 +1480,7 @@ At(
 
 ### Slice
 
-用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`
+用于定义查找范围。当前普通 `@AsmInject(target = InjectionPoint.INVOKE / InjectionPoint.INVOKE_STRING / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、`@Redirect(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`
 以及 `@ModifyArg(at.value = InjectionPoint.INVOKE)`、`@ModifyArgs(at.value = InjectionPoint.INVOKE)`、
 `@ModifyReceiver(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN)`、`@WrapOperation(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.NEW / InjectionPoint.CAST / InjectionPoint.INSTANCEOF / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.JUMP / InjectionPoint.SWITCH / InjectionPoint.CONSTANT / InjectionPoint.THROW)`、
 `@WrapWithCondition(at.value = InjectionPoint.INVOKE / InjectionPoint.FIELD / InjectionPoint.FIELD_ASSIGN / InjectionPoint.LOAD / InjectionPoint.STORE / InjectionPoint.CONSTANT / InjectionPoint.JUMP / InjectionPoint.THROW)`、

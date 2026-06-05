@@ -42,6 +42,7 @@ object AsmInjectorFactory {
             InjectionPoint.RETURN -> ReturnInjector(method, asmInfo)
             InjectionPoint.INVOKE -> InvokeInjector(method, asmInfo, injectionPoint)
             InjectionPoint.INVOKE_ASSIGN -> InvokeInjector(method, asmInfo, injectionPoint)
+            InjectionPoint.INVOKE_STRING,
             InjectionPoint.FIELD,
             InjectionPoint.FIELD_ASSIGN,
             InjectionPoint.NEW,

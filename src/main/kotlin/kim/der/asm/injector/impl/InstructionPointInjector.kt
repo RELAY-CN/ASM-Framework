@@ -21,6 +21,7 @@ import org.objectweb.asm.tree.FieldInsnNode
 import org.objectweb.asm.tree.InsnList
 import org.objectweb.asm.tree.InvokeDynamicInsnNode
 import org.objectweb.asm.tree.JumpInsnNode
+import org.objectweb.asm.tree.LdcInsnNode
 import org.objectweb.asm.tree.LocalVariableNode
 import org.objectweb.asm.tree.LookupSwitchInsnNode
 import org.objectweb.asm.tree.MethodInsnNode
@@ -28,19 +29,26 @@ import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TableSwitchInsnNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
+import org.objectweb.asm.tree.analysis.Analyzer
+import org.objectweb.asm.tree.analysis.AnalyzerException
+import org.objectweb.asm.tree.analysis.Frame
+import org.objectweb.asm.tree.analysis.SourceInterpreter
+import org.objectweb.asm.tree.analysis.SourceValue
 import java.lang.reflect.Method
 
 /**
  * 指令点注入器。
  *
- * 用于处理字段访问、字段赋值、局部变量读写、对象创建、类型转换、类型判断、跳转、switch、常量与抛异常等单条字节码指令附近的普通 `@AsmInject`。
+ * 用于处理字符串实参调用点、字段访问、字段赋值、局部变量读写、对象创建、类型转换、类型判断、跳转、switch、常量与抛异常等单条字节码指令附近的普通 `@AsmInject`。
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
- * 普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
+ * 普通 [InjectionPoint.INVOKE_STRING] / [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] /
  * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
  * 边界缩小候选指令查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；
  * 也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
  * `index=N` 或 `var=N` 限制 JVM 局部变量槽位，也可用 `name=localName` 按 LocalVariableTable 名称过滤；
+ * INVOKE_STRING 使用 `At.target` 匹配普通方法调用，并用 `At.args` 中的 `ldc=<string>` 或 `string=<string>`
+ * 匹配该调用实参里的直接 `LDC String`，不追踪局部变量、字符串拼接或 `invokedynamic`；
  * JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，SWITCH 不支持 `At.target`，CONSTANT
  * 指定 `At.target` 时按常量文本过滤，THROW 指定 `At.target`
  * 时只匹配 `ATHROW` 前直接构造出的同类型异常。
@@ -87,7 +95,7 @@ class InstructionPointInjector(
         val injectAnnotation = asmMethod.getAnnotation(AsmInject::class.java) ?: return 0
         requireSupportedShift(injectAnnotation.at.shift, injectAnnotation.at.by)
         val localVariableFilter = parseLocalVariableFilter(injectAnnotation.at.args)
-        val matcher = buildMatcher(target, injectAnnotation.at.target, localVariableFilter)
+        val matcher = buildMatcher(target, injectAnnotation.at.target, localVariableFilter, injectAnnotation.at.args)
         val instructions = target.instructions
         val insns = instructions.toArray()
         val (sliceStartIndex, sliceEndIndex) =
@@ -144,6 +152,7 @@ class InstructionPointInjector(
     private fun usesSliceRange(): Boolean =
         point == InjectionPoint.LOAD ||
             point == InjectionPoint.STORE ||
+            point == InjectionPoint.INVOKE_STRING ||
             point == InjectionPoint.FIELD ||
             point == InjectionPoint.FIELD_ASSIGN ||
             point == InjectionPoint.NEW ||
@@ -463,11 +472,12 @@ class InstructionPointInjector(
      * 构造当前指令点的候选指令匹配器。
      *
      * 匹配器会把 `At.target` 解析为字段、类型、跳转 opcode、常量文本或异常类型约束；
-     * `LOAD` / `STORE` 还会叠加局部变量槽位或名称过滤。
+     * `INVOKE_STRING` 会叠加直接字符串常量实参过滤，`LOAD` / `STORE` 还会叠加局部变量槽位或名称过滤。
      *
      * @param method 目标方法
      * @param target 注解声明的 `At.target`
      * @param localVariableFilter `LOAD` / `STORE` 的局部变量过滤条件
+     * @param args 注解声明的 `At.args`
      * @return 用于筛选候选指令的谓词
      * @throws IllegalArgumentException 当前指令点不支持声明的目标格式时抛出
      */
@@ -475,8 +485,27 @@ class InstructionPointInjector(
         method: MethodNode,
         target: String,
         localVariableFilter: LocalVariableFilter,
+        args: Array<String>,
     ): (AbstractInsnNode) -> Boolean {
         return when (point) {
+            InjectionPoint.INVOKE_STRING -> {
+                val stringLiteral = parseInvokeStringLiteral(args)
+                val (targetOwner, targetName, targetDesc) = parseTargetMethod(target)
+                if (targetOwner == null || targetName == null || targetDesc == null) {
+                    throw IllegalArgumentException(
+                        "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc): $target",
+                    )
+                }
+                val frames = analyzeSourceFrames(method)
+                val insns = method.instructions.toArray()
+                fun(insn: AbstractInsnNode): Boolean {
+                    if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
+                        return false
+                    }
+                    val index = insns.indexOf(insn)
+                    return index >= 0 && methodCallHasDirectStringArgument(frames[index], insn, stringLiteral)
+                }
+            }
             InjectionPoint.FIELD -> {
                 val fieldTarget = parseFieldTarget(target)
                 fun(insn: AbstractInsnNode): Boolean =
@@ -923,6 +952,98 @@ class InstructionPointInjector(
             }
         val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
         return Class.forName(className, false, classLoader)
+    }
+
+    /**
+     * 解析 `INVOKE_STRING` 的直接字符串常量过滤条件。
+     *
+     * `ldc=` 与 `string=` 是等价写法；必须显式声明一个过滤值，避免该注入点退化成宽泛方法调用匹配。
+     *
+     * @param args `At.args` 中的附加定位参数
+     * @return 需要匹配的直接字符串常量
+     * @throws IllegalArgumentException 未声明或重复声明字符串过滤条件时抛出
+     */
+    private fun parseInvokeStringLiteral(args: Array<String>): String {
+        require(args.isNotEmpty()) {
+            "@AsmInject(INVOKE_STRING) requires at.args entry ldc=<string> or string=<string>"
+        }
+        require(args.size == 1) {
+            "@AsmInject(INVOKE_STRING) supports only one at.args entry ldc=<string> or string=<string>"
+        }
+        val arg = args.single().trim()
+        return when {
+            arg.startsWith("ldc=") -> arg.substringAfter("ldc=")
+            arg.startsWith("string=") -> arg.substringAfter("string=")
+            else -> throw IllegalArgumentException(
+                "@AsmInject(INVOKE_STRING) requires at.args entry ldc=<string> or string=<string>",
+            )
+        }
+    }
+
+    /**
+     * 使用 ASM 数据流分析获取每条指令执行前的来源集合。
+     *
+     * 当前只用它判断目标调用消费的参数是否直接来自 `LDC String`，不尝试追踪局部变量写入来源或字符串拼接来源。
+     *
+     * @param method 目标方法
+     * @return 与指令数组下标对应的分析帧
+     * @throws IllegalStateException ASM 分析失败时抛出，消息保留目标方法签名方便定位
+     */
+    private fun analyzeSourceFrames(method: MethodNode): Array<Frame<SourceValue>?> =
+        try {
+            Analyzer(SourceInterpreter()).analyze(analysisOwner(), method)
+        } catch (e: AnalyzerException) {
+            throw IllegalStateException(
+                "@AsmInject(INVOKE_STRING) cannot analyze target method ${method.name}${method.desc}",
+                e,
+            )
+        }
+
+    /**
+     * 解析数据流分析使用的 owner。
+     *
+     * 精确目标注册优先使用目标类；路径匹配注册没有固定目标类，此处退回 ASM 类名即可，因为 SourceInterpreter
+     * 对本次 `LDC String` 来源判断不依赖 owner 的继承关系或类加载。
+     *
+     * @return JVM internal name
+     */
+    private fun analysisOwner(): String =
+        asmInfo.targets.firstOrNull()
+            ?: Type.getType(asmInfo.asmClass).internalName
+
+    /**
+     * 判断方法调用的实参来源中是否包含指定的直接 `LDC String`。
+     *
+     * 只检查调用指令消费的参数区间，不检查 receiver；`ALOAD local` 这类局部变量来源不会被当作直接字符串常量。
+     *
+     * @param frame 调用指令执行前的分析帧
+     * @param insn 候选普通方法调用
+     * @param stringLiteral 需要匹配的字符串常量
+     * @return 调用实参直接来自指定 `LDC String` 时返回 `true`
+     */
+    private fun methodCallHasDirectStringArgument(
+        frame: Frame<SourceValue>?,
+        insn: MethodInsnNode,
+        stringLiteral: String,
+    ): Boolean {
+        if (frame == null) {
+            return false
+        }
+
+        // ASM Frame 的 operand stack 按 value entry 计数，long/double 仍只占一个 SourceValue。
+        val argumentValueCount = Type.getArgumentTypes(insn.desc).size
+        val firstArgumentIndex = frame.stackSize - argumentValueCount
+        if (firstArgumentIndex < 0) {
+            return false
+        }
+
+        for (stackIndex in firstArgumentIndex until frame.stackSize) {
+            val source = frame.getStack(stackIndex)
+            if (source.insns.any { it is LdcInsnNode && it.cst == stringLiteral }) {
+                return true
+            }
+        }
+        return false
     }
 
     /**

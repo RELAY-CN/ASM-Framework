@@ -29,6 +29,7 @@
 | 只按条件决定是否保留原调用、字段读写、数组元素读取/写入、数组长度、变量读写、常量、分支或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整 |
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
+| 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |
 
 ### 1. 旧的调用替换逻辑
 
@@ -52,12 +53,19 @@
 
 - 用 `@AsmInject`、`@WrapWithCondition`、`@ModifyExpressionValue` 等注解表达明确的插桩语义
 - 若只是要观测某个调用点，优先在目标方法上直接写一个注解式 handler
+- 若旧监听只关心“调用某方法且某个参数是固定字符串字面量”，迁移为普通
+  `@AsmInject(target = InjectionPoint.INVOKE_STRING)`；这是注解式观察点，不回流旧 listener 或 manager 兼容层
 
 字段读取这类“原逻辑仍然执行，但某些情况下不要使用原字段值”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.FIELD, target = "..."))`。handler 首参接收已经读取出的字段值，
 返回 `true` 时保留该值，返回 `false` 时框架压入字段类型默认值；该模式不把 `GETFIELD` receiver 传给 handler。
 数组元素读取和数组长度读取可分别使用 `FIELD + args = ["array=get"]` 与 `FIELD + args = ["array=length"]`；
 handler 只接收已经读取出的元素值或 `Int` 长度，不接收数组引用或索引。
+
+字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`。它只匹配调用实参中的直接 `LDC String`，
+且 `At.target` 必须写包含 owner 的 `owner.name(desc)`，
+不会把该字符串传给 handler，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic` 生成的字符串。
+需要替换字符串实参时，应使用 `@ModifyArg` 或 `@ModifyArgs`，而不是把 `INVOKE_STRING` 当作替换能力。
 
 ### 3. 旧的目标方法描述
 
@@ -110,6 +118,32 @@ object TargetMixin {
 
 上例在 `displayName` 字段读取后插入条件判断。返回 `true` 时继续使用原字段值；返回 `false` 时本次读取表达式变为
 `String` 的默认值。
+
+字符串调用监听迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @AsmInject(
+        method = "run()V",
+        target = InjectionPoint.INVOKE_STRING,
+        at = At(
+            value = InjectionPoint.INVOKE_STRING,
+            target = "com/example/Audit.emit(Ljava/lang/String;)V",
+            args = ["ldc=marker"],
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun beforeMarkerAudit() {
+        // 只观察该调用点；不接收或替换 marker 字符串
+    }
+}
+```
+
+上例只会在 `Audit.emit("marker")` 这类直接字符串常量实参调用点附近插入 handler。同值字符串如果先写入局部变量、
+由字符串拼接得到，或来自方法返回值，都不会被该规则命中。
 
 ## 兼容性说明
 

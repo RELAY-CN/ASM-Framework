@@ -5300,6 +5300,177 @@ class FrameworkReliabilityTest {
     }
 
     @Nested
+    @DisplayName("@AsmInject INVOKE_STRING 字符串调用点场景")
+    inner class AsmInjectInvokeStringScenarios {
+        @Test
+        @DisplayName("直接字符串实参应只命中包含 marker 的目标调用")
+        fun directStringArgumentMatchesOnlyMarkedInvocation() {
+            // Given
+            AsmRegistry.register(InvokeStringMarkerMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("InvokeStringTarget", invokeStringTargetBytes(), javaClass.classLoader)
+            val classNode = readClass(transformed)
+            val method = classNode.methods.single { it.name == "run" && it.desc == "()V" }
+            val instructions = method.instructions.toArray()
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeStringMarkerMixin::class.java)
+            val handlerCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+                if (insn is org.objectweb.asm.tree.MethodInsnNode && insn.owner == mixinOwner && insn.name == "inject") {
+                    index
+                } else {
+                    null
+                }
+            }
+            val targetCallIndexes = instructions.mapIndexedNotNull { index, insn ->
+                if (
+                    insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == "InvokeStringTarget" &&
+                    insn.name == "target" &&
+                    insn.desc == "(Ljava/lang/String;)V"
+                ) {
+                    index
+                } else {
+                    null
+                }
+            }
+            fun previousNonHandlerRealInstructionIndex(callIndex: Int): Int {
+                for (index in callIndex - 1 downTo 0) {
+                    val insn = instructions[index]
+                    val isHandlerCall =
+                        insn is org.objectweb.asm.tree.MethodInsnNode &&
+                            insn.owner == mixinOwner &&
+                            insn.name == "inject"
+                    if (insn.opcode >= 0 && !isHandlerCall) {
+                        return index
+                    }
+                }
+                return -1
+            }
+            val directMarkerCallIndexes = targetCallIndexes.filter { callIndex ->
+                val previousIndex = previousNonHandlerRealInstructionIndex(callIndex)
+                val previous = instructions.getOrNull(previousIndex)
+                previous is org.objectweb.asm.tree.LdcInsnNode && previous.cst == "marker"
+            }
+
+            // Then
+            assertThat(targetCallIndexes)
+                .`as`("Given: 目标方法存在三次相同调用，覆盖非 marker、直接 marker 与同值局部变量三种业务形态")
+                .hasSize(3)
+            assertThat(directMarkerCallIndexes)
+                .`as`("Given: 只有一次目标调用的上一个业务指令是直接 LDC 字符串 marker")
+                .hasSize(1)
+            assertThat(handlerCallIndexes)
+                .`as`("Then: INVOKE_STRING 只应在包含 marker 直接字符串实参的调用点前插入 handler")
+                .hasSize(1)
+            val directMarkerCallIndex = directMarkerCallIndexes.single()
+            val directMarkerLoadIndex = previousNonHandlerRealInstructionIndex(directMarkerCallIndex)
+            val handlerCallIndex = handlerCallIndexes.single()
+            assertThat(handlerCallIndex)
+                .`as`("Then: handler 应位于直接 marker 常量加载之后、目标调用之前，不应命中同值局部变量调用")
+                .isGreaterThan(directMarkerLoadIndex)
+                .isLessThan(directMarkerCallIndex)
+        }
+
+        @Test
+        @DisplayName("缺少 ldc 参数时应在转换阶段暴露配置错误")
+        fun missingLdcArgumentFailsWithClearConfigurationError() {
+            // Given
+            AsmRegistry.register(MissingInvokeStringArgumentMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("InvokeStringTarget", invokeStringTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: INVOKE_STRING 必须显式声明字符串实参过滤，避免退化成宽泛 INVOKE 匹配")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage("@AsmInject(INVOKE_STRING) requires at.args entry ldc=<string> or string=<string>")
+        }
+
+        @Test
+        @DisplayName("额外 args 参数应在转换阶段暴露配置错误")
+        fun extraInvokeStringArgumentFailsWithClearConfigurationError() {
+            // Given
+            AsmRegistry.register(ExtraInvokeStringArgumentMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("InvokeStringTarget", invokeStringTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: INVOKE_STRING 只允许一个 ldc/string 过滤参数，避免误配置被静默忽略")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@AsmInject(INVOKE_STRING) supports only one at.args entry ldc=<string> or string=<string>",
+                )
+        }
+
+        @Test
+        @DisplayName("缺少直接 marker 字符串调用点时应按命中数契约失败")
+        fun missingDirectMarkerArgumentFailsByInjectionCountContract() {
+            // Given
+            AsmRegistry.register(InvokeStringMarkerMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "InvokeStringTarget",
+                    invokeStringTargetBytes(includeDirectMarker = false),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: INVOKE_STRING 只能匹配直接字符串常量，不能退回同值局部变量或普通 INVOKE")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@AsmInject handler inject requires at least 1 injection(s), " +
+                        "actual 0 in target method run()V of class InvokeStringTarget",
+                )
+        }
+
+        @Test
+        @DisplayName("省略 owner 的 target 应在转换阶段暴露配置错误")
+        fun ownerlessTargetFailsWithClearConfigurationError() {
+            // Given
+            AsmRegistry.register(OwnerlessInvokeStringTargetMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("InvokeStringTarget", invokeStringTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: INVOKE_STRING 的目标调用必须精确到 owner，避免同名同签名调用误命中")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc): target(Ljava/lang/String;)V",
+                )
+        }
+
+        @Test
+        @DisplayName("包含 long 参数的调用仍应命中直接字符串实参")
+        fun longArgumentBeforeDirectStringArgumentStillMatches() {
+            // Given
+            AsmRegistry.register(InvokeStringLongArgumentMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform(
+                "InvokeStringLongArgumentTarget",
+                invokeStringLongArgumentTargetBytes(),
+                javaClass.classLoader,
+            )
+            val classNode = readClass(transformed)
+            val method = classNode.methods.single { it.name == "run" && it.desc == "()V" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeStringLongArgumentMixin::class.java)
+            val handlerCallCount = method.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "inject"
+            }
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: ASM Frame 按值而非 JVM slot 计数，long 参数不应导致 marker 实参漏匹配")
+                .isEqualTo(1)
+        }
+    }
+
+    @Nested
     @DisplayName("@ModifyConstant Slice 边界场景")
     inner class ModifyConstantSliceBoundaryScenarios {
         @Test
@@ -16674,6 +16845,95 @@ class FrameworkReliabilityTest {
         fun inject(): Boolean = false
     }
 
+    @AsmMixin("InvokeStringTarget")
+    object InvokeStringMarkerMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "InvokeStringTarget.target(Ljava/lang/String;)V",
+                args = ["ldc=marker"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("InvokeStringTarget")
+    object MissingInvokeStringArgumentMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "InvokeStringTarget.target(Ljava/lang/String;)V",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("InvokeStringTarget")
+    object ExtraInvokeStringArgumentMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "InvokeStringTarget.target(Ljava/lang/String;)V",
+                args = ["ldc=marker", "var=1"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("InvokeStringTarget")
+    object OwnerlessInvokeStringTargetMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "target(Ljava/lang/String;)V",
+                args = ["ldc=marker"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("InvokeStringLongArgumentTarget")
+    object InvokeStringLongArgumentMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "InvokeStringLongArgumentTarget.target(JLjava/lang/String;)V",
+                args = ["ldc=marker"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("Test")
     object InvokeAssignInjectMixin {
         @AsmInject(
@@ -21375,6 +21635,77 @@ class FrameworkReliabilityTest {
             visitLdcInsn("original")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeStringTargetBytes(includeDirectMarker: Boolean = true): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeStringTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "target",
+            "(Ljava/lang/String;)V",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitLdcInsn("other")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "InvokeStringTarget", "target", "(Ljava/lang/String;)V", false)
+            if (includeDirectMarker) {
+                visitLdcInsn("marker")
+                visitMethodInsn(Opcodes.INVOKESTATIC, "InvokeStringTarget", "target", "(Ljava/lang/String;)V", false)
+            }
+            visitLdcInsn("marker")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "InvokeStringTarget", "target", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeStringLongArgumentTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeStringLongArgumentTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "target",
+            "(JLjava/lang/String;)V",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.LCONST_1)
+            visitLdcInsn("marker")
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "InvokeStringLongArgumentTarget",
+                "target",
+                "(JLjava/lang/String;)V",
+                false,
+            )
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(3, 1)
             visitEnd()
         }
         cw.visitEnd()

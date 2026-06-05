@@ -43,16 +43,17 @@ package kim.der.asm.api.annotation
  * 多个兼容重载需要显式指定 [method]。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`；为空时按 handler 名称和注入点兼容性推断唯一同名目标方法
- * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW
+ * @param target 注入点类型；普通注入支持 HEAD/TAIL/RETURN/INVOKE/INVOKE_ASSIGN/INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW
  * @param cancellable 是否声明该注入点允许取消；当前 HEAD、TAIL 与普通 INVOKE/INVOKE_ASSIGN 的 BEFORE/AFTER
  * 注入会据此允许 [CallbackInfo.cancel] 或 [CallbackInfo.setReturnValue] 触发提前返回分支
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
- * @param at 当 [target] 为 INVOKE/INVOKE_ASSIGN/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW 时用于描述具体指令点；
+ * @param at 当 [target] 为 INVOKE/INVOKE_ASSIGN/INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
- * 或 `var=N` 按 JVM 局部变量槽位过滤，也可用 `name=localName` 按 LocalVariableTable 中的变量名过滤
+ * 或 `var=N` 按 JVM 局部变量槽位过滤，也可用 `name=localName` 按 LocalVariableTable 中的变量名过滤；
+ * 普通 INVOKE_STRING 需要在 [At.target] 写 `owner.name(desc)`，并通过 [At.args] 中的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串常量实参
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入、普通 [InjectionPoint.FIELD] /
- * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.LOAD] /
+ * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.INVOKE_STRING] 字符串实参调用点注入、普通 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写指令点注入，以及普通 [InjectionPoint.NEW] /
  * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.SWITCH] /
  * [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转、switch、常量与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
@@ -143,10 +144,11 @@ annotation class AsmInject(
  * 注入点枚举。
  *
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[INVOKE_ASSIGN]、[FIELD]、
- * [FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP]、[SWITCH]、[CONSTANT] 与 [THROW]。
+ * [INVOKE_STRING]、[FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP]、[SWITCH]、[CONSTANT] 与 [THROW]。
  * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [FIELD_ASSIGN] 改写字段待写入值，也可配合数组字段目标改写数组读取、数组写入或数组长度表达式，通过 [LOAD] 改写局部变量读取表达式值，通过 [STORE] 改写局部变量待写入表达式值，通过 [INSTANCEOF] 改写类型判断结果，通过 [JUMP] 改写条件跳转分支结果，通过 [SWITCH] 改写 `tableswitch` / `lookupswitch` selector，
  * 通过 [CONSTANT] 改写常量表达式，
  * 也可通过 [THROW] 改写即将抛出的异常。
+ * [INVOKE_STRING] 只匹配目标方法调用实参中的直接 `LDC String`，不会追踪局部变量、字符串拼接或方法返回值。
  * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
  * [CONSTANT] 搭配 [Shift.REPLACE] 时可用 handler 返回值替换原常量加载。
  *
@@ -168,6 +170,9 @@ enum class InjectionPoint {
 
     /** 方法调用后 */
     INVOKE_ASSIGN,
+
+    /** 带直接字符串常量实参的方法调用前 */
+    INVOKE_STRING,
 
     /** 字段访问前 */
     FIELD,
@@ -206,7 +211,7 @@ enum class InjectionPoint {
 /**
  * 调用点定位信息。
  *
- * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.INVOKE_STRING]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 的匹配目标，
  * 并通过 [shift] 指定在匹配指令前/后插入 handler。普通 [AsmInject] 的
  * [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] /
@@ -218,6 +223,8 @@ enum class InjectionPoint {
  *
  * - INVOKE 目标要求包含方法、构造器或 `invokedynamic` 调用点描述符；owner 可省略，省略时只按方法名与描述符匹配。
  *   `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+ * - INVOKE_STRING 目标要求包含 owner 的普通方法调用描述符 `owner.name(desc)`，并通过 [args] 中的 `ldc=<string>` 或 `string=<string>`
+ *   指定直接字符串常量实参。它只观察调用点，不接收或替换该字符串，不匹配局部变量、拼接字符串、`invokedynamic` 或方法返回值。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 支持 Slice 缩小候选范围，只支持 BEFORE 或 REPLACE，且不支持 by；AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
@@ -265,7 +272,7 @@ enum class InjectionPoint {
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
- * @param target 目标方法调用、构造器调用、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、跳转操作码、常量文本或 THROW 直接构造异常类型签名
+ * @param target 目标方法调用、构造器调用、字符串实参调用点、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、跳转操作码、常量文本或 THROW 直接构造异常类型签名
  * @param shift 注入偏移策略
  * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
@@ -279,7 +286,8 @@ enum class InjectionPoint {
  * [ModifyExpressionValue] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
  * 其中 `array=get` / `array=length` 需配合 [InjectionPoint.FIELD]，`array=set` 需配合
- * [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`
+ * [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`，
+ * 普通 [AsmInject] 的 [InjectionPoint.INVOKE_STRING] 支持 `ldc=<string>` 或 `string=<string>`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -339,7 +347,7 @@ enum class Shift {
  * 注入点切片范围。
  *
  * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
- * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入、普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、
+ * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入、普通 [InjectionPoint.INVOKE_STRING] 字符串实参调用点注入、普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、
  * 普通 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 局部变量读写指令点注入、普通
  * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] /
  * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转、switch、常量与抛异常指令点注入、

@@ -165,6 +165,21 @@ object LoggingMixin {
     fun beforePrintln(message: String, param: String) {
         println("About to print $message for $param")
     }
+
+    @AsmInject(
+        method = "process(Ljava/lang/String;)V",
+        target = InjectionPoint.INVOKE_STRING,
+        at = At(
+            value = InjectionPoint.INVOKE_STRING,
+            target = "com/example/Audit.emit(Ljava/lang/String;)V",
+            args = ["ldc=marker"],
+        ),
+        require = 1,
+        allow = 1,
+    )
+    fun beforeMarkerAudit(param: String) {
+        println("Audit marker in process: $param")
+    }
 }
 ```
 
@@ -175,6 +190,10 @@ object LoggingMixin {
 `param` 来自 `process` 目标方法。`INVOKE_ASSIGN` 默认在匹配调用完成后插入 handler；需要调用前注入时使用 `INVOKE`。
 普通 `INVOKE` / `INVOKE_ASSIGN` 也可匹配 `invokedynamic` 调用；动态调用没有 receiver，handler 参数来自动态调用点描述符，
 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+普通 `INVOKE_STRING` 只观察普通方法调用实参中的直接 `LDC String`，必须在 `At.target` 写包含 owner 的 `owner.name(desc)` 调用描述符，并在
+`At.args` 中声明唯一一个 `ldc=value` 或 `string=value`。它不会把字符串传给 handler，也不会替换字符串；
+handler 只能像上面的 `beforeMarkerAudit` 一样继续接收目标方法参数前缀。局部变量中的同值字符串、字符串拼接、
+方法返回值或 `invokedynamic` 生成的字符串不会被 `INVOKE_STRING` 匹配。
 除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD`、`TAIL`、`RETURN`、`INVOKE BEFORE/AFTER`、`INVOKE_ASSIGN`
 和非替换指令点注入的 handler 返回值会被丢弃，不会改写目标方法返回结果。普通 `@AsmInject(CONSTANT)` 的 `Shift.REPLACE`
 会用 handler 返回值替换原常量加载，但不会把原常量值传给 handler。
@@ -189,7 +208,7 @@ handler 可用 `callback.isCancellable()` 判断当前回调是否允许取消�
 方法，也可使用 `value` 属性、`setTypedReturnValue(value)`、`getTypedReturnValue()` 以及 `getReturnValueI()` 等 primitive getter，
 适合让 handler 签名直接表达目标返回值类型并迁移 Mixin 风格代码。
 
-当目标方法内有多个相同调用、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、switch、常量或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT` 或 `THROW`
+当目标方法内有多个相同调用、字符串实参调用点、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、switch、常量或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT` 或 `THROW`
 注入限制在一段调用边界内：
 `@ModifyConstant` 还可在常量修改场景中使用字段读写或常量文本作为切片边界。
 
@@ -216,7 +235,7 @@ fun process(value: String) {
 再接收目标方法参数前缀；引用或数组参数可用父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按注入点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
-`from` 边界之后、`to` 边界之前的调用点、字段读写指令、局部变量读写指令、类型转换指令、跳转指令、switch 指令、常量加载或抛异常指令才会参与匹配，边界调用本身不会被注入；
+`from` 边界之后、`to` 边界之前的调用点、带直接字符串常量实参的调用点、字段读写指令、局部变量读写指令、类型转换指令、跳转指令、switch 指令、常量加载或抛异常指令才会参与匹配，边界调用本身不会被注入；
 `ordinal` 会在切片内重新计数。
 
 普通 `@AsmInject(JUMP)` 只在匹配跳转指令前后插入 handler，不接收也不改写跳转条件栈值或跳转目标；`At.target`
@@ -1402,6 +1421,8 @@ object FieldPointMixin {
 ```
 
 指令点注入默认不会替换原始指令，也不会自动把栈顶字段值、待写入值、局部变量值、new 出来的对象、类型转换对象、类型判断结果、跳转条件栈值、switch selector、常量值或异常对象传给 handler。普通 `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 可用 `Slice` 缩小候选指令范围；除 `NEW` 外也可用 `At.by` 按真实字节码指令数移动插入锚点，偏移会跳过 label、frame 与 line number 等伪指令；普通 `LOAD` / `STORE` 还可用 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可用 `["name=localName"]` 按 LocalVariableTable 变量名过滤；目标 class 缺少调试变量表时名称过滤不会命中，应改用槽位或 `ordinal`。普通 `JUMP` 可用跳转操作码名或数字操作码过滤；普通 `SWITCH` 不支持 `At.target`，匹配 `tableswitch` 与 `lookupswitch`；普通 `CONSTANT` 可用常量文本过滤，`Shift.REPLACE` 会用 handler 返回值替换原常量加载；普通 `THROW` 可用 `At.target` 的类型 internal name 或 binary name 只匹配 `ATHROW` 前直接构造出的同类型异常，但不会追踪局部变量或方法返回值来源。`NEW` 不支持 `Shift.AFTER` 和 `At.by`，因为此时未初始化对象仍在栈上，插入普通 handler 可能生成无法通过 JVM 校验的字节码。普通 `LOAD` / `STORE` 只能观察局部变量读写位置；如果需要只替换本次读取表达式值且不写回槽位，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.LOAD, args = ["index=N"]))`，也可在目标 class 保留调试变量表时把参数换成 `["name=localName"]`；如果需要改写本次写入前栈值并让原 `xSTORE` 继续写入槽位，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.STORE, args = ["index=N"]))` 或同样的名称过滤；如果需要保留可调用原读取值的操作句柄，可使用 `@WrapOperation(at = At(value = InjectionPoint.LOAD, args = ["name=localName"]))`；如果需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值，可使用 `@WrapOperation(at = At(value = InjectionPoint.STORE, args = ["name=localName"]))`；如果需要读取并写回同一槽位，可使用 `@ModifyVariable(at = At(value = InjectionPoint.LOAD), index = N)`。普通 `CAST` 只能观察类型转换位置，不接收也不替换待转换对象；如果需要完全替换 `CHECKCAST`，可使用 `@Redirect(at = At(value = InjectionPoint.CAST, target = "..."))`；如果需要在 handler 中按需调用原类型转换，可使用 `@WrapOperation(at = At(value = InjectionPoint.CAST, target = "..."))`；如果只需要改写类型转换后的表达式值，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `INSTANCEOF` 只能观察类型判断位置，不接收也不改写 boolean 结果；如果需要完全替换类型判断，可使用 `@Redirect(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果需要在 handler 中按需调用原类型判断，可使用 `@WrapOperation(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；如果只需要改写类型判断结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`。普通 `JUMP` 只能观察跳转位置；如果需要直接替换条件跳转分支结果，可使用 `@Redirect(at = At(value = InjectionPoint.JUMP, target = "..."))`；如果需要保留原条件结果并改写新结果，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.JUMP, target = "..."))`；如果需要保留可调用原分支结果的操作句柄，可使用 `@WrapOperation(at = At(value = InjectionPoint.JUMP, target = "..."))`；如果只需要按额外条件决定是否保留原跳转，可使用 `@WrapWithCondition(at = At(value = InjectionPoint.JUMP, target = "..."))`。普通 `SWITCH` 只能观察 switch 指令位置；如果需要直接替换 selector，可使用 `@Redirect(at = At(value = InjectionPoint.SWITCH))`；如果需要保留原 switch 指令并改写 selector，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.SWITCH))`；需要保留可调用原 selector 的操作句柄时可使用 `@WrapOperation(at = At(value = InjectionPoint.SWITCH))`。普通 `THROW` 只能观察抛异常位置，不接收异常对象；如果需要直接替换异常对象，可使用 `@Redirect(at = At(value = InjectionPoint.THROW, target = "..."))`；如果需要保留原 `ATHROW` 并改写异常对象，可使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.THROW, target = "..."))`；如果需要可调用原异常对象的操作句柄，可使用 `@WrapOperation(at = At(value = InjectionPoint.THROW, target = "..."))`；如果只需要按条件决定是否保留原抛出，可使用 `@WrapWithCondition(at = At(value = InjectionPoint.THROW, target = "..."))`。如果常量替换需要读取原常量值，可使用 `@ModifyConstant`、`@Redirect(at = At(value = InjectionPoint.CONSTANT, target = "..."))`、`@ModifyExpressionValue(at = At(value = InjectionPoint.CONSTANT, target = "..."))` 或 `@WrapOperation(at = At(value = InjectionPoint.CONSTANT, target = "..."))`；如果需要按条件保留原常量或在条件不满足时把本次常量表达式替换为同类型默认值，也可使用 `@WrapWithCondition(at = At(value = InjectionPoint.CONSTANT, target = "..."))`。如果需要替换方法调用、修改调用参数或改写构造完成后的对象表达式、字段待写入值、局部变量读取或待写入表达式值、类型转换结果、类型判断结果、条件跳转结果、switch selector 或异常对象，可根据场景使用 `@Redirect`、`@WrapOperation`、`@ModifyArg` 或 `@ModifyExpressionValue`。
+
+普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。
 
 ## 最佳实践
 
