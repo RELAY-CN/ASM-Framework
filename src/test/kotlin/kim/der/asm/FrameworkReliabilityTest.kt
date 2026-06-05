@@ -150,6 +150,123 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
+    fun documentationContractsKeepAnnotationPointMappingsAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val redirectArraySection =
+            api
+                .substringAfter("`@Redirect` 可在")
+                .substringBefore("`@WrapOperation`")
+        val wrapOperationSupportIntro =
+            asmMixinKDoc
+                .substringAfter("* 包裹原始操作注解。")
+                .substringBefore("annotation class WrapOperation")
+                .substringAfter("* 当前实现支持")
+                .substringBefore("* [InjectionPoint.INVOKE] 省略")
+        val wrapConditionSliceSummary =
+            guide
+                .substringAfter("引用类型参数可使用精确类型")
+                .substringBefore("\n\n### 场景 10")
+
+        // Then
+        assertThat(redirectArraySection)
+            .`as`("Then: @Redirect 数组写入必须绑定 FIELD_ASSIGN，避免把 array=set 误导为 FIELD 定位")
+            .contains("`FIELD_ASSIGN` 目标上使用 `args = [\"array=set\"]`")
+            .doesNotContain("`FIELD` 目标上使用 `args = [\"array=get\"]`、`args = [\"array=set\"]`")
+        assertThat(wrapOperationSupportIntro)
+            .`as`("Then: @WrapOperation KDoc 的支持范围首段应覆盖当前全部可包裹表达式")
+            .contains(
+                "[InjectionPoint.NEW]",
+                "[InjectionPoint.CAST]",
+                "[InjectionPoint.INSTANCEOF]",
+                "[InjectionPoint.LOAD]",
+                "[InjectionPoint.STORE]",
+                "[InjectionPoint.JUMP]",
+                "[InjectionPoint.SWITCH]",
+                "[InjectionPoint.CONSTANT]",
+                "[InjectionPoint.THROW]",
+            )
+        assertThat(wrapConditionSliceSummary)
+            .`as`("Then: GUIDE 的 Slice 总结应使用明确 InjectionPoint 名称并说明数组模式归属")
+            .contains(
+                "`INVOKE`",
+                "`INVOKE_ASSIGN`",
+                "`FIELD`",
+                "`FIELD_ASSIGN`",
+                "`LOAD`",
+                "`STORE`",
+                "`CONSTANT`",
+                "`JUMP`",
+                "`SWITCH`",
+                "`THROW`",
+                "`array=set` 跟随 `FIELD_ASSIGN`",
+            )
+    }
+
+    @Test
+    @DisplayName("公开文档应保持 ModifyReceiver 省略 method 与 target 的推断契约一致")
+    fun documentationContractsKeepModifyReceiverInferenceAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val asmInjectKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
+        val apiModifyReceiverSection =
+            api
+                .substringAfter("### @ModifyReceiver")
+                .substringBefore("### @WrapOperation")
+        val guideModifyReceiverSection =
+            guide
+                .substringAfter("`@ModifyReceiver` 用于只替换")
+                .substringBefore("`@WrapOperation` 用于")
+        val kdocModifyReceiverSection =
+            asmMixinKDoc
+                .substringAfter("* 修改调用 receiver 注解。")
+                .substringBefore("annotation class ModifyReceiver")
+        val atKDocSection =
+            asmInjectKDoc
+                .substringAfter("* 调用点定位信息。")
+                .substringBefore("annotation class At")
+
+        // Then
+        assertThat(apiModifyReceiverSection)
+            .`as`("Then: API 应说明 method 省略和三类 target 省略都按兼容 receiver 候选推断")
+            .contains(
+                "省略 `method`",
+                "`At.target` 为空的 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN`",
+                "不兼容候选不计入",
+                "字段写入会保留原待写入值并写入新的 receiver",
+            )
+        assertThat(guideModifyReceiverSection)
+            .`as`("Then: GUIDE 应用业务语言说明三类 receiver 推断和无 receiver 候选的失败边界")
+            .contains(
+                "省略 `method`",
+                "省略 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN` 目标",
+                "静态调用、构造器调用和不兼容实例调用不计入",
+                "静态字段和不兼容字段读取不计入",
+                "`FIELD_ASSIGN` 会把原待写入值写到新 receiver",
+            )
+        assertThat(kdocModifyReceiverSection)
+            .`as`("Then: ModifyReceiver KDoc 应把 public API 的省略推断边界同步给 IDE 用户")
+            .contains(
+                "可省略 [method]",
+                "[At.target] 为空时会使用实际可兼容的 receiver 候选参与推断",
+                "静态调用、构造器调用和 handler 不兼容的实例调用不计入 [ordinal] 或命中数",
+                "静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数",
+                "静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数",
+            )
+        assertThat(atKDocSection)
+            .`as`("Then: 通用 At KDoc 只说明显式 target 格式，不应覆盖 ModifyReceiver 的省略推断例外")
+            .contains("FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。")
+    }
+
+    @Test
     fun removeSynchronizedRemovesBlockMonitorInstructions() {
         AsmRegistry.register(RemoveBlockSynchronizedMixin::class.java)
 
@@ -3705,6 +3822,29 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("省略 method 与 INVOKE target 时应按兼容 receiver 推断唯一业务调用")
+    fun modifyReceiverInfersMethodAndInvokeTargetByCompatibleReceiverType() {
+        // Given
+        AsmRegistry.register(ModifyReceiverInferredMethodAndInvokeTargetMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform(
+                "MixedModifyReceiverTarget",
+                mixedModifyReceiverTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("MixedModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: String handler 只能匹配 String.concat receiver，不能误改 StringBuilder.toString receiver")
+            .isEqualTo("both-inferred-call")
+    }
+
+    @Test
     fun modifyReceiverAtInvokeAcceptsAssignableParentParameter() {
         AsmRegistry.register(ModifyReceiverParentParamMixin::class.java)
 
@@ -4003,6 +4143,33 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("省略 method 与 FIELD target 时应按兼容 receiver 推断字段读取")
+    fun modifyReceiverInfersMethodAndFieldReadTargetByCompatibleReceiverType() {
+        // Given
+        AsmRegistry.register(ModifyReceiverInferredMethodAndFieldReadMixin::class.java)
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val original = clazz.getDeclaredConstructor().newInstance()
+        val replacement = clazz.getDeclaredConstructor().newInstance()
+
+        try {
+            clazz.getMethod("writeName", String::class.java).invoke(original, "original")
+            clazz.getMethod("writeName", String::class.java).invoke(replacement, "replacement")
+            ModifyReceiverInferredMethodAndFieldReadMixin.replacement = replacement
+
+            // When
+            val result = clazz.getMethod("readName").invoke(original)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 省略 method 与字段 target 后，应按 handler 签名推断 readName 的实例字段 receiver")
+                .isEqualTo("replacement")
+        } finally {
+            ModifyReceiverInferredMethodAndFieldReadMixin.replacement = null
+        }
+    }
+
+    @Test
     fun modifyReceiverAtFieldReadCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyReceiverFieldReadWithTargetParamsMixin::class.java)
 
@@ -4081,6 +4248,38 @@ class FrameworkReliabilityTest {
         } finally {
             ModifyReceiverInferredTestFieldAssignMixin.replacement = null
             ModifyReceiverInferredTestFieldAssignMixin.lastValue = null
+        }
+    }
+
+    @Test
+    @DisplayName("省略 method 与 FIELD_ASSIGN target 时应按兼容 receiver 推断字段写入")
+    fun modifyReceiverInfersMethodAndFieldAssignTargetByCompatibleReceiverType() {
+        // Given
+        AsmRegistry.register(ModifyReceiverInferredMethodAndFieldAssignMixin::class.java)
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val original = clazz.getDeclaredConstructor().newInstance()
+        val replacement = clazz.getDeclaredConstructor().newInstance()
+
+        try {
+            ModifyReceiverInferredMethodAndFieldAssignMixin.replacement = replacement
+
+            // When
+            clazz.getMethod("writeName", String::class.java).invoke(original, "redirected")
+
+            // Then
+            assertThat(clazz.getMethod("readName").invoke(original))
+                .`as`("Then: 原 receiver 不应接收字段写入值")
+                .isNull()
+            assertThat(clazz.getMethod("readName").invoke(replacement))
+                .`as`("Then: 兼容推断出的 replacement receiver 应保留原待写入字段值")
+                .isEqualTo("redirected")
+            assertThat(ModifyReceiverInferredMethodAndFieldAssignMixin.lastValue)
+                .`as`("Then: handler 后续参数仍应按目标方法参数前缀传入，便于真实业务校验上下文")
+                .isEqualTo("redirected")
+        } finally {
+            ModifyReceiverInferredMethodAndFieldAssignMixin.replacement = null
+            ModifyReceiverInferredMethodAndFieldAssignMixin.lastValue = null
         }
     }
 
@@ -13915,6 +14114,20 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("MixedModifyReceiverTarget")
+    object ModifyReceiverInferredMethodAndInvokeTargetMixin {
+        @ModifyReceiver(
+            at = At(value = InjectionPoint.INVOKE),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun value(original: String): String {
+            original.length
+            return "both-inferred"
+        }
+    }
+
     @AsmMixin("ModifyReceiverTarget")
     object ModifyReceiverParentParamMixin {
         @ModifyReceiver(
@@ -14176,6 +14389,19 @@ class FrameworkReliabilityTest {
         fun testA0(original: Any): Any = replacement ?: original
     }
 
+    @AsmMixin("FieldPointTarget")
+    object ModifyReceiverInferredMethodAndFieldReadMixin {
+        var replacement: Any? = null
+
+        @ModifyReceiver(
+            at = At(value = InjectionPoint.FIELD),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun readName(original: Any): Any = replacement ?: original
+    }
+
     @AsmMixin("FieldParamTarget")
     object ModifyReceiverFieldReadWithTargetParamsMixin {
         var replacement: Any? = null
@@ -14221,6 +14447,26 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(
+            original: Any,
+            value: String,
+        ): Any {
+            lastValue = value
+            return replacement ?: original
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyReceiverInferredMethodAndFieldAssignMixin {
+        var replacement: Any? = null
+        var lastValue: String? = null
+
+        @ModifyReceiver(
+            at = At(value = InjectionPoint.FIELD_ASSIGN),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun writeName(
             original: Any,
             value: String,
         ): Any {

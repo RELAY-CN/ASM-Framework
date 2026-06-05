@@ -1539,8 +1539,6 @@ class TargetClassContext(
                 Opcodes.DRETURN,
                 Opcodes.ARETURN,
             )
-        private val MODIFY_RECEIVER_FIELD_READ_OPS = setOf(Opcodes.GETFIELD, Opcodes.GETSTATIC)
-        private val MODIFY_RECEIVER_FIELD_WRITE_OPS = setOf(Opcodes.PUTFIELD, Opcodes.PUTSTATIC)
     }
 
     /**
@@ -2171,102 +2169,6 @@ class TargetClassContext(
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
         }.getOrDefault(false)
 
-    private fun resolveModifyReceiverType(
-        targetMethod: MethodNode,
-        annotation: ModifyReceiver,
-    ): Type {
-        val receiverTypes =
-            when (annotation.at.value) {
-                InjectionPoint.INVOKE -> collectModifyReceiverInvokeTypes(targetMethod, annotation)
-                InjectionPoint.FIELD -> collectModifyReceiverFieldTypes(targetMethod, annotation, fieldAssign = false)
-                InjectionPoint.FIELD_ASSIGN -> collectModifyReceiverFieldTypes(targetMethod, annotation, fieldAssign = true)
-                else -> throw IllegalArgumentException(
-                    "@ModifyReceiver supports only INVOKE, FIELD and FIELD_ASSIGN injection points",
-                )
-            }
-        return receiverTypes.singleOrNull()
-            ?: throw IllegalArgumentException(
-                "@ModifyReceiver cannot resolve unique receiver type in ${targetMethod.name}${targetMethod.desc}: $receiverTypes",
-            )
-    }
-
-    private fun collectModifyReceiverInvokeTypes(
-        targetMethod: MethodNode,
-        annotation: ModifyReceiver,
-    ): List<Type> {
-        val (targetOwner, targetName, targetDesc) = parseModifyReceiverTargetMethod(annotation.at.target)
-        if (targetName == null || targetDesc == null) {
-            throw IllegalArgumentException("@ModifyReceiver INVOKE requires at.target method signature")
-        }
-
-        val insns = targetMethod.instructions.toArray()
-        val (sliceStartIndex, sliceEndIndex) = resolveModifyReceiverSliceRange(insns, annotation.slice)
-        val receiverTypes = mutableListOf<Type>()
-        var matchedOrdinal = 0
-        for ((index, insn) in insns.withIndex()) {
-            if (index < sliceStartIndex || index >= sliceEndIndex) {
-                continue
-            }
-            if (insn !is MethodInsnNode || !matchesModifyReceiverTargetMethod(insn, targetOwner, targetName, targetDesc)) {
-                continue
-            }
-            val currentOrdinal = matchedOrdinal++
-            if (annotation.ordinal >= 0 && currentOrdinal != annotation.ordinal) {
-                continue
-            }
-            if (insn.opcode == Opcodes.INVOKESTATIC || insn.name == "<init>") {
-                throw IllegalArgumentException(
-                    "@ModifyReceiver supports only instance method calls, target ${insn.owner}.${insn.name}${insn.desc}",
-                )
-            }
-            receiverTypes.add(Type.getObjectType(insn.owner))
-        }
-        return receiverTypes
-    }
-
-    private fun collectModifyReceiverFieldTypes(
-        targetMethod: MethodNode,
-        annotation: ModifyReceiver,
-        fieldAssign: Boolean,
-    ): List<Type> {
-        val fieldTarget = parseModifyReceiverFieldTarget(annotation.at.target)
-        if (fieldTarget.name == null) {
-            val mode = if (fieldAssign) "FIELD_ASSIGN" else "FIELD"
-            throw IllegalArgumentException("@ModifyReceiver $mode requires at.target field signature")
-        }
-
-        val insns = targetMethod.instructions.toArray()
-        val (sliceStartIndex, sliceEndIndex) = resolveModifyReceiverSliceRange(insns, annotation.slice)
-        val receiverTypes = mutableListOf<Type>()
-        var matchedOrdinal = 0
-        for ((index, insn) in insns.withIndex()) {
-            if (index < sliceStartIndex || index >= sliceEndIndex) {
-                continue
-            }
-            val expectedOpcodes =
-                if (fieldAssign) {
-                    MODIFY_RECEIVER_FIELD_WRITE_OPS
-                } else {
-                    MODIFY_RECEIVER_FIELD_READ_OPS
-                }
-            if (insn !is FieldInsnNode || insn.opcode !in expectedOpcodes || !matchesModifyReceiverTargetField(insn, fieldTarget)) {
-                continue
-            }
-            val currentOrdinal = matchedOrdinal++
-            if (annotation.ordinal >= 0 && currentOrdinal != annotation.ordinal) {
-                continue
-            }
-            if (insn.opcode == Opcodes.GETSTATIC || insn.opcode == Opcodes.PUTSTATIC) {
-                val action = if (fieldAssign) "writes" else "reads"
-                throw IllegalArgumentException(
-                    "@ModifyReceiver supports only instance field $action, target ${insn.owner}.${insn.name}:${insn.desc}",
-                )
-            }
-            receiverTypes.add(Type.getObjectType(insn.owner))
-        }
-        return receiverTypes
-    }
-
     private fun validateModifyReceiverHandlerSignature(
         handlerMethod: Method,
         targetMethod: MethodNode,
@@ -2383,36 +2285,6 @@ class TargetClassContext(
         }
     }
 
-    private fun parseModifyReceiverFieldTarget(signature: String): ModifyReceiverFieldTarget {
-        if (signature.isEmpty()) {
-            return ModifyReceiverFieldTarget(null, null, null)
-        }
-
-        val ownerAndName: String
-        val desc: String?
-        val colonIndex = signature.indexOf(':')
-        if (colonIndex >= 0) {
-            ownerAndName = signature.substring(0, colonIndex)
-            desc = signature.substring(colonIndex + 1)
-        } else {
-            ownerAndName = signature
-            desc = null
-        }
-
-        val slashIndex = ownerAndName.lastIndexOf('/')
-        val dotIndex = ownerAndName.lastIndexOf('.')
-        val separatorIndex = maxOf(slashIndex, dotIndex)
-        return if (separatorIndex >= 0) {
-            ModifyReceiverFieldTarget(
-                ownerAndName.substring(0, separatorIndex).replace('.', '/'),
-                ownerAndName.substring(separatorIndex + 1),
-                desc,
-            )
-        } else {
-            ModifyReceiverFieldTarget(null, ownerAndName, desc)
-        }
-    }
-
     private fun matchesModifyReceiverTargetMethod(
         insn: MethodInsnNode,
         targetOwner: String?,
@@ -2426,19 +2298,6 @@ class TargetClassContext(
             return false
         }
         return targetDesc == null || insn.desc == targetDesc
-    }
-
-    private fun matchesModifyReceiverTargetField(
-        insn: FieldInsnNode,
-        target: ModifyReceiverFieldTarget,
-    ): Boolean {
-        if (target.owner != null && insn.owner != target.owner) {
-            return false
-        }
-        if (target.name != null && insn.name != target.name) {
-            return false
-        }
-        return target.desc == null || insn.desc == target.desc
     }
 
     private fun isModifyReceiverParameterCompatible(
@@ -2486,12 +2345,6 @@ class TargetClassContext(
             receiverClass.isAssignableFrom(handlerReturnClass)
         }.getOrDefault(false)
     }
-
-    private data class ModifyReceiverFieldTarget(
-        val owner: String?,
-        val name: String?,
-        val desc: String?,
-    )
 
     /**
      * 应用 @WrapOperation 包裹原始操作。

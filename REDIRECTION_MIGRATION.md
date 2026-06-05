@@ -83,6 +83,11 @@ name 或 binary name，也可省略以匹配切片内兼容的类型转换，必
 判断结果，返回 `true` 时保留该结果，返回 `false` 时把本次判断替换为 `false`；`At.target` 可写类型 internal
 name 或 binary name，也可省略以匹配切片内兼容的类型判断，必要时继续使用 `Slice` 限制范围。
 
+其他“原操作仍然执行，但条件不满足时不要采纳表达式结果或控制流结果”的旧监听意图，也应迁移到对应
+`@WrapWithCondition` 注入点：局部变量读取/写入使用 `LOAD` / `STORE`，常量读取使用 `CONSTANT`，条件分支使用
+`JUMP`，switch selector 使用 `SWITCH`，即将抛出的异常使用 `THROW`。数组元素读取和数组长度读取跟随
+`FIELD + array=get/array=length`，数组元素写入跟随 `FIELD_ASSIGN + array=set`。
+
 字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`。它只匹配调用实参中的直接 `LDC String`，
 且 `At.target` 必须写包含 owner 的 `owner.name(desc)`，
 不会把该字符串传给 handler，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic` 生成的字符串。

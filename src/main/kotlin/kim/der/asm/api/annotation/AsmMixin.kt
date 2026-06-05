@@ -560,7 +560,8 @@ annotation class ModifyArgs(
  * - 第一个参数必须接收原 receiver；对象或数组 receiver 可用原 receiver 类型的父类、接口、`Any` 或 `Object` 接收
  * - 返回类型对基础类型仍需精确匹配；对象或数组类型可返回可赋值给原 receiver 类型的子类型，`Any` / `Object` 也可作为泛型引用返回类型
  * - 后续参数可按顺序接收目标方法参数前缀
- * - [At.value] 为 [InjectionPoint.INVOKE] 时，可通过 [At.target] 指定要匹配的实例方法调用；省略时按 handler 首参与返回类型筛选兼容 receiver
+ * - [At.value] 为 [InjectionPoint.INVOKE] 时，可通过 [At.target] 指定要匹配的实例方法调用；省略时按 handler 首参与返回类型筛选兼容 receiver；
+ *   静态调用、构造器调用和 handler 不兼容的实例调用不计入 [ordinal] 或命中数
  * - [At.value] 为 [InjectionPoint.FIELD] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段读取 receiver；
  *   静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数
  * - [At.value] 为 [InjectionPoint.FIELD_ASSIGN] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段写入 receiver；
@@ -652,10 +653,13 @@ annotation class ModifyReceiver(
  * 实例字段写入）、原调用参数、动态调用点参数、构造器参数、字段写入值、数组访问参数、类型检查输入值、局部变量读取值、局部变量待写入值、原条件跳转分支结果、switch selector、原常量值或即将抛出的异常与 [Operation]，
  * 可选择调用、跳过或多次调用原始操作。
  *
- * 当前实现支持 [InjectionPoint.INVOKE] 方法调用、`invokedynamic` 调用、[InjectionPoint.FIELD] 字段读取与
- * [InjectionPoint.FIELD_ASSIGN] 字段写入；[InjectionPoint.FIELD] 可通过 `args = ["array=get"]`
- * 包裹数组元素读取，通过 `args = ["array=length"]` 包裹数组长度读取；
- * [InjectionPoint.FIELD_ASSIGN] 可通过 `args = ["array=set"]` 包裹数组元素写入。
+ * 当前实现支持 [InjectionPoint.INVOKE] 方法调用、`invokedynamic` 调用、构造器调用、[InjectionPoint.NEW] 构造表达式、
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入、[InjectionPoint.CAST] 类型转换、
+ * [InjectionPoint.INSTANCEOF] 类型判断、[InjectionPoint.LOAD] 局部变量读取、[InjectionPoint.STORE] 局部变量写入、
+ * [InjectionPoint.JUMP] 条件跳转、[InjectionPoint.SWITCH] switch selector、[InjectionPoint.CONSTANT] 常量读取与
+ * [InjectionPoint.THROW] 抛异常操作；[InjectionPoint.FIELD] 可通过 `args = ["array=get"]`
+ * 包裹数组元素读取，通过 `args = ["array=length"]` 包裹数组长度读取；[InjectionPoint.FIELD_ASSIGN] 可通过
+ * `args = ["array=set"]` 包裹数组元素写入。
  * [InjectionPoint.INVOKE] 省略 [At.target] 时会按 handler 栈参数、[Operation] 位置与返回类型筛选兼容的
  * 普通调用、`invokedynamic` 调用或构造器调用，不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.FIELD] 省略 [At.target] 时会按 handler 字段 owner 参数、[Operation] 位置与返回类型筛选兼容的
