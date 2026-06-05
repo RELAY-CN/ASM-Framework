@@ -5006,6 +5006,48 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("自动目标推断时显式 INVOKE 空 Slice 边界应保留配置错误")
+    fun inferredTargetEmptyInvokeSliceBoundaryPreservesConfigurationError() {
+        // Given
+        data class BoundaryCase(
+            val context: String,
+            val mixin: Class<*>,
+            val targetClass: String,
+            val targetBytes: () -> ByteArray,
+        )
+
+        val cases =
+            listOf(
+                BoundaryCase(
+                    "@ModifyArgs(INVOKE)",
+                    InferredTargetEmptyInvokeSliceModifyArgsMixin::class.java,
+                    "SliceModifyArgsTarget",
+                ) { sliceModifyArgsTargetBytes() },
+                BoundaryCase(
+                    "@ModifyReceiver",
+                    InferredTargetEmptyInvokeSliceModifyReceiverMixin::class.java,
+                    "SliceModifyReceiverTarget",
+                ) { sliceModifyReceiverTargetBytes() },
+            )
+
+        cases.forEach { case ->
+            // Given
+            AsmRegistry.clear()
+            AsmRegistry.register(case.mixin)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(case.targetClass, case.targetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: ${case.context} 自动推断目标方法时，也应保留显式空 INVOKE Slice 边界的配置错误")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "Invalid ${case.context} slice boundary INVOKE target: target must not be empty",
+                )
+        }
+    }
+
+    @Test
     fun wrapOperationFieldSliceLimitsFieldReadsBetweenFromAndTo() {
         AsmRegistry.register(WrapOperationFieldReadSliceMixin::class.java)
 
@@ -11766,6 +11808,25 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceModifyArgsTarget")
+    object InferredTargetEmptyInvokeSliceModifyArgsMixin {
+        @ModifyArgs(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun value(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "changed")
+        }
+    }
+
     @AsmMixin("InvokeDynamicSliceModifyArgsTarget")
     object ModifyArgsInvokeDynamicSliceMixin {
         @ModifyArgs(
@@ -14600,6 +14661,25 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("SliceModifyReceiverTarget")
+    object InferredTargetEmptyInvokeSliceModifyReceiverMixin {
+        @ModifyReceiver(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun value(original: String): String {
             original.length
             return "changed"
         }

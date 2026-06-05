@@ -1862,7 +1862,7 @@ class TargetClassContext(
         annotation: ModifyArgs,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             require(annotation.at.value == InjectionPoint.INVOKE) {
                 "@ModifyArgs currently supports only INVOKE injection point"
             }
@@ -1870,7 +1870,8 @@ class TargetClassContext(
             require(hasCompatibleModifyArgsCandidate(handlerMethod, annotation, targetMethod)) {
                 "@ModifyArgs target ${targetMethod.name}${targetMethod.desc} has no matching call site"
             }
-        }.isSuccess
+            true
+        }
 
     private fun validateModifyArgsHandlerSignature(
         handlerMethod: Method,
@@ -1916,7 +1917,7 @@ class TargetClassContext(
         annotation: ModifyArgs,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector = AsmInjectorFactory.createModifyArgsInjector(
                 handlerMethod,
                 asmInfo,
@@ -1925,7 +1926,7 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     private fun isModifyArgsParameterCompatible(
         expected: Type,
@@ -2015,7 +2016,7 @@ class TargetClassContext(
         annotation: ModifyReceiver,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector = AsmInjectorFactory.createModifyReceiverInjector(
                 method,
                 asmInfo,
@@ -2024,7 +2025,20 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
+
+    /**
+     * 自动目标推断会把普通签名不兼容视为候选不匹配，但 Slice 边界错误是用户配置错误，必须原样冒泡。
+     */
+    private inline fun runAutoTargetInferenceCandidateCheck(block: () -> Boolean): Boolean =
+        try {
+            block()
+        } catch (error: IllegalArgumentException) {
+            if (error.message?.contains("slice boundary") == true) {
+                throw error
+            }
+            false
+        }
 
     private fun validateModifyReceiverHandlerSignature(
         handlerMethod: Method,
