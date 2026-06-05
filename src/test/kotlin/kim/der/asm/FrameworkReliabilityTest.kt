@@ -5471,6 +5471,157 @@ class FrameworkReliabilityTest {
     }
 
     @Nested
+    @DisplayName("@WrapWithCondition NEW 构造结果场景")
+    inner class WrapWithConditionNewScenarios {
+        @Test
+        @DisplayName("handler 放行时应保留构造完成后的对象引用")
+        fun wrapWithConditionAtNewKeepsConstructedObjectWhenTrue() {
+            // Given
+            AsmRegistry.register(WrapConditionNewAllowMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("NewInstructionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("create")
+
+            // Then
+            val result = method.invoke(instance)
+            assertThat(result)
+                .`as`("Then: handler 返回 true 时 NEW 条件包裹应保留已初始化的 StringBuilder 对象")
+                .isInstanceOf(StringBuilder::class.java)
+            assertThat(result.toString())
+                .`as`("Then: handler 接收到已初始化对象后产生的状态修改应保留在原对象上")
+                .isEqualTo("kept")
+        }
+
+        @Test
+        @DisplayName("handler 拒绝时应把构造表达式替换为 null")
+        fun wrapWithConditionAtNewUsesNullWhenHandlerReturnsFalse() {
+            // Given
+            AsmRegistry.register(WrapConditionNewDenyMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("NewInstructionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("create")
+
+            // Then
+            assertThat(method.invoke(instance))
+                .`as`("Then: NEW 构造结果是引用表达式，handler 返回 false 时应留下默认值 null")
+                .isNull()
+        }
+
+        @Test
+        @DisplayName("handler 可追加接收目标方法参数前缀")
+        fun wrapWithConditionAtNewCanUseTargetMethodParameters() {
+            // Given
+            AsmRegistry.register(WrapConditionNewTargetParamsMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform("NewParamTarget", newParamTargetBytes(), javaClass.classLoader)
+            val clazz = loadClass("NewParamTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("create", String::class.java, Int::class.javaPrimitiveType)
+
+            // Then
+            assertThat(method.invoke(instance, "prefix", 6).toString())
+                .`as`("Then: handler 应能用目标方法参数决定是否保留构造完成后的对象")
+                .isEqualTo("prefix-6")
+            assertThat(method.invoke(instance, "prefix", 7))
+                .`as`("Then: 目标方法参数不满足业务条件时应把构造表达式替换为 null")
+                .isNull()
+        }
+
+        @Test
+        @DisplayName("省略 target 时应只包裹 handler 兼容的 NEW")
+        fun wrapWithConditionAtNewWithoutTargetSkipsIncompatibleConstructions() {
+            // Given
+            AsmRegistry.register(WrapConditionNewInferredAllowMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "MixedNewExpressionValueTarget",
+                    mixedNewExpressionValueTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "value" && it.desc == "()Ljava/lang/String;" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionNewInferredAllowMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("MixedNewExpressionValueTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("value")
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: handler 首参为 StringBuilder 时不应包裹 StringBuffer 的 NEW 候选")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance))
+                .`as`("Then: 唯一兼容的 StringBuilder NEW 被放行后应保留原对象状态")
+                .isEqualTo("original-kept")
+        }
+
+        @Test
+        @DisplayName("Slice 应只包裹边界内的构造表达式")
+        fun wrapWithConditionAtNewRespectsSliceBoundary() {
+            // Given
+            AsmRegistry.register(WrapConditionNewSliceDenyMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "SliceNewExpressionValueTarget",
+                    sliceNewExpressionValueTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "createSelected" && it.desc == "()Ljava/lang/StringBuilder;" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionNewSliceDenyMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("SliceNewExpressionValueTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("createSelected")
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: Slice 边界内只有第二个 StringBuilder NEW，应只插入一次条件包裹")
+                .isEqualTo(1)
+            assertThat(method.invoke(instance))
+                .`as`("Then: 边界内 NEW 被拒绝后应返回 null，边界外 POP 掉的构造不应被包裹")
+                .isNull()
+        }
+
+        @Test
+        @DisplayName("handler 首参类型不兼容时应暴露签名错误")
+        fun mismatchedWrapWithConditionAtNewFailsWithClearMessage() {
+            // Given
+            AsmRegistry.register(MismatchedWrapConditionNewMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("NewInstructionTarget", newInstructionTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: NEW 条件包裹必须接收构造完成后的对象类型，不能用不兼容的类型误接")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@WrapWithCondition NEW handler shouldKeep parameter #0 mismatch: " +
+                        "expected Ljava/lang/StringBuilder;, actual Ljava/lang/String;",
+                )
+        }
+    }
+
+    @Nested
     @DisplayName("@WrapWithCondition CAST 类型转换场景")
     inner class WrapWithConditionCastScenarios {
         @Test
@@ -12866,6 +13017,101 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = original
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object WrapConditionNewAllowMixin {
+        @WrapWithCondition(
+            method = "create()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: StringBuilder): Boolean {
+            original.append("kept")
+            return true
+        }
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object WrapConditionNewDenyMixin {
+        @WrapWithCondition(
+            method = "create()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: StringBuilder): Boolean {
+            original.append("discarded")
+            return false
+        }
+    }
+
+    @AsmMixin("NewParamTarget")
+    object WrapConditionNewTargetParamsMixin {
+        @WrapWithCondition(
+            method = "create(Ljava/lang/String;I)Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            original: StringBuilder,
+            prefix: String,
+            count: Int,
+        ): Boolean {
+            original.append(prefix).append('-').append(count)
+            return prefix.length == count
+        }
+    }
+
+    @AsmMixin("MixedNewExpressionValueTarget")
+    object WrapConditionNewInferredAllowMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.NEW),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: StringBuilder): Boolean {
+            original.append("-kept")
+            return true
+        }
+    }
+
+    @AsmMixin("SliceNewExpressionValueTarget")
+    object WrapConditionNewSliceDenyMixin {
+        @WrapWithCondition(
+            method = "createSelected()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: StringBuilder): Boolean {
+            original.append("-discarded")
+            return false
+        }
+    }
+
+    @AsmMixin("NewInstructionTarget")
+    object MismatchedWrapConditionNewMixin {
+        @WrapWithCondition(
+            method = "create()Ljava/lang/StringBuilder;",
+            at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: String): Boolean = original.isNotEmpty()
     }
 
     @AsmMixin("CastInstructionTarget")

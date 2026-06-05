@@ -35,13 +35,13 @@ import java.lang.reflect.Modifier
  * WrapWithCondition 注入器。
  *
  * 该注入器会匹配目标方法内的普通方法调用、任意返回值的 `invokedynamic` 调用、字段读取、字段写入、
- * 简单数组元素读取、数组元素写入、数组长度读取、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点，
+ * 简单数组元素读取、数组元素写入、数组长度读取、对象构造结果、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点，
  * 并在原指令前后插入 boolean handler。
  * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段读取值、字段写入值、数组读取值、
- * 数组写入栈参数、数组长度值、局部变量读取值或待写入值、类型转换后的引用、类型判断结果、常量值、原条件跳转分支结果、switch selector 或原异常对象并继续执行原指令。
+ * 数组写入栈参数、数组长度值、构造完成后的引用、局部变量读取值或待写入值、类型转换后的引用、类型判断结果、常量值、原条件跳转分支结果、switch selector 或原异常对象并继续执行原指令。
  * handler 返回 `false` 时跳过原指令、原条件跳转或原抛出；非 `void` 普通方法调用与非 `void` `invokedynamic`
  * 调用、字段读取、数组元素读取、数组长度读取、局部变量读取、类型判断、常量加载以及 switch selector 会压入对应类型的默认值；
- * 类型转换会压入引用默认值 `null`。
+ * 对象构造结果与类型转换会压入引用默认值 `null`。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或
  * `invokedynamic` 调用；构造器和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 首参和 boolean 返回类型筛选兼容字段读取；
@@ -54,6 +54,8 @@ import java.lang.reflect.Modifier
  * 过滤局部变量读取，handler 首参接收本次 `xLOAD` 读取出的表达式值；返回 `false` 时仅替换本次读取结果，不回写槽位。
  * [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
  * 过滤局部变量写入，handler 首参接收本次 `xSTORE` 即将消费的待写入值。
+ * [InjectionPoint.NEW] 使用 [At.target] 类型 internal name 或 binary name 过滤，省略时按 handler 首参筛选兼容构造点；
+ * handler 首参接收构造完成后的引用，返回 `false` 时把本次构造表达式替换为 `null`。
  * [InjectionPoint.CAST] 使用 [At.target] 类型 internal name 或 binary name 过滤，省略时按 handler 首参筛选兼容转换点；
  * handler 首参接收 `CHECKCAST` 完成后的引用，返回 `false` 时把本次转换结果替换为 `null`。
  * [InjectionPoint.INSTANCEOF] 使用 [At.target] 类型 internal name 或 binary name 过滤，省略时匹配切片内全部兼容类型判断；
@@ -62,13 +64,14 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.JUMP] 未指定跳转目标时会匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持条件包裹。
  * [InjectionPoint.SWITCH] 不支持 [At.target]，handler 首参接收 `tableswitch` / `lookupswitch` 消费前的 `Int` selector。
  * [InjectionPoint.THROW] 未指定异常类型目标时会匹配切片内全部 `ATHROW`；指定目标时只匹配前一条真实指令为同类型 `<init>` 的直接构造异常。
- * 构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，当前明确拒绝条件包裹。
+ * [InjectionPoint.INVOKE] 命中的构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，仍明确拒绝条件包裹；
+ * 如需按构造完成后的对象决定是否保留表达式，应使用 [InjectionPoint.NEW]。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * 条件包裹使用
  * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
@@ -83,11 +86,11 @@ class WrapWithConditionInjector(
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
      * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
-     * 局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件包裹逻辑。
+     * 对象构造结果、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件包裹逻辑。
      *
      * @param target 目标方法
      * @return 至少包裹一个调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
-     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点时返回 `true`
+     * 对象构造点、局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -96,11 +99,11 @@ class WrapWithConditionInjector(
 
     /**
      * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
-     * 局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
+     * 对象构造结果、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
      * @return 实际包裹的调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
-     * 局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点数量
+     * 对象构造点、局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
@@ -127,6 +130,7 @@ class WrapWithConditionInjector(
                 }
             InjectionPoint.LOAD -> injectLoad(target)
             InjectionPoint.STORE -> injectStore(target)
+            InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
             InjectionPoint.CONSTANT -> injectConstant(target)
@@ -134,7 +138,7 @@ class WrapWithConditionInjector(
             InjectionPoint.SWITCH -> injectSwitch(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, CAST, INSTANCEOF, CONSTANT, JUMP, SWITCH and THROW injection points",
+                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, CONSTANT, JUMP, SWITCH and THROW injection points",
             )
         }
     }
@@ -761,6 +765,80 @@ class WrapWithConditionInjector(
         target: MethodNode,
         constantType: Type,
     ): Boolean = runCatching { validateConstantHandlerSignature(target, constantType) }.isSuccess
+
+    /**
+     * 在匹配的对象构造完成后插入条件 handler。
+     *
+     * 显式声明类型目标时按 internal name 或 binary name 匹配；省略目标时按 handler 首参筛选兼容构造点。
+     * 注入点位于配对 `<init>` 之后，此时栈顶已经是初始化完成的对象，handler 返回 `false` 时用 `null` 替换本次构造表达式。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的对象构造数量
+     * @throws IllegalArgumentException 找不到配对构造器、`NEW` 后缺少 `DUP` 或 handler 签名不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun injectNewObject(target: MethodNode): Int {
+        val typeTarget = at.target.replace('.', '/')
+        val inferTarget = typeTarget.isEmpty()
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn !is TypeInsnNode || insn.opcode != Opcodes.NEW) {
+                continue
+            }
+            if (!inferTarget && insn.desc != typeTarget) {
+                continue
+            }
+
+            val newType = Type.getObjectType(insn.desc)
+            if (inferTarget && !isNewObjectHandlerCompatible(target, newType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val dupInsn = nextRealInstruction(insn)
+            if (dupInsn?.opcode != Opcodes.DUP) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition NEW requires NEW followed by DUP for ${insn.desc}",
+                )
+            }
+            val constructorInsn = findConstructorInvocation(insn)
+            val targetParamCount = validateNewObjectHandlerSignature(target, newType)
+            val il = buildNewObjectConditionWrapper(target, newType, targetParamCount)
+            target.instructions.insert(constructorInsn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 判断 handler 是否兼容候选对象构造结果。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param newType 构造完成后的对象类型
+     * @return handler 可条件包裹该构造点时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun isNewObjectHandlerCompatible(
+        target: MethodNode,
+        newType: Type,
+    ): Boolean = runCatching { validateNewObjectHandlerSignature(target, newType) }.isSuccess
 
     /**
      * 在匹配的 `CHECKCAST` 类型转换后插入条件 handler。
@@ -1566,6 +1644,26 @@ class WrapWithConditionInjector(
     ): InsnList = buildLoadConditionWrapper(target, constantType, targetParamCount)
 
     /**
+     * 构造 `NEW` 构造结果条件包裹的后置指令序列。
+     *
+     * `NEW` 表达式在配对 `<init>` 之后留下已初始化对象，栈形状与 `CHECKCAST` 完成后的引用一致：
+     * 暂存原对象，调用 handler；handler 返回 `false` 时压入 `null` 替换本次构造表达式。
+     *
+     * @param target 目标方法
+     * @param newType 构造完成后的对象类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到配对 `<init>` 后的条件包裹指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun buildNewObjectConditionWrapper(
+        target: MethodNode,
+        newType: Type,
+        targetParamCount: Int,
+    ): InsnList = buildCastConditionWrapper(target, newType, targetParamCount)
+
+    /**
      * 构造 `CHECKCAST` 类型转换条件包裹的后置指令序列。
      *
      * CAST 是引用表达式，false 分支必须留下 `null`，不能复用会为 `String` 生成空串的通用默认值策略。
@@ -2300,6 +2398,68 @@ class WrapWithConditionInjector(
     }
 
     /**
+     * 校验 `NEW` 构造结果条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收构造完成后的对象引用；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param newType 构造完成后的对象类型
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、构造对象参数或追加目标参数不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun validateNewObjectHandlerSignature(
+        target: MethodNode,
+        newType: Type,
+    ): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition NEW handler ${asmMethod.name} must receive constructed object",
+            )
+        }
+        if (!isHandlerParameterCompatible(newType, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition NEW handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected $newType, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    /**
      * 校验 `CHECKCAST` 类型转换条件包裹的 handler 签名。
      *
      * handler 必须返回 `boolean`，首参接收转换完成后的引用；
@@ -2690,6 +2850,41 @@ class WrapWithConditionInjector(
             return previous.owner
         }
         return null
+    }
+
+    /**
+     * 查找与 `NEW` 指令配对的构造器调用。
+     *
+     * 同一 owner 出现嵌套 `NEW` 时使用计数跳过内层 `<init>`，确保条件包裹插入到当前构造表达式完成后。
+     *
+     * @param newInsn 待匹配的 `NEW` 指令
+     * @return 与该 `NEW` 配对的构造器调用指令
+     * @throws IllegalArgumentException 找不到配对构造器调用时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun findConstructorInvocation(newInsn: TypeInsnNode): MethodInsnNode {
+        var nestedSameOwnerNewCount = 0
+        var current = newInsn.next
+        while (current != null) {
+            if (current is TypeInsnNode && current.opcode == Opcodes.NEW && current.desc == newInsn.desc) {
+                nestedSameOwnerNewCount++
+            } else if (
+                current is MethodInsnNode &&
+                current.opcode == Opcodes.INVOKESPECIAL &&
+                current.owner == newInsn.desc &&
+                current.name == "<init>"
+            ) {
+                if (nestedSameOwnerNewCount == 0) {
+                    return current
+                }
+                nestedSameOwnerNewCount--
+            }
+            current = current.next
+        }
+
+        throw IllegalArgumentException("@WrapWithCondition cannot find constructor call for NEW ${newInsn.desc}")
     }
 
     /**

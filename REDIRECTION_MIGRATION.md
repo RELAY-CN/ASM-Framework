@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | 完全替换一次调用、字段访问、局部变量表达式或分支结果 | `@Redirect` | handler 直接提供替代结果或替代副作用，不保留原操作句柄 |
 | 在 handler 内按需调用、跳过或多次执行原操作 | `@WrapOperation` | 需要 `Operation` 句柄、要组合原参数或多次调用时优先使用 |
-| 只按条件决定是否保留原调用、字段读写、数组元素读取/写入、数组长度、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
+| 只按条件决定是否保留原调用、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整 |
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
 | 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |
@@ -61,6 +61,12 @@
 返回 `true` 时保留该值，返回 `false` 时框架压入字段类型默认值；该模式不把 `GETFIELD` receiver 传给 handler。
 数组元素读取和数组长度读取可分别使用 `FIELD + args = ["array=get"]` 与 `FIELD + args = ["array=length"]`；
 handler 只接收已经读取出的元素值或 `Int` 长度，不接收数组引用或索引。
+
+对象构造这类“原构造过程仍然执行，但某些上下文下不要采纳构造结果”的监听/替换意图，优先迁移为
+`@WrapWithCondition(at = At(value = InjectionPoint.NEW, target = "..."))`。handler 首参接收构造完成后的对象引用，
+返回 `true` 时保留该对象，返回 `false` 时把本次构造表达式替换为 `null`；`At.target` 可写类型 internal
+name 或 binary name，也可省略以匹配切片内兼容的构造点。若需要替换构造器参数、完全替换构造过程或多次调用原构造，
+再使用 `@Redirect` 或 `@WrapOperation`。
 
 类型转换这类“原 `CHECKCAST` 仍然执行，但某些上下文下不要采纳转换结果”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.CAST, target = "..."))`。handler 首参接收转换完成后的引用，
@@ -128,6 +134,24 @@ object TargetMixin {
 
 上例在 `displayName` 字段读取后插入条件判断。返回 `true` 时继续使用原字段值；返回 `false` 时本次读取表达式变为
 `String` 的默认值。
+
+构造结果条件迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @WrapWithCondition(
+        method = "create(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+        at = At(value = InjectionPoint.NEW, target = "java/lang/StringBuilder"),
+    )
+    @JvmStatic
+    fun keepBuilderWhenNamed(builder: StringBuilder, name: String): Boolean {
+        return name.isNotBlank() && builder.capacity() >= 0
+    }
+}
+```
+
+上例在 `StringBuilder` 构造完成后插入条件判断。返回 `true` 时继续使用构造出的对象；返回 `false` 时本次构造表达式变为 `null`。
 
 字符串调用监听迁移示例：
 
