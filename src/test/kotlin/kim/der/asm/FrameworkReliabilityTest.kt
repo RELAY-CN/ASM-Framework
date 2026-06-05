@@ -8339,6 +8339,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@ModifyVariable 自动推断目标时空白变量名过滤应保留配置错误")
+    fun inferredModifyVariableBlankNameFilterKeepsConfigurationError() {
+        // Given
+        AsmRegistry.register(InferredBlankNameModifyVariableMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("StoreVariableTarget", storeVariableTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 省略 method 时空白 name 仍是用户配置错误，不能被自动推断吞成目标方法缺失")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@ModifyVariable STORE local variable name filter must not be blank")
+    }
+
+    @Test
     fun modifyVariableExposesArgsOnlyParameter() {
         val methods = ModifyVariable::class.java.declaredMethods.associateBy { it.name }
 
@@ -17695,6 +17710,16 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "blank-$original"
+    }
+
+    @AsmMixin("StoreVariableTarget")
+    object InferredBlankNameModifyVariableMixin {
+        @ModifyVariable(
+            at = At(value = InjectionPoint.STORE),
+            name = [" "],
+        )
+        @JvmStatic
+        fun value(original: String): String = "blank-$original"
     }
 
     @AsmMixin("StoreVariableTarget")

@@ -2422,6 +2422,9 @@ class TargetClassContext(
             return requireTargetMethod(methodSignature) to methodSignature
         }
 
+        // 自动推断候选检查会吞掉普通不兼容异常；name 过滤是用户配置错误，必须先校验并原样暴露。
+        normalizeModifyVariableNames(annotation)
+
         val compatibleTargets =
             classNode.methods.filter { candidate ->
                 candidate.name == method.name &&
@@ -2526,7 +2529,7 @@ class TargetClassContext(
             )
     }
 
-    // HEAD 自动推断也必须保留同样的 name 校验，避免省略 method 时绕过配置错误。
+    // HEAD 类型解析和自动推断入口共用同一套 name 校验，避免省略 method 时绕过配置错误。
     private fun normalizeModifyVariableNames(annotation: ModifyVariable): Set<String> =
         annotation.name.mapTo(linkedSetOf()) { name ->
             name.trim().also { trimmed ->
