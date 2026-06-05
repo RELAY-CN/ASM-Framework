@@ -1426,7 +1426,7 @@ class TargetClassContext(
         copyMethodNames: Map<String, String>,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val clone = cloneTargetMethod(targetMethod)
             if (annotation.inline) {
                 injectInlineCode(clone, method, annotation, copyMethodNames) > 0
@@ -1434,7 +1434,7 @@ class TargetClassContext(
                 val injector = AsmInjectorFactory.createInjector(annotation.target, method, asmInfo)
                 injector.injectCount(clone) > 0
             }
-        }.getOrDefault(false)
+        }
 
     /**
      * 内联 ASM 方法的字节码到目标方法
@@ -1695,7 +1695,7 @@ class TargetClassContext(
         annotation: ModifyArg,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector = AsmInjectorFactory.createModifyArgInjector(
                 handlerMethod,
                 asmInfo,
@@ -1705,7 +1705,7 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     private fun validateModifyArgEntryHandlerSignature(
         handlerMethod: Method,
@@ -2195,7 +2195,7 @@ class TargetClassContext(
         annotation: WrapOperation,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector = AsmInjectorFactory.createWrapOperationInjector(
                 method,
                 asmInfo,
@@ -2204,7 +2204,7 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     /**
      * 应用 @WrapWithCondition 条件包裹调用。
@@ -2273,7 +2273,7 @@ class TargetClassContext(
         annotation: WrapWithCondition,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector = AsmInjectorFactory.createWrapWithConditionInjector(
                 method,
                 asmInfo,
@@ -2282,7 +2282,7 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     /**
      * 应用 @ModifyExpressionValue 修改表达式值。
@@ -2351,7 +2351,7 @@ class TargetClassContext(
         annotation: ModifyExpressionValue,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector = AsmInjectorFactory.createModifyExpressionValueInjector(
                 method,
                 asmInfo,
@@ -2360,7 +2360,7 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     private fun cloneTargetMethod(method: MethodNode): MethodNode {
         val clone = MethodNode(
@@ -2459,7 +2459,7 @@ class TargetClassContext(
         annotation: ModifyVariable,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector =
                 AsmInjectorFactory.createModifyVariableInjector(
                     handlerMethod,
@@ -2472,7 +2472,7 @@ class TargetClassContext(
                     argsOnly = annotation.argsOnly,
                 )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     private fun resolveModifyVariableType(
         handlerMethod: Method,
@@ -2714,7 +2714,7 @@ class TargetClassContext(
         redirectTarget: String,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             val injector =
                 AsmInjectorFactory.createRedirectInjector(
                     method,
@@ -2726,7 +2726,7 @@ class TargetClassContext(
                     annotation.at.args,
                 )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     /**
      * 构建 Redirect 目标方法签名
@@ -3380,7 +3380,7 @@ class TargetClassContext(
         annotation: ModifyReturnValue,
         targetMethod: MethodNode,
     ): Boolean =
-        runCatching {
+        runAutoTargetInferenceCandidateCheck {
             validateModifyReturnValueHandlerSignature(handlerMethod, targetMethod)
             val injector = AsmInjectorFactory.createModifyReturnValueInjector(
                 handlerMethod,
@@ -3389,7 +3389,7 @@ class TargetClassContext(
                 annotation.slice,
             )
             injector.injectCount(cloneTargetMethod(targetMethod)) > 0
-        }.getOrDefault(false)
+        }
 
     private fun validateModifyReturnValueHandlerSignature(
         handlerMethod: Method,
