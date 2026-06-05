@@ -9229,27 +9229,63 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("构造器 Invoker 返回已实现接口时应生成可调用工厂并保留构造状态")
     fun constructorInvokerCanReturnImplementedInterface() {
+        // Given
         AsmRegistry.register(InterfaceReturnConstructorInvokerMixin::class.java)
 
+        // When
         val transformed =
             AsmProcessor().transform("ConstructorInvokerTarget", constructorInvokerTargetBytes(), javaClass.classLoader)
         val classNode = readClass(transformed)
         val method = classNode.methods.single { it.name == "createAsRunnable" }
+        val clazz = loadClass("ConstructorInvokerTarget", transformed)
+        val created = clazz.getMethod("createAsRunnable", String::class.java).invoke(null, "runnable-created")
 
-        assertEquals("(Ljava/lang/String;)Ljava/lang/Runnable;", method.desc)
+        // Then
+        assertThat(method.desc)
+            .`as`("Then: 构造器工厂的公开返回签名应保持为 Runnable，兼容按接口暴露实例的调用方")
+            .isEqualTo("(Ljava/lang/String;)Ljava/lang/Runnable;")
+        assertThat(created)
+            .`as`("Then: 工厂返回对象应真实实现 Runnable，而不是只在字节码签名上声明接口")
+            .isInstanceOf(Runnable::class.java)
+        (created as Runnable).run()
+        assertThat(clazz.getMethod("value").invoke(created))
+            .`as`("Then: 构造器参数应写入目标对象状态，证明工厂确实调用了匹配构造器")
+            .isEqualTo("runnable-created")
     }
 
     @Test
+    @DisplayName("构造器 Invoker 返回继承接口时应生成可调用工厂并保留集合行为")
     fun constructorInvokerCanReturnInheritedInterface() {
+        // Given
         AsmRegistry.register(InheritedInterfaceReturnConstructorInvokerMixin::class.java)
 
+        // When
         val transformed =
             AsmProcessor().transform("ConstructorInvokerTarget", constructorInvokerTargetBytes(), javaClass.classLoader)
         val classNode = readClass(transformed)
         val method = classNode.methods.single { it.name == "createAsList" }
+        val clazz = loadClass("ConstructorInvokerTarget", transformed)
+        val created = clazz.getMethod("createAsList", String::class.java).invoke(null, "list-created")
 
-        assertEquals("(Ljava/lang/String;)Ljava/util/List;", method.desc)
+        @Suppress("UNCHECKED_CAST")
+        val list = created as MutableList<Any>
+        list.add("entry")
+
+        // Then
+        assertThat(method.desc)
+            .`as`("Then: 构造器工厂可用目标类继承链中的 List 接口作为公开返回签名")
+            .isEqualTo("(Ljava/lang/String;)Ljava/util/List;")
+        assertThat(created)
+            .`as`("Then: 工厂返回对象应真实可作为 List 使用，而不是只通过描述符放宽返回类型")
+            .isInstanceOf(List::class.java)
+        assertThat(list)
+            .`as`("Then: 返回的继承接口对象应保留 ArrayList 继承行为")
+            .containsExactly("entry")
+        assertThat(clazz.getMethod("value").invoke(created))
+            .`as`("Then: 构造器参数应写入目标对象状态，证明工厂没有绕过目标构造器")
+            .isEqualTo("list-created")
     }
 
     @Test
