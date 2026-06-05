@@ -9307,6 +9307,32 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("Accessor 与 Invoker 省略 value 时应保留 acronym 字段和方法名")
+    fun accessorAndInvokerInferencePreservesAcronymNames() {
+        // Given
+        AsmRegistry.register(AcronymAccessorInvokerMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("AcronymInferenceTarget", acronymInferenceTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("AcronymInferenceTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        assertThat(clazz.getMethod("getURL").invoke(instance))
+            .`as`("Given: acronym getter 应能按 JavaBeans 规则推断 URL 字段，而不是误推断为 uRL")
+            .isEqualTo("https://example.test/地图")
+
+        clazz.getMethod("setURL", String::class.java).invoke(instance, "https://mirror.example/重放")
+
+        // Then
+        assertThat(clazz.getMethod("getURL").invoke(instance))
+            .`as`("Then: acronym setter 应写回 URL 字段，证明 setURL 未被推断成 uRL")
+            .isEqualTo("https://mirror.example/重放")
+        assertThat(clazz.getMethod("callURL", String::class.java).invoke(instance, "下载"))
+            .`as`("Then: acronym invoker 应调用私有 URL 方法，兼容 Mixin 风格 callURL 推断")
+            .isEqualTo("https://mirror.example/重放")
+    }
+
+    @Test
     fun modifyConstantDoesNotTreatNewInstructionAsClassConstant() {
         AsmRegistry.register(ClassConstantModifyMixin::class.java)
 
@@ -18487,6 +18513,20 @@ class FrameworkReliabilityTest {
         fun callSecret(value: String): String = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("AcronymInferenceTarget")
+    class AcronymAccessorInvokerMixin {
+        @Accessor
+        fun getURL(): String = throw UnsupportedOperationException()
+
+        @Accessor
+        fun setURL(value: String) {
+            throw UnsupportedOperationException()
+        }
+
+        @Invoker
+        fun callURL(value: String): String = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("NewInstructionTarget")
     object ClassConstantModifyMixin {
         @Group(name = "newInstructionIsNotClassConstant", min = 0, max = 0)
@@ -23936,6 +23976,33 @@ class FrameworkReliabilityTest {
             visitFieldInsn(Opcodes.GETFIELD, "ConstructorInvokerTarget", "value", "Ljava/lang/String;")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun acronymInferenceTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "AcronymInferenceTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PRIVATE, "URL", "Ljava/lang/String;", null, null).visitEnd()
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitLdcInsn("https://example.test/地图")
+            visitFieldInsn(Opcodes.PUTFIELD, "AcronymInferenceTarget", "URL", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PRIVATE, "URL", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "AcronymInferenceTarget", "URL", "Ljava/lang/String;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()

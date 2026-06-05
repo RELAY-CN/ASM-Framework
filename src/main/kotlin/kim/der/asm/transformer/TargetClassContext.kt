@@ -972,17 +972,27 @@ class TargetClassContext(
         // 支持 get/set/is 前缀
         return when {
             methodName.startsWith("get") && methodName.length > 3 -> {
-                methodName.substring(3).let { it[0].lowercaseChar() + it.substring(1) }
+                decapitalizeAccessorSuffix(methodName.substring(3))
             }
             methodName.startsWith("set") && methodName.length > 3 -> {
-                methodName.substring(3).let { it[0].lowercaseChar() + it.substring(1) }
+                decapitalizeAccessorSuffix(methodName.substring(3))
             }
             methodName.startsWith("is") && methodName.length > 2 -> {
-                methodName.substring(2).let { it[0].lowercaseChar() + it.substring(1) }
+                decapitalizeAccessorSuffix(methodName.substring(2))
             }
             else -> methodName
         }
     }
+
+    /**
+     * 按 JavaBeans/Mixin 的 acronym 规则还原访问器后缀，避免 `getURL` 被误推断为 `uRL`。
+     */
+    private fun decapitalizeAccessorSuffix(suffix: String): String =
+        if (suffix.length >= 2 && suffix[0].isUpperCase() && suffix[1].isUpperCase()) {
+            suffix
+        } else {
+            suffix[0].lowercaseChar() + suffix.substring(1)
+        }
 
     /**
      * 从调用器方法名推断目标方法名
@@ -991,10 +1001,10 @@ class TargetClassContext(
         // 支持 call/invoke 前缀
         return when {
             methodName.startsWith("call") && methodName.length > 4 -> {
-                methodName.substring(4).let { it[0].lowercaseChar() + it.substring(1) }
+                decapitalizeAccessorSuffix(methodName.substring(4))
             }
             methodName.startsWith("invoke") && methodName.length > 6 -> {
-                methodName.substring(6).let { it[0].lowercaseChar() + it.substring(1) }
+                decapitalizeAccessorSuffix(methodName.substring(6))
             }
             else -> methodName
         }

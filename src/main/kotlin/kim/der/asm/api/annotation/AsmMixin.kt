@@ -1679,6 +1679,8 @@ annotation class Shadow(
  *
  * 无参数且返回字段类型的方法会生成 getter；一个参数且返回 `void` 的方法会生成 setter。
  * 当 [value] 为空时，会按 `getXxx`、`setXxx` 或 `isXxx` 方法名推断目标字段名。
+ * 推断遵循 JavaBeans/Mixin 的 acronym 规则：若后缀前两个字符均为大写，会保留原后缀，
+ * 例如 `getURL`、`setURL` 或 `isURL` 会推断为 `URL`，而不是 `uRL`。
  * 目标类自身没有该字段时，会沿可加载父类查找可继承字段，再查找可加载接口中的 `public static` 字段，
  * 并在生成指令时使用字段实际 owner。
  *
@@ -1704,6 +1706,7 @@ annotation class Accessor(
      * 目标字段名。
      *
      * 为空时按 `getXxx`、`setXxx` 或 `isXxx` 访问器方法名推断字段名。
+     * 后缀前两个字符均为大写时保留原后缀，例如 `getURL` 推断为 `URL`。
      */
     val value: String = "",
 
@@ -1723,7 +1726,8 @@ annotation class Accessor(
  * 普通方法调用器会在目标类中生成一个同签名桥接方法，优先匹配目标类自身方法；若不存在，
  * 会沿可加载父类查找非 `private` 继承方法，再查找可加载接口中的默认方法。生成调用时按目标方法的静态性选择
  * `INVOKEVIRTUAL`、`INVOKESPECIAL`、`INVOKESTATIC` 或 `INVOKEINTERFACE`。当 [value] 为空时，
- * 会从 `callXxx` 或 `invokeXxx` 方法名推断目标方法名。接口私有方法会使用 `INVOKESPECIAL`
+ * 会从 `callXxx` 或 `invokeXxx` 方法名推断目标方法名；若后缀前两个字符均为大写，会保留原后缀，
+ * 例如 `callURL` 或 `invokeURL` 会推断为 `URL`。接口私有方法会使用 `INVOKESPECIAL`
  * 生成桥接调用，接口默认方法使用 `INVOKEINTERFACE`。
  *
  * 构造器调用器使用 `@Invoker("<init>")` 声明。此时 ASM 方法必须是静态方法，
@@ -1752,6 +1756,7 @@ annotation class Invoker(
      * 目标方法名或构造器标记。
      *
      * 为空时按 `callXxx` 或 `invokeXxx` 方法名推断；`"<init>"` 表示生成构造器工厂。
+     * 后缀前两个字符均为大写时保留原后缀，例如 `callURL` 推断为 `URL`。
      */
     val value: String = "",
 

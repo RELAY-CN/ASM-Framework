@@ -1146,6 +1146,8 @@ Shadow 字段/方法会沿可加载父类查找可继承成员；字段还会查
 
 `@Accessor` 可按方法形态生成 getter 或 setter。getter 必须无参数并返回字段类型，
 setter 必须接收一个字段类型参数并返回 `void`。
+省略 `value` 时会按 `getXxx`、`setXxx` 或 `isXxx` 推断字段名；若后缀前两个字符均为大写，
+会保留原后缀，例如 `getURL` 会推断为 `URL`，而不是 `uRL`。
 访问静态字段时，访问器方法也必须是静态方法；Kotlin `object` 中通常需要添加 `@JvmStatic`。
 目标类自身没有字段时，访问器会沿可加载父类查找可继承字段，再查找可加载接口中的 `public static` 字段；
 继承字段和接口字段的访问指令会使用字段实际 owner。接口字段按 JVM 规则作为静态字段读取，
@@ -1173,6 +1175,8 @@ object InvokerMixin {
 
 普通 `@Invoker` 会先查找目标类自身方法，找不到时沿可加载父类查找非 `private` 继承方法，
 再查找可加载接口中的默认方法；参数和返回值必须与目标方法一致，静态性也必须一致。
+省略 `value` 时会按 `callXxx` 或 `invokeXxx` 推断目标方法名；若后缀前两个字符均为大写，
+会保留原后缀，例如 `callURL` 会推断为 `URL`。
 如果目标是接口私有方法，框架会使用 `INVOKESPECIAL` 生成桥接调用；接口默认方法使用 `INVOKEINTERFACE`。
 接口 `private` 或 `static` 方法不会作为继承默认方法匹配。
 `@Invoker("<init>")` 会生成静态工厂方法，参数用于匹配目标构造器，返回类型使用目标类或
