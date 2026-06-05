@@ -5471,6 +5471,116 @@ class FrameworkReliabilityTest {
     }
 
     @Nested
+    @DisplayName("@WrapWithCondition INVOKE_ASSIGN 调用返回值场景")
+    inner class WrapWithConditionInvokeAssignScenarios {
+        @Test
+        @DisplayName("handler 拒绝时应保留原调用副作用并替换返回表达式")
+        fun wrapWithConditionAtInvokeAssignKeepsCallSideEffectAndUsesDefaultWhenFalse() {
+            // Given
+            AsmRegistry.register(WrapConditionInvokeAssignByTargetParamsMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "InvokeAssignConditionTarget",
+                    invokeAssignConditionTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("InvokeAssignConditionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("value", Boolean::class.javaPrimitiveType, String::class.java)
+            val result = method.invoke(instance, false, "deny")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: INVOKE_ASSIGN false 分支只替换调用完成后的 String 返回值，不应跳过后续 concat")
+                .isEqualTo("-done")
+            assertThat(clazz.getField("counter").getInt(instance))
+                .`as`("Then: 原 produce 调用必须已经执行，副作用计数应保留下来")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("handler 放行时可使用目标方法参数前缀保留返回表达式")
+        fun wrapWithConditionAtInvokeAssignCanUseTargetMethodParameters() {
+            // Given
+            AsmRegistry.register(WrapConditionInvokeAssignByTargetParamsMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "InvokeAssignConditionTarget",
+                    invokeAssignConditionTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("InvokeAssignConditionTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("value", Boolean::class.javaPrimitiveType, String::class.java)
+            val result = method.invoke(instance, true, "keep")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 目标方法参数满足业务条件时应保留 produce 的真实返回值")
+                .isEqualTo("keep-1-done")
+            assertThat(clazz.getField("counter").getInt(instance))
+                .`as`("Then: handler 放行不应重复执行或跳过原调用")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("省略 target 时应只包裹兼容的非 void 调用返回值")
+        fun wrapWithConditionAtInvokeAssignWithoutTargetSkipsIncompatibleReturnTypes() {
+            // Given
+            AsmRegistry.register(WrapConditionInvokeAssignInferredStringMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "InferredInvokeExpressionValueTarget",
+                    inferredInvokeExpressionValueTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val classNode = readClass(transformed)
+            val methodNode = classNode.methods.single { it.name == "value" && it.desc == "()Ljava/lang/String;" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(WrapConditionInvokeAssignInferredStringMixin::class.java)
+            val handlerCallCount = methodNode.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "shouldKeep"
+            }
+            val clazz = loadClass("InferredInvokeExpressionValueTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value").invoke(instance)
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: handler 首参为 String 时不应包裹 StringBuilder 返回值候选")
+                .isEqualTo(1)
+            assertThat(result)
+                .`as`("Then: 唯一兼容的 String 调用返回值被拒绝后应替换为默认空字符串")
+                .isEqualTo("")
+        }
+
+        @Test
+        @DisplayName("显式命中 void 调用时应暴露配置错误")
+        fun wrapWithConditionAtInvokeAssignRejectsVoidCall() {
+            // Given
+            AsmRegistry.register(WrapConditionInvokeAssignVoidCallMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: INVOKE_ASSIGN 表示调用返回表达式，不能用于没有返回值的 void 调用")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@WrapWithCondition INVOKE_ASSIGN cannot conditionally keep void call " +
+                        "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+                )
+        }
+    }
+
+    @Nested
     @DisplayName("@WrapWithCondition NEW 构造结果场景")
     inner class WrapWithConditionNewScenarios {
         @Test
@@ -11337,6 +11447,55 @@ class FrameworkReliabilityTest {
             count.toString()
             return false
         }
+    }
+
+    @AsmMixin("InvokeAssignConditionTarget")
+    object WrapConditionInvokeAssignByTargetParamsMixin {
+        @WrapWithCondition(
+            method = "value(ZLjava/lang/String;)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "InvokeAssignConditionTarget.produce(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            value: String,
+            keep: Boolean,
+            prefix: String,
+        ): Boolean = keep && value.startsWith(prefix)
+    }
+
+    @AsmMixin("InferredInvokeExpressionValueTarget")
+    object WrapConditionInvokeAssignInferredStringMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.INVOKE_ASSIGN),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionInvokeAssignVoidCallMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "WrapConditionStaticTarget.record(Ljava/lang/String;)V",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: String): Boolean = value.isNotEmpty()
     }
 
     @AsmMixin("WrapConditionInstanceTarget")
@@ -20535,6 +20694,63 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "trim", "()Ljava/lang/String;", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeAssignConditionTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeAssignConditionTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PUBLIC, "counter", "I", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "(ZLjava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "InvokeAssignConditionTarget",
+                "produce",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitLdcInsn("-done")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "produce", "(Ljava/lang/String;)Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.DUP)
+            visitFieldInsn(Opcodes.GETFIELD, "InvokeAssignConditionTarget", "counter", "I")
+            visitInsn(Opcodes.ICONST_1)
+            visitInsn(Opcodes.IADD)
+            visitFieldInsn(Opcodes.PUTFIELD, "InvokeAssignConditionTarget", "counter", "I")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn("-")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "InvokeAssignConditionTarget", "counter", "I")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "java/lang/String", "valueOf", "(I)Ljava/lang/String;", false)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 2)
             visitEnd()
         }
         cw.visitEnd()

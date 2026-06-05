@@ -149,9 +149,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 调用点定位；当前支持 INVOKE、FIELD_ASSIGN、JUMP 与 THROW
+     * @param at 调用点定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW
      * @param ordinal 匹配点序号；负数表示处理全部匹配点
-     * @param slice 切片范围；当前 INVOKE、FIELD_ASSIGN、JUMP 与 THROW 条件包裹支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW 条件包裹支持 INVOKE 边界切片
      * @return WrapWithCondition 注入器
      *
      * @author Dr (dr@der.kim)

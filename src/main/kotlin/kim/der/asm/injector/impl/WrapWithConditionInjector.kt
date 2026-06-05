@@ -34,16 +34,18 @@ import java.lang.reflect.Modifier
 /**
  * WrapWithCondition 注入器。
  *
- * 该注入器会匹配目标方法内的普通方法调用、任意返回值的 `invokedynamic` 调用、字段读取、字段写入、
+ * 该注入器会匹配目标方法内的普通方法调用、任意返回值的 `invokedynamic` 调用、调用返回值、字段读取、字段写入、
  * 简单数组元素读取、数组元素写入、数组长度读取、对象构造结果、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点，
  * 并在原指令前后插入 boolean handler。
  * handler 返回 `true` 时恢复原调用的 receiver 与参数、字段读取值、字段写入值、数组读取值、
- * 数组写入栈参数、数组长度值、构造完成后的引用、局部变量读取值或待写入值、类型转换后的引用、类型判断结果、常量值、原条件跳转分支结果、switch selector 或原异常对象并继续执行原指令。
- * handler 返回 `false` 时跳过原指令、原条件跳转或原抛出；非 `void` 普通方法调用与非 `void` `invokedynamic`
- * 调用、字段读取、数组元素读取、数组长度读取、局部变量读取、类型判断、常量加载以及 switch selector 会压入对应类型的默认值；
+ * 数组写入栈参数、数组长度值、调用返回值、构造完成后的引用、局部变量读取值或待写入值、类型转换后的引用、类型判断结果、常量值、原条件跳转分支结果、switch selector 或原异常对象并继续执行或保留原语义。
+ * handler 返回 `false` 时，调用前、写入、跳转或抛出类控制点会跳过原操作；非 `void` 普通方法调用与非 `void` `invokedynamic`
+ * 调用、调用返回值、字段读取、数组元素读取、数组长度读取、局部变量读取、类型判断、常量加载以及 switch selector 会压入对应类型的默认值；
  * 对象构造结果与类型转换会压入引用默认值 `null`。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或
  * `invokedynamic` 调用；构造器和 handler 不兼容的调用不会计入 [WrapWithCondition.ordinal] 或命中数。
+ * [InjectionPoint.INVOKE_ASSIGN] 匹配非 `void` 普通方法调用或 `invokedynamic` 调用完成后的返回值；
+ * 省略 [At.target] 时按 handler 首参与 boolean 返回类型筛选兼容调用返回值，不兼容或 `void` 调用不计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 首参和 boolean 返回类型筛选兼容字段读取；
  * handler 只接收读取出的字段值，不接收 `GETFIELD` receiver，不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 也可通过 [At.args] 中的 `array=get` 或 `array=length` 匹配目标数组字段后的数组元素读取或数组长度读取；
@@ -67,10 +69,10 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.INVOKE] 命中的构造器 `<init>` 虽然返回 `void`，但会消费未初始化对象，仍明确拒绝条件包裹；
  * 如需按构造完成后的对象决定是否保留表达式，应使用 [InjectionPoint.NEW]。
  *
- * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * 条件包裹使用
  * INVOKE 边界缩小匹配范围
@@ -85,11 +87,11 @@ class WrapWithConditionInjector(
     private val slice: Slice = Slice(),
 ) : AbstractAsmInjector(method, asmInfo) {
     /**
-     * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
+     * 在匹配的方法调用、`invokedynamic` 调用、调用返回值、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
      * 对象构造结果、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转或抛异常点插入条件包裹逻辑。
      *
      * @param target 目标方法
-     * @return 至少包裹一个调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
+     * @return 至少包裹一个调用点、动态调用点、调用返回值、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
      * 对象构造点、局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点时返回 `true`
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
@@ -98,11 +100,11 @@ class WrapWithConditionInjector(
     override fun inject(target: MethodNode): Boolean = injectCount(target) > 0
 
     /**
-     * 在匹配的方法调用、`invokedynamic` 调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
+     * 在匹配的方法调用、`invokedynamic` 调用、调用返回值、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
      * 对象构造结果、局部变量读取或写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点插入条件包裹逻辑，并返回实际包裹数量。
      *
      * @param target 目标方法
-     * @return 实际包裹的调用点、动态调用点、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
+     * @return 实际包裹的调用点、动态调用点、调用返回值、字段读取点、字段写入点、数组元素读取点、数组元素写入点、数组长度读取点、
      * 对象构造点、局部变量读取或写入点、类型判断点、常量加载点、条件跳转点、switch 点或抛异常点数量
      * @throws IllegalArgumentException 定位点、目标调用、字段目标或 handler 签名不合法时抛出
      * @author Dr (dr@der.kim)
@@ -111,6 +113,7 @@ class WrapWithConditionInjector(
     override fun injectCount(target: MethodNode): Int {
         return when (at.value) {
             InjectionPoint.INVOKE -> injectMethodCall(target)
+            InjectionPoint.INVOKE_ASSIGN -> injectMethodCallReturn(target)
             InjectionPoint.FIELD ->
                 when (arrayAccessMode()) {
                     ArrayAccessMode.NONE -> injectFieldRead(target)
@@ -138,7 +141,7 @@ class WrapWithConditionInjector(
             InjectionPoint.SWITCH -> injectSwitch(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, CONSTANT, JUMP, SWITCH and THROW injection points",
+                "@WrapWithCondition supports only INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, CONSTANT, JUMP, SWITCH and THROW injection points",
             )
         }
     }
@@ -270,6 +273,96 @@ class WrapWithConditionInjector(
     ): Boolean {
         return runCatching { validateInvokeDynamicHandlerSignature(target, insn) }.isSuccess
     }
+
+    /**
+     * 在匹配的非 `void` 普通方法调用或 `invokedynamic` 调用后插入条件 handler。
+     *
+     * 该模式保留原调用执行，只在调用已经把返回值压入栈顶后决定是否继续采纳该返回表达式。
+     * handler 返回 `false` 时把本次返回值替换为对应类型默认值，返回 `true` 时恢复原返回值。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的调用返回值数量
+     * @throws IllegalArgumentException 目标签名不完整、匹配到 `void` 调用或 handler 签名不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun injectMethodCallReturn(target: MethodNode): Int {
+        val inferTarget = at.target.isEmpty()
+        val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
+            throw IllegalArgumentException("@WrapWithCondition INVOKE_ASSIGN requires at.target method signature")
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            val callDesc =
+                when (insn) {
+                    is MethodInsnNode ->
+                        if (inferTarget || (targetName != null && matchesTargetMethod(insn, targetOwner, targetName, targetDesc))) {
+                            insn.desc
+                        } else {
+                            null
+                        }
+                    is InvokeDynamicInsnNode ->
+                        if (inferTarget || (targetName != null && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc))) {
+                            insn.desc
+                        } else {
+                            null
+                        }
+                    else -> null
+                } ?: continue
+
+            val callReturnType = Type.getReturnType(callDesc)
+            if (callReturnType == Type.VOID_TYPE) {
+                if (inferTarget) {
+                    continue
+                }
+                throw IllegalArgumentException(
+                    "@WrapWithCondition INVOKE_ASSIGN cannot conditionally keep void call " +
+                        callDisplayName(insn, callDesc),
+                )
+            }
+            if (inferTarget && !isCallReturnHandlerCompatible(target, callReturnType)) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateCallReturnHandlerSignature(target, callReturnType)
+            val il = buildMethodCallReturnConditionWrapper(target, callReturnType, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 判断 handler 是否兼容候选调用返回值。
+     *
+     * 该方法用于目标推断模式，签名不兼容候选不会计入 ordinal 或命中数。
+     *
+     * @param target 目标方法
+     * @param callReturnType 候选调用返回值类型
+     * @return handler 可条件包裹该调用返回值时返回 `true`
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun isCallReturnHandlerCompatible(
+        target: MethodNode,
+        callReturnType: Type,
+    ): Boolean = runCatching { validateCallReturnHandlerSignature(target, callReturnType) }.isSuccess
 
     /**
      * 在匹配的字段读取后插入条件 handler。
@@ -1577,6 +1670,26 @@ class WrapWithConditionInjector(
     ): InsnList = buildLoadConditionWrapper(target, Type.INT_TYPE, targetParamCount)
 
     /**
+     * 构造调用返回值条件包裹的后置指令序列。
+     *
+     * `INVOKE_ASSIGN` 插入点位于调用指令之后，栈顶已经是原调用返回值；序列会暂存该值，
+     * 再由 boolean handler 决定恢复原值还是压入返回类型默认值。
+     *
+     * @param target 目标方法
+     * @param returnType 原调用返回值类型
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 插入到原调用后的条件包裹指令列表
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun buildMethodCallReturnConditionWrapper(
+        target: MethodNode,
+        returnType: Type,
+        targetParamCount: Int,
+    ): InsnList = buildLoadConditionWrapper(target, returnType, targetParamCount)
+
+    /**
      * 构造局部变量读取条件包裹的后置指令序列。
      *
      * 序列会暂存 `xLOAD` 刚压入栈顶的读取值，调用 boolean handler；
@@ -1996,6 +2109,68 @@ class WrapWithConditionInjector(
         for (index in 0 until requestedTargetParamCount) {
             val expected = targetParamTypes[index]
             val actual = actualParams[expectedCallParams.size + index]
+            if (!isHandlerParameterCompatible(expected, actual)) {
+                throw IllegalArgumentException(
+                    "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
+                        "expected $expected, actual $actual",
+                )
+            }
+        }
+
+        return requestedTargetParamCount
+    }
+
+    /**
+     * 校验调用返回值条件包裹的 handler 签名。
+     *
+     * handler 必须返回 `boolean`，首参接收普通调用或 `invokedynamic` 调用已经产生的返回值；
+     * 其余参数会被解释为目标方法开头的参数前缀。
+     *
+     * @param target 目标方法
+     * @param callReturnType 调用返回值类型
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalArgumentException handler 返回值、调用返回值参数或追加目标参数不兼容时抛出
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun validateCallReturnHandlerSignature(
+        target: MethodNode,
+        callReturnType: Type,
+    ): Int {
+        val returnType = Type.getReturnType(asmMethod)
+        if (returnType.sort != Type.BOOLEAN) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} must return boolean, actual $returnType",
+            )
+        }
+
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.isEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition INVOKE_ASSIGN handler ${asmMethod.name} must receive call return value",
+            )
+        }
+        if (!isHandlerParameterCompatible(callReturnType, actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition INVOKE_ASSIGN handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected $callReturnType, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamTypes = Type.getArgumentTypes(target.desc)
+        val requestedTargetParamCount = actualParams.size - 1
+        if (requestedTargetParamCount > targetParamTypes.size) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition handler ${asmMethod.name} requests " +
+                    "$requestedTargetParamCount target parameter(s), " +
+                    "but target method ${target.name}${target.desc} has only ${targetParamTypes.size}",
+            )
+        }
+
+        for (index in 0 until requestedTargetParamCount) {
+            val expected = targetParamTypes[index]
+            val actual = actualParams[1 + index]
             if (!isHandlerParameterCompatible(expected, actual)) {
                 throw IllegalArgumentException(
                     "@WrapWithCondition handler ${asmMethod.name} target parameter #$index mismatch: " +
@@ -3626,6 +3801,28 @@ class WrapWithConditionInjector(
      * @return 左右边界都等于指令数量的空范围
      */
     private fun emptySlice(insns: Array<AbstractInsnNode>): Pair<Int, Int> = insns.size to insns.size
+
+    /**
+     * 提取调用指令的可读名称。
+     *
+     * 该名称只用于错误提示；普通调用包含 owner、name 和 descriptor，动态调用标明 `invokedynamic`。
+     *
+     * @param insn 待描述的调用指令
+     * @param desc 调用点 JVM 描述符
+     * @return 可读调用名称
+     *
+     * @author Dr (dr@der.kim)
+     * @date 2026-06-05
+     */
+    private fun callDisplayName(
+        insn: AbstractInsnNode,
+        desc: String,
+    ): String =
+        when (insn) {
+            is MethodInsnNode -> "${insn.owner}.${insn.name}$desc"
+            is InvokeDynamicInsnNode -> "invokedynamic ${insn.name}$desc"
+            else -> "<unknown>$desc"
+        }
 
     /**
      * 查找切片边界方法调用在指令数组中的位置。

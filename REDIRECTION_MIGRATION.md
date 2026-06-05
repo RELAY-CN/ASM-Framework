@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | 完全替换一次调用、字段访问、局部变量表达式或分支结果 | `@Redirect` | handler 直接提供替代结果或替代副作用，不保留原操作句柄 |
 | 在 handler 内按需调用、跳过或多次执行原操作 | `@WrapOperation` | 需要 `Operation` 句柄、要组合原参数或多次调用时优先使用 |
-| 只按条件决定是否保留原调用、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
+| 只按条件决定是否保留原调用、调用返回值、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整 |
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
 | 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |
@@ -61,6 +61,11 @@
 返回 `true` 时保留该值，返回 `false` 时框架压入字段类型默认值；该模式不把 `GETFIELD` receiver 传给 handler。
 数组元素读取和数组长度读取可分别使用 `FIELD + args = ["array=get"]` 与 `FIELD + args = ["array=length"]`；
 handler 只接收已经读取出的元素值或 `Int` 长度，不接收数组引用或索引。
+
+方法调用这类“原调用必须执行，但某些上下文下不要采纳返回值”的监听/替换意图，优先迁移为
+`@WrapWithCondition(at = At(value = InjectionPoint.INVOKE_ASSIGN, target = "..."))`。handler 首参接收调用完成后的返回值，
+返回 `true` 时保留该返回值，返回 `false` 时把本次返回表达式替换为返回类型默认值；该模式不会跳过原调用。
+若旧逻辑要在条件不满足时连原调用副作用一起跳过，应使用 `@WrapWithCondition(at = At(value = InjectionPoint.INVOKE, target = "..."))`。
 
 对象构造这类“原构造过程仍然执行，但某些上下文下不要采纳构造结果”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.NEW, target = "..."))`。handler 首参接收构造完成后的对象引用，

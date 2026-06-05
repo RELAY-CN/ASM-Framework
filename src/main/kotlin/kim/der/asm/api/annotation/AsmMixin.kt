@@ -864,12 +864,12 @@ annotation class WrapMethod(
 /**
  * 条件包裹注解。
  *
- * 用于在目标方法内匹配普通方法调用、`invokedynamic` 调用、字段读取、字段写入、简单数组元素读取、
+ * 用于在目标方法内匹配普通方法调用、`invokedynamic` 调用、调用返回值、字段读取、字段写入、简单数组元素读取、
  * 数组元素写入、数组长度读取、对象构造结果、局部变量读取/写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点插入条件判断（语义参考
- * Mixin Extras 的 `@WrapWithCondition`）。handler 返回 `true` 时继续执行原调用、写入、按原分支结果跳转或继续原抛出，
- * 返回 `false` 时跳过原指令、原跳转或原抛出；非 `void` 方法调用、`invokedynamic` 调用、字段读取、
- * 数组元素读取、数组长度读取、局部变量读取、类型判断、常量加载和 switch selector 会留下对应类型的默认值；对象构造结果与类型转换会留下 `null`。
- * 相比 [Redirect]，该注解不替换原逻辑，只决定原指令、原跳转或原抛出是否继续执行，更适合“按条件跳过副作用调用、写入、分支跳转或异常抛出”的场景。
+ * Mixin Extras 的 `@WrapWithCondition`）。handler 返回 `true` 时继续执行原操作、保留表达式结果、按原分支结果跳转或继续原抛出；
+ * 返回 `false` 时，调用前、写入、跳转或抛出类控制点会跳过原操作，调用返回值、字段读取、数组元素读取、
+ * 数组长度读取、局部变量读取、类型判断、常量加载和 switch selector 会留下对应类型的默认值；对象构造结果与类型转换会留下 `null`。
+ * 相比 [Redirect]，该注解不替换原逻辑，只决定原操作、表达式结果、原跳转或原抛出是否保留，更适合“按条件跳过副作用调用、写入、分支跳转或异常抛出”的场景。
  *
  * [InjectionPoint.INVOKE] 模式支持普通方法调用和 `invokedynamic` 调用。
  * 省略 [At.target] 时会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或 `invokedynamic` 调用；
@@ -877,6 +877,9 @@ annotation class WrapMethod(
  * 构造器 `<init>` 不能作为 [InjectionPoint.INVOKE] 条件包裹目标；跳过构造器会留下未初始化对象并生成不可验证字节码，转换阶段会失败。
  * 如需按构造完成后的对象决定是否保留表达式，可使用 [InjectionPoint.NEW]；如需替换或多次调用构造过程，应使用 [Redirect] 或 [WrapOperation]。
  * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
+ * [InjectionPoint.INVOKE_ASSIGN] 模式匹配普通方法调用或 `invokedynamic` 调用完成后的非 `void` 返回值。
+ * handler 先接收调用返回值；返回 `true` 时保留该返回值，返回 `false` 时把本次返回表达式替换为返回类型默认值。
+ * 省略 [At.target] 时会按 handler 首参和 `Boolean` 返回类型筛选兼容调用返回值，`void` 或不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.FIELD] 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取，字段目标格式支持
  * `owner.field:desc`、`field:desc` 与 `field`。handler 首参接收读取出的字段值，不接收 receiver；
  * 返回 `true` 时保留原字段值，返回 `false` 时用字段类型默认值替换本次读取结果。省略 [At.target] 时会按 handler
@@ -916,9 +919,9 @@ annotation class WrapMethod(
  * 不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.THROW] 模式匹配 `ATHROW` 前即将抛出的 [Throwable]，handler 先接收该异常对象，
  * 返回 `true` 时恢复原异常并继续原 `ATHROW`，返回 `false` 时跳过原抛出；指定 [At.target] 时只匹配直接构造后抛出的同类型异常。
- * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、
+ * [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、
  * [InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
- * 模式可使用 [slice] 把候选调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
+ * 模式可使用 [slice] 把候选调用、调用返回值、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
  * 局部变量读取、局部变量写入、对象构造、类型转换、类型判断、条件跳转、switch selector、常量加载或抛异常点
  * 限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
  *
@@ -928,6 +931,7 @@ annotation class WrapMethod(
  * - 非静态目标调用的 handler 参数先接收 receiver，再接收原调用参数
  * - 静态目标调用的 handler 参数接收原调用参数
  * - `invokedynamic` 目标调用没有 receiver，handler 参数接收动态调用点描述符中的参数
+ * - 调用返回值的 handler 先接收非 `void` 调用完成后的返回值
  * - 字段读取的 handler 先接收 `GETFIELD` / `GETSTATIC` 读取出的字段值，不接收 receiver
  * - 实例字段写入的 handler 参数先接收字段 owner，再接收待写入值
  * - 静态字段写入的 handler 参数接收待写入值
@@ -946,17 +950,17 @@ annotation class WrapMethod(
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 引用类型参数可声明为精确类型、可赋值父类型或 `Any` / `Object`
  * - [At.target] 可指定要匹配的方法调用、动态调用、字段签名、类型、跳转操作码、常量文本或异常类型；[InjectionPoint.INVOKE]、
- *   [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]
+ *   [InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.CONSTANT]
  *   与 [InjectionPoint.THROW] 可省略 [At.target]，按 handler 签名筛选兼容候选；
  *   [InjectionPoint.LOAD] / [InjectionPoint.STORE] 不使用 [At.target]，通过 [At.args] 过滤局部变量读写候选；
  *   [InjectionPoint.SWITCH] 不支持 [At.target]
  * - [method] 为空时会按 handler 名称、条件包裹操作点和 handler 签名兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
  *
  * @param method 目标方法签名；为空时按 handler 名称、条件包裹操作点和签名兼容规则推断唯一同名目标方法
- * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
- * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
+ * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]
  * 模式支持 INVOKE 边界切片
  * @param require 最小命中数；大于 0 时实际条件包裹数必须不少于该值
@@ -979,7 +983,7 @@ annotation class WrapWithCondition(
     /**
      * 条件包裹操作点定位。
      *
-     * 支持普通方法调用、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、对象构造结果、局部变量读取/写入、类型转换、类型判断、条件跳转、switch selector、常量加载和抛异常点。
+     * 支持普通方法调用、调用返回值、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、对象构造结果、局部变量读取/写入、类型转换、类型判断、条件跳转、switch selector、常量加载和抛异常点。
      */
     val at: At = At(value = InjectionPoint.INVOKE),
 
