@@ -4108,6 +4108,27 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ModifyExpressionValue INSTANCEOF 省略 target 时应改写全部兼容类型判断")
+    fun modifyExpressionValueAtInstanceofWithoutTargetRewritesCompatibleChecks() {
+        // Given
+        AsmRegistry.register(AnyInstanceofModifyExpressionValueMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("MultiInstanceofTarget", multiInstanceofTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiInstanceofTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("isString", Any::class.java, Any::class.java)
+
+        // Then
+        assertThat(method.invoke(instance, StringBuilder("ignored"), StringBuilder("raw")))
+            .`as`("Then: 两个原本都为 false 的 INSTANCEOF 判断应被无 target ModifyExpressionValue 改写为 true")
+            .isEqualTo(true)
+        assertThat(method.invoke(instance, "text", StringBuilder("raw")))
+            .`as`("Then: 第一个 INSTANCEOF 原本为 true、第二个被改写为 true，组合结果仍应为 true")
+            .isEqualTo(true)
+    }
+
+    @Test
     fun modifyExpressionValueAtThrowRewritesThrownException() {
         AsmRegistry.register(ModifyExpressionValueThrowMixin::class.java)
 
@@ -4145,6 +4166,23 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("inferred-original", result)
+    }
+
+    @Test
+    @DisplayName("ModifyExpressionValue CONSTANT 应支持 slice 限定常量表达式")
+    fun modifyExpressionValueAtConstantSliceLimitsConstantsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueConstantSliceMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("SliceConstantTarget", sliceConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: slice 只应改写边界内的常量表达式，边界外相同常量保持原值")
+            .isEqualTo("target:expression-target:target")
     }
 
     @Test
@@ -15175,6 +15213,20 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "inferred-$original"
     }
 
+    @AsmMixin("SliceConstantTarget")
+    object ModifyExpressionValueConstantSliceMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "target"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expression-$original"
+    }
+
     @AsmMixin("MixedConstantTarget")
     object RedirectConstantMixin {
         @Redirect(
@@ -15407,6 +15459,24 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun shouldKeep(selector: Int): Boolean = selector >= 0
+    }
+
+    @AsmMixin("MultiInstanceofTarget")
+    object AnyInstanceofModifyExpressionValueMixin {
+        @ModifyExpressionValue(
+            method = "isString(Ljava/lang/Object;Ljava/lang/Object;)Z",
+            at = At(value = InjectionPoint.INSTANCEOF),
+        )
+        @JvmStatic
+        fun modify(
+            original: Boolean,
+            ignored: Any,
+            raw: Any,
+        ): Boolean {
+            ignored.hashCode()
+            raw.hashCode()
+            return true
+        }
     }
 
     @AsmMixin("InstanceofTarget")
