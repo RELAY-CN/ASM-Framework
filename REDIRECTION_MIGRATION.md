@@ -5,6 +5,9 @@
 旧版 `RedirectionReplaceApi`、`RedirectionReplaceManager`、`RedirectionListener`、`MethodTypeInfoValue` 及其 `AsmReplace` / `AsmListener`
 适配层已经移除。框架现在只保留注解式 ASM API 与内部默认返回值生成器。
 
+本文档只说明如何把旧意图迁移到注解式 API，不是旧运行期 manager / listener 兼容层说明，也不是恢复
+`RedirectionReplaceApi`、`RedirectionReplaceManager` 或 `RedirectionListener` 的设计依据。
+
 ## 新方案
 
 优先使用下列注解完成字节码修改：
@@ -39,6 +42,14 @@
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
 | 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |
 
+迁移时可按下面顺序快速选型：
+
+1. 只改调用参数或 receiver：优先 `@ModifyArg` / `@ModifyArgs` / `@ModifyReceiver`。
+2. 需要完整替换一次操作结果或副作用：使用 `@Redirect`。
+3. 需要在 handler 里按需调用、跳过或多次执行原操作：使用 `@WrapOperation`。
+4. 原操作应继续执行，但结果、副作用或控制流只在条件满足时保留：使用 `@WrapWithCondition`。
+5. 只是观察位置或追加日志、统计等副作用，不改表达式值和控制流：才使用 `@AsmInject`。
+
 ### 1. 旧的调用替换逻辑
 
 以前：
@@ -61,6 +72,8 @@
 
 - 用 `@AsmInject`、`@WrapWithCondition`、`@ModifyExpressionValue` 等注解表达明确的插桩语义
 - 若只是要观测某个调用点，优先在目标方法上直接写一个注解式 handler
+- 若监听逻辑会改变表达式值、局部状态、控制流或副作用保留条件，不应默认迁移成 `@AsmInject`；应按意图选择
+  `@WrapWithCondition`、`@ModifyExpressionValue`、`@Redirect` 或 `@WrapOperation`
 - 若旧监听只关心“调用某方法且某个参数是固定字符串字面量”，迁移为普通
   `@AsmInject(target = InjectionPoint.INVOKE_STRING)`；这是注解式观察点，不回流旧 listener 或 manager 兼容层
 
@@ -97,6 +110,24 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
 `@WrapWithCondition` 注入点：局部变量读取/写入使用 `LOAD` / `STORE`，常量读取使用 `CONSTANT`，条件分支使用
 `JUMP`，switch selector 使用 `SWITCH`，即将抛出的异常使用 `THROW`。数组元素读取和字段来源数组长度读取跟随
 `FIELD + array=get/array=length`，裸数组长度读取使用 `ARRAY_LENGTH`，数组元素写入跟随 `FIELD_ASSIGN + array=set`。
+
+#### 控制流和局部状态迁移要点
+
+旧 listener / manager 经常把控制流补丁写成“找到某段调用附近的某个跳转再接管”。迁移时不要按全方法裸匹配：
+
+- 条件跳转使用 `JUMP`。如果要直接替换分支结果，使用 `@Redirect(JUMP)`；如果要保留可调用原分支结果的句柄，使用
+  `@WrapOperation(JUMP)`；如果只决定是否保留原跳转，使用 `@WrapWithCondition(JUMP)`；如果原跳转仍执行但需要改写
+  boolean 表达式结果，使用 `@ModifyExpressionValue(JUMP)`。
+- `At.target` 应写条件跳转 opcode 名或数字，例如 `IFLE`、`IF_ICMPGT` 或 `158`。省略目标会匹配切片内所有条件跳转；
+  `GOTO` 与 `JSR` 这类无条件跳转不属于可改写分支结果。
+- 同一方法存在多个相同 opcode 跳转时，优先使用 `Slice(from = ..., to = ...)` 把候选限制在稳定调用边界之间，再用
+  `require = 1, allow = 1` 固定命中数。这样目标字节码漂移时会在转换阶段失败，而不是误改 slice 外的同类跳转。
+- switch 迁移使用 `SWITCH`，该模式不使用 `At.target`。需要直接改 selector 时用 `@Redirect(SWITCH)`；需要保留原 selector
+  的 `Operation<Int>` 句柄时用 `@WrapOperation(SWITCH)`；只按条件保留 selector 时用 `@WrapWithCondition(SWITCH)`。
+- 局部变量写入使用 `STORE`。它表示 `xSTORE` 消费前的待写入值，handler 返回值会交给原 `xSTORE` 继续写入槽位；如果旧逻辑
+  真正想在写入之后读取并写回变量，应迁移到 `@ModifyVariable(at = At(value = InjectionPoint.STORE, ...))`，不要把两种时机混用。
+- `LOAD` / `STORE` 的变量名过滤依赖目标 class 保留 LocalVariableTable；线上混淆或裁剪调试信息时，应优先用 `index=N`
+  或 `var=N`，再通过切片和命中数契约降低误命中风险。
 
 字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`。它只匹配调用实参中的直接 `LDC String`，
 且 `At.target` 必须写包含 owner 的 `owner.name(desc)`，
@@ -199,6 +230,56 @@ object TargetMixin {
 ```
 
 上例在 `StringBuilder` 构造完成后插入条件判断。返回 `true` 时继续使用构造出的对象；返回 `false` 时本次构造表达式变为 `null`。
+
+条件分支迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @Redirect(
+        method = "choose(I)Ljava/lang/String;",
+        at = At(value = InjectionPoint.JUMP, target = "IF_ICMPGT"),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun redirectInsideDecision(original: Boolean, value: Int): Boolean {
+        return value > 100 && original
+    }
+}
+```
+
+上例只替换 `Trace.begin()` 与 `Trace.end()` 之间的 `IF_ICMPGT` 分支结果。slice 外的同 opcode 跳转保持原行为；
+slice 内其他 opcode 条件跳转也不会被 `target = "IF_ICMPGT"` 命中。
+
+局部变量写入迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @WrapOperation(
+        method = "render()Ljava/lang/String;",
+        at = At(value = InjectionPoint.STORE, args = ["index=2"]),
+        slice = Slice(
+            from = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.begin()V"),
+            to = At(value = InjectionPoint.INVOKE, target = "com/example/Trace.end()V"),
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun wrapLocalStore(original: String, operation: Operation<String>): String {
+        return operation.call(original.trim())
+    }
+}
+```
+
+上例包裹的是 slot 2 的本次待写入值。`operation.call(...)` 返回传入值并交给原 `ASTORE` 继续写入；如果目标方法缺少
+LocalVariableTable，使用槽位过滤比 `name=...` 更稳定。
 
 字符串调用监听迁移示例：
 
