@@ -3574,6 +3574,58 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ModifyExpressionValue 应能直接改写局部数组 ARRAYLENGTH 结果")
+    fun modifyExpressionValueAtArrayLengthInstructionRewritesLocalArrayLength() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueArrayLengthInstructionMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("count").invoke(instance))
+            .`as`("Then: ARRAY_LENGTH 应覆盖局部数组的 ARRAYLENGTH 指令，而不要求数组来自字段读取")
+            .isEqualTo(4)
+    }
+
+    @Test
+    @DisplayName("ModifyExpressionValue 改写 ARRAYLENGTH 时应能接收目标方法参数")
+    fun modifyExpressionValueAtArrayLengthInstructionCanUseTargetMethodParameters() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueArrayLengthInstructionWithTargetParamsMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
+            .`as`("Then: ARRAY_LENGTH handler 应在原长度后继续接收目标方法参数前缀")
+            .isEqualTo(7)
+    }
+
+    @Test
+    @DisplayName("ModifyExpressionValue ARRAY_LENGTH 声明 at.target 时应快速失败")
+    fun modifyExpressionValueAtArrayLengthInstructionRejectsTarget() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueArrayLengthInstructionWithTargetMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        }.`as`("Then: ARRAY_LENGTH 不应静默忽略 at.target，字段来源数组长度应继续使用 FIELD + array=length")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@ModifyExpressionValue ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+    }
+
+    @Test
     fun modifyExpressionValueAtArrayLengthCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueArrayLengthWithTargetParamsMixin::class.java)
 
@@ -14145,6 +14197,46 @@ class FrameworkReliabilityTest {
         fun modify(original: Int): Int = original + 3
     }
 
+    @AsmMixin("LocalArrayLengthTarget")
+    object ModifyExpressionValueArrayLengthInstructionMixin {
+        @ModifyExpressionValue(
+            method = "count()I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 2
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object ModifyExpressionValueArrayLengthInstructionWithTargetParamsMixin {
+        @ModifyExpressionValue(
+            method = "countWithBonus(I)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: Int,
+            bonus: Int,
+        ): Int = original + bonus
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object ModifyExpressionValueArrayLengthInstructionWithTargetMixin {
+        @ModifyExpressionValue(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                target = "LocalArrayLengthTarget.names:[Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original
+    }
+
     @AsmMixin("ArrayAccessTarget")
     object ModifyExpressionValueArrayLengthWithTargetParamsMixin {
         @ModifyExpressionValue(
@@ -23370,6 +23462,35 @@ class FrameworkReliabilityTest {
             visitMaxs(1, 2)
             visitEnd()
         }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun localArrayLengthTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "LocalArrayLengthTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "count", "()I", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ICONST_2)
+            visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "countWithBonus", "(I)I", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ICONST_2)
+            visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_INT)
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(1, 2)
+            visitEnd()
+        }
+
         cw.visitEnd()
         return cw.toByteArray()
     }

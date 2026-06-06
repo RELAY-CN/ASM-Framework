@@ -35,7 +35,7 @@ import java.lang.reflect.Modifier
 /**
  * ModifyExpressionValue 注入器。
  *
- * 该注入器会匹配目标方法内的指定普通方法调用、`invokedynamic` 调用、字段读取、字段写入值、数组元素读取、数组元素写入值、数组长度、对象构造、类型转换、
+ * 该注入器会匹配目标方法内的指定普通方法调用、`invokedynamic` 调用、字段读取、字段写入值、数组元素读取、数组元素写入值、数组长度、裸 `ARRAYLENGTH`、对象构造、类型转换、
  * `INSTANCEOF` 判断、局部变量读取值、局部变量写入值、条件跳转、`tableswitch` / `lookupswitch` selector、常量表达式值或 `ATHROW` 抛异常指令，
  * 并在表达式产生值后把原值传给 handler。
  * handler 返回的新值会替代原表达式值留在操作数栈顶，后续原始字节码继续按未修改的栈形态执行。
@@ -46,11 +46,12 @@ import java.lang.reflect.Modifier
  * 指定类型目标时，只匹配 `ATHROW` 前直接构造出的同类型异常。
  *
  * @param at 表达式定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、
- * [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
+ * [InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW]；[InjectionPoint.FIELD]
  * 可匹配字段读取值，省略字段目标时会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`；
  * [InjectionPoint.FIELD_ASSIGN] 可匹配 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，省略字段目标时会按 handler 首参与返回类型筛选兼容字段写入；
  * [InjectionPoint.FIELD] 也可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值；
  * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 匹配数组元素写入前的待写入值，
+ * [InjectionPoint.ARRAY_LENGTH] 会直接匹配任意 `ARRAYLENGTH` 指令产生的 `Int` 长度结果，不要求数组来自字段读取；
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 可显式匹配普通调用或按 bootstrap owner、动态调用名、bootstrap 名
  * 以及动态调用点描述符匹配 `invokedynamic` 返回值；未指定调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；
  * [InjectionPoint.NEW] 匹配对象构造完成后的实例，未指定类型目标时，会按 handler 首参与返回类型筛选兼容的 `NEW` 候选；
@@ -70,7 +71,7 @@ import java.lang.reflect.Modifier
  * 指定类型目标时，只会匹配前一条真实指令为同类型 `<init>` 的直接构造异常
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
- * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组元素读取、数组元素写入值、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组元素读取、数组元素写入值、数组长度、裸 `ARRAYLENGTH`、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
  * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围，
  * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @author Dr (dr@der.kim)
@@ -129,6 +130,7 @@ class ModifyExpressionValueInjector(
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.ARRAY_LENGTH -> injectArrayLengthInstruction(target)
             InjectionPoint.LOAD -> injectLoad(target)
             InjectionPoint.STORE -> injectStore(target)
             InjectionPoint.JUMP -> injectJump(target)
@@ -136,7 +138,7 @@ class ModifyExpressionValueInjector(
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, LOAD, STORE, JUMP, SWITCH, CONSTANT and THROW",
+                "@ModifyExpressionValue currently supports only INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, ARRAY_LENGTH, LOAD, STORE, JUMP, SWITCH, CONSTANT and THROW",
             )
         }
     }
@@ -414,6 +416,49 @@ class ModifyExpressionValueInjector(
             }
 
             findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateHandlerSignature(target, Type.INT_TYPE)
+            val il = buildExpressionValueModification(target, Type.INT_TYPE, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 直接改写 `ARRAYLENGTH` 指令产生的 `Int` 长度值。
+     *
+     * 该注入点不追踪数组来源，适合局部数组、参数数组或方法返回数组等非字段来源。
+     * 需要限定数组字段来源时仍应使用 [InjectionPoint.FIELD] 与 `array=length`。
+     *
+     * @param target 目标方法
+     * @return 实际改写的裸数组长度表达式数量
+     * @throws IllegalArgumentException 声明了无意义的字段目标，或 handler 签名不兼容时抛出
+     */
+    private fun injectArrayLengthInstruction(target: MethodNode): Int {
+        if (at.target.isNotBlank()) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ARRAYLENGTH) {
+                continue
+            }
+
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {
                 continue

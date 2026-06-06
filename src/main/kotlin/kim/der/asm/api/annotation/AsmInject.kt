@@ -148,7 +148,7 @@ annotation class AsmInject(
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[INVOKE_ASSIGN]、[FIELD]、
  * [INVOKE_STRING]、[FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP]、[SWITCH]、[CONSTANT] 与 [THROW]。
  * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [FIELD_ASSIGN] 改写字段待写入值，也可配合数组字段目标改写数组读取、数组写入或数组长度表达式，通过 [LOAD] 改写局部变量读取表达式值，通过 [STORE] 改写局部变量待写入表达式值，通过 [INSTANCEOF] 改写类型判断结果，通过 [JUMP] 改写条件跳转分支结果，通过 [SWITCH] 改写 `tableswitch` / `lookupswitch` selector，
- * 通过 [CONSTANT] 改写常量表达式，
+ * 通过 [CONSTANT] 改写常量表达式，通过 [ARRAY_LENGTH] 直接改写任意 `ARRAYLENGTH` 产生的 `Int` 长度结果，
  * 也可通过 [THROW] 改写即将抛出的异常。
  * [INVOKE_STRING] 只匹配目标方法调用实参中的直接 `LDC String`，不会追踪局部变量、字符串拼接或方法返回值。
  * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
@@ -211,6 +211,9 @@ enum class InjectionPoint {
 
     /** 抛出异常前 */
     THROW,
+
+    /** 数组长度结果 */
+    ARRAY_LENGTH,
 }
 
 /**
@@ -268,8 +271,9 @@ enum class InjectionPoint {
  *   [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.SWITCH]
  *   分别表示构造结果、类型转换结果、类型判断结果与 switch selector 的条件保留。
  * - [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [InjectionPoint.FIELD_ASSIGN] 改写字段待写入值；
- *   也可通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组长度表达式，
+ *   也可通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取表达式或数组字段长度表达式，
  *   通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set` 把数组字段目标解释为数组元素写入前的待写入元素值；
+ *   也可通过 [InjectionPoint.ARRAY_LENGTH] 直接改写任意 `ARRAYLENGTH` 指令产生的 `Int` 结果，且不要求数组来自字段读取；
  *   通过 [InjectionPoint.LOAD] 与 `index=N`、`var=N` 或 `name=localName` 改写指定 JVM 局部变量槽位
  *   或 LocalVariableTable 变量名的本次读取表达式值，不写回槽位；
  *   通过 [InjectionPoint.STORE] 与 `index=N`、`var=N` 或 `name=localName` 改写指定 JVM 局部变量槽位
@@ -280,7 +284,7 @@ enum class InjectionPoint {
  *
  * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入的 [Slice] 边界
  * 当前仅支持 [InjectionPoint.INVOKE]
- * @param target 目标方法调用、构造器调用、字符串实参调用点、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、跳转操作码、常量文本或 THROW 直接构造异常类型签名
+ * @param target 目标方法调用、构造器调用、字符串实参调用点、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、跳转操作码、常量文本或 THROW 直接构造异常类型签名；[InjectionPoint.ARRAY_LENGTH] 不使用该字段
  * @param shift 注入偏移策略
  * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
@@ -294,7 +298,7 @@ enum class InjectionPoint {
  * [ModifyExpressionValue] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
  * 其中 `array=get` / `array=length` 需配合 [InjectionPoint.FIELD]，`array=set` 需配合
- * [InjectionPoint.FIELD_ASSIGN]；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`，
+ * [InjectionPoint.FIELD_ASSIGN]；[InjectionPoint.ARRAY_LENGTH] 不需要附加参数；普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`，
  * 普通 [AsmInject] 的 [InjectionPoint.INVOKE_STRING] 支持 `ldc=<string>` 或 `string=<string>`
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -371,7 +375,7 @@ enum class Shift {
  * [InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、
  * [InjectionPoint.SWITCH] 与 [InjectionPoint.THROW] 条件包裹，
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
- * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组读取、数组写入值、数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
+ * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组读取、数组写入值、数组字段长度、[InjectionPoint.ARRAY_LENGTH] 裸数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
  * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写改写、[ModifyReturnValue] 返回值修改，以及 [ModifyConstant] 常量修改
  * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；其中 [ModifyConstant] 还支持 [InjectionPoint.FIELD]、

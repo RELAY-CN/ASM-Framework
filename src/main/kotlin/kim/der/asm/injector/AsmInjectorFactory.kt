@@ -55,6 +55,9 @@ object AsmInjectorFactory {
             InjectionPoint.STORE,
             InjectionPoint.THROW,
             -> InstructionPointInjector(method, asmInfo, injectionPoint)
+            InjectionPoint.ARRAY_LENGTH -> throw IllegalArgumentException(
+                "ARRAY_LENGTH is currently supported only by @ModifyExpressionValue",
+            )
         }
 
     /**
@@ -170,9 +173,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
+     * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、NEW、CAST、INSTANCEOF、ARRAY_LENGTH、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前调用返回、字段读取、字段写入值、数组读取、数组写入值、数组长度、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
+     * @param slice 切片范围；当前调用返回、字段读取、字段写入值、数组读取、数组写入值、数组长度、裸 ARRAYLENGTH、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
      * 表达式改写支持 INVOKE 边界切片
      * @return ModifyExpressionValue 注入器
      *
