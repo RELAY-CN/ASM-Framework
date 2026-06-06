@@ -4271,6 +4271,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ModifyExpressionValue SWITCH 声明 target 时应快速失败")
+    fun modifyExpressionValueAtSwitchRejectsTargetFilter() {
+        // Given
+        AsmRegistry.register(TargetedModifyExpressionValueSwitchMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+        }.`as`("Then: SWITCH selector 表达式改写不应接受 target 过滤，避免把 case 值误当成指令目标")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@ModifyExpressionValue SWITCH does not support at.target")
+    }
+
+    @Test
     fun wrapOperationAtSwitchWrapsTableSwitchSelector() {
         AsmRegistry.register(WrapOperationSwitchMixin::class.java)
 
@@ -4337,6 +4351,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("Redirect SWITCH 声明 target 时应快速失败")
+    fun redirectAtSwitchRejectsTargetFilter() {
+        // Given
+        AsmRegistry.register(TargetedRedirectSwitchMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("SwitchSelectorTarget", switchSelectorTargetBytes(), javaClass.classLoader)
+        }.`as`("Then: SWITCH selector 重定向不应接受 target 过滤，避免把 switch case 值误当成指令目标")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("Redirect SWITCH does not support target")
+    }
+
+    @Test
     fun redirectAtThrowCanReplaceThrowable() {
         AsmRegistry.register(RedirectThrowMixin::class.java)
 
@@ -4350,6 +4378,29 @@ class FrameworkReliabilityTest {
 
         assertEquals(true, exception.cause is IllegalArgumentException)
         assertEquals("redirected-failed", exception.cause?.message)
+    }
+
+    @Test
+    @DisplayName("Redirect THROW 应支持 target 与 slice 同时限定直接构造异常")
+    fun redirectAtThrowSliceFiltersDirectlyConstructedThrowableAfterFrom() {
+        // Given
+        AsmRegistry.register(RedirectThrowSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceThrowInstructionTarget", sliceThrowInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceThrowInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("failSelected").invoke(instance)
+            }
+        assertThat(exception.cause)
+            .`as`("Then: slice 内直接构造的 IllegalStateException 应被 Redirect(THROW) 替换")
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("redirected-inside")
     }
 
     @Test
@@ -15306,6 +15357,18 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("SwitchSelectorTarget")
+    object TargetedModifyExpressionValueSwitchMixin {
+        @ModifyExpressionValue(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH, target = "0"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
     object WrapOperationSwitchMixin {
         @WrapOperation(
             method = "choose(IZ)Ljava/lang/String;",
@@ -15383,6 +15446,18 @@ class FrameworkReliabilityTest {
             value.hashCode()
             return if (forceThirty) 30 else selector + 10
         }
+    }
+
+    @AsmMixin("SwitchSelectorTarget")
+    object TargetedRedirectSwitchMixin {
+        @Redirect(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH, target = "0"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(selector: Int): Int = selector
     }
 
     @AsmMixin("SwitchSelectorTarget")
@@ -20302,6 +20377,21 @@ class FrameworkReliabilityTest {
         @Redirect(
             method = "fail()V",
             at = At(value = InjectionPoint.THROW),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: Throwable): Throwable = IllegalArgumentException("redirected-${original.message}")
+    }
+
+    @AsmMixin("SliceThrowInstructionTarget")
+    object RedirectThrowSliceMixin {
+        @Redirect(
+            method = "failSelected()V",
+            at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
             require = 1,
             allow = 1,
         )
