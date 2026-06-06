@@ -51,6 +51,7 @@ import java.lang.reflect.Modifier
  * handler 只接收读取出的字段值，不接收 `GETFIELD` receiver，不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 也可通过 [At.args] 中的 `array=get` 或 `array=length` 匹配目标数组字段后的数组元素读取或数组长度读取；
  * handler 分别只接收已读取的元素值或 `Int` 长度，不接收数组引用或索引。
+ * [InjectionPoint.ARRAY_LENGTH] 可直接条件保留非字段来源的裸 `ARRAYLENGTH` 结果，handler 同样接收 `Int` 长度值。
  * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选
  * 兼容的字段写入，且不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.LOAD] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
@@ -134,6 +135,7 @@ class WrapWithConditionInjector(
                 }
             InjectionPoint.LOAD -> injectLoad(target)
             InjectionPoint.STORE -> injectStore(target)
+            InjectionPoint.ARRAY_LENGTH -> injectArrayLengthInstruction(target)
             InjectionPoint.NEW -> injectNewObject(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
@@ -575,6 +577,49 @@ class WrapWithConditionInjector(
             }
 
             findArrayFieldProducer(insn, fieldTarget) ?: continue
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateArrayReadHandlerSignature(target, Type.INT_TYPE)
+            val il = buildArrayLengthConditionWrapper(target, targetParamCount)
+            target.instructions.insert(insn, il)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 直接条件包裹裸 `ARRAYLENGTH` 指令产生的长度结果。
+     *
+     * 该入口不追踪数组来源，适合局部数组、参数数组或方法返回数组等非字段来源；
+     * 需要限定数组字段来源时仍应使用 [InjectionPoint.FIELD] 与 `array=length`。
+     *
+     * @param target 目标方法
+     * @return 实际插入条件包裹逻辑的裸数组长度读取数量
+     * @throws IllegalArgumentException 声明了无意义的字段目标，或 handler 签名不兼容时抛出
+     */
+    private fun injectArrayLengthInstruction(target: MethodNode): Int {
+        if (at.target.isNotBlank()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ARRAYLENGTH) {
+                continue
+            }
+
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {
                 continue

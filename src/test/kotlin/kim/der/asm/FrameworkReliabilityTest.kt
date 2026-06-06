@@ -3626,6 +3626,60 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("Redirect 应能直接替换局部数组 ARRAYLENGTH")
+    fun redirectAtArrayLengthInstructionReplacesLocalArrayLength() {
+        // Given
+        AsmRegistry.register(RedirectArrayLengthInstructionMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
+            .`as`("Then: Redirect ARRAY_LENGTH 应接收被 ARRAYLENGTH 消费的数组引用并可继续接收目标方法参数")
+            .isEqualTo(7)
+    }
+
+    @Test
+    @DisplayName("WrapOperation 应能包裹局部数组 ARRAYLENGTH 并调用原长度")
+    fun wrapOperationAtArrayLengthInstructionCanCallOriginalArrayLength() {
+        // Given
+        AsmRegistry.register(WrapOperationArrayLengthInstructionMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
+            .`as`("Then: WrapOperation ARRAY_LENGTH 的 Operation 应能用原数组引用计算原始长度")
+            .isEqualTo(7)
+    }
+
+    @Test
+    @DisplayName("WrapWithCondition 应能条件保留局部数组 ARRAYLENGTH 结果")
+    fun wrapWithConditionAtArrayLengthInstructionCanDropLocalArrayLengthResult() {
+        // Given
+        AsmRegistry.register(WrapWithConditionArrayLengthInstructionMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
+            .`as`("Then: WrapWithCondition ARRAY_LENGTH 返回 false 时应把本次数组长度结果替换为 Int 默认值")
+            .isEqualTo(0)
+    }
+
+    @Test
     fun modifyExpressionValueAtArrayLengthCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueArrayLengthWithTargetParamsMixin::class.java)
 
@@ -14235,6 +14289,52 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object RedirectArrayLengthInstructionMixin {
+        @Redirect(
+            method = "countWithBonus(I)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            array: Any,
+            bonus: Int,
+        ): Int = java.lang.reflect.Array.getLength(array) + bonus
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object WrapOperationArrayLengthInstructionMixin {
+        @WrapOperation(
+            method = "countWithBonus(I)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Any,
+            operation: Operation<Int>,
+            bonus: Int,
+        ): Int = operation.call(array) + bonus
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object WrapWithConditionArrayLengthInstructionMixin {
+        @WrapWithCondition(
+            method = "countWithBonus(I)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun keep(
+            length: Int,
+            bonus: Int,
+        ): Boolean = length + bonus < 0
     }
 
     @AsmMixin("ArrayAccessTarget")

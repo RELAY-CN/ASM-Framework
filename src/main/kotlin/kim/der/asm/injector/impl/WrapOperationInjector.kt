@@ -37,7 +37,7 @@ import java.lang.reflect.Modifier
 /**
  * WrapOperation 注入器。
  *
- * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、类型转换、类型判断、条件跳转、switch selector、常量读取或即将抛出的异常，
+ * 该注入器会匹配目标方法内的指定方法调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、条件跳转、switch selector、常量读取或即将抛出的异常，
  * 并用 handler 替换原操作。
  * handler 会收到原操作 receiver（实例调用、实例字段读取与实例字段写入）、原调用参数、构造器参数、字段写入值或
  * 数组访问参数、类型转换或类型判断输入值、局部变量读取值、局部变量待写入值、原条件跳转分支结果、switch selector、原常量值、即将抛出的异常、[Operation] 句柄和可选目标方法参数；handler 可通过 [Operation.call]
@@ -46,6 +46,8 @@ import java.lang.reflect.Modifier
  * 当前实现支持普通 [InjectionPoint.INVOKE] 方法调用、[InjectionPoint.FIELD] 字段读取与
  * [InjectionPoint.FIELD_ASSIGN] 字段写入。[InjectionPoint.FIELD] 可通过 `array=get` 包裹数组元素读取，
  * 通过 `array=length` 包裹数组长度读取；[InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；
+ * [InjectionPoint.ARRAY_LENGTH] 可直接包裹非字段来源的裸 `ARRAYLENGTH`，handler 首参按 `Any` / `Object`
+ * 接收数组引用并通过 `Operation<Int>` 调用原长度；
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 栈参数、[Operation] 位置与返回类型筛选兼容的普通调用、
  * `invokedynamic` 调用或构造器调用，且不兼容候选不会计入 [WrapOperation.ordinal] 或命中数；
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 字段 owner 参数、[Operation] 位置与返回类型筛选兼容的字段读取，
@@ -67,7 +69,7 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.THROW] 可包裹 `ATHROW` 前的异常对象；指定目标时只匹配直接构造后抛出的同类型异常。
  *
  * @param at 操作点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]
- * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
+ * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、
@@ -130,6 +132,7 @@ class WrapOperationInjector(
             InjectionPoint.NEW -> injectNewConstructor(target)
             InjectionPoint.CAST -> injectCast(target)
             InjectionPoint.INSTANCEOF -> injectInstanceof(target)
+            InjectionPoint.ARRAY_LENGTH -> injectArrayLengthInstruction(target)
             InjectionPoint.LOAD -> injectLoad(target)
             InjectionPoint.STORE -> injectStore(target)
             InjectionPoint.JUMP -> injectJump(target)
@@ -502,6 +505,50 @@ class WrapOperationInjector(
 
             val targetParamCount = validateArrayAccessHandlerSignature(target, fieldInsn, mode)
             val il = buildArrayAccessWrapper(target, fieldInsn, mode, targetParamCount)
+            target.instructions.insertBefore(insn, il)
+            target.instructions.remove(insn)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 直接包裹裸 `ARRAYLENGTH` 指令。
+     *
+     * 该入口不追踪数组来源，适合局部数组、参数数组或方法返回数组等非字段来源；
+     * 需要限定数组字段来源时仍应使用 [InjectionPoint.FIELD] 与 `array=length`。
+     *
+     * @param target 目标方法
+     * @return 实际包裹的裸数组长度指令数量
+     * @throws IllegalArgumentException 声明了无意义的字段目标，或 handler 签名不兼容时抛出
+     */
+    private fun injectArrayLengthInstruction(target: MethodNode): Int {
+        if (at.target.isNotBlank()) {
+            throw IllegalArgumentException(
+                "@WrapOperation ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+        }
+
+        var injectionCount = 0
+        var matchedOrdinal = 0
+        val insns = target.instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ARRAYLENGTH) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateArrayLengthInstructionHandlerSignature(target)
+            val il = buildArrayLengthInstructionWrapper(target, targetParamCount)
             target.instructions.insertBefore(insn, il)
             target.instructions.remove(insn)
             injectionCount++
@@ -1337,6 +1384,47 @@ class WrapOperationInjector(
                 il.add(TypeInsnNode(Opcodes.CHECKCAST, elementType.internalName))
             }
         }
+
+        return il
+    }
+
+    /**
+     * 构造裸 `ARRAYLENGTH` 操作包裹的替代指令序列。
+     *
+     * 裸 `ARRAYLENGTH` 无法从指令本身恢复数组描述符，因此 handler 按 `Any` / `Object`
+     * 接收实际数组引用；[Operation.call] 仍会基于运行时数组对象读取原始长度。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原 `ARRAYLENGTH` 的指令列表
+     */
+    private fun buildArrayLengthInstructionWrapper(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val arrayType = Type.getType(Any::class.java)
+        var nextTempIndex = nextLocalIndex(target)
+        val arrayIndex = nextTempIndex.also { nextTempIndex += 1 }
+        val operationIndex = nextTempIndex
+
+        storeStackValue(il, arrayType, arrayIndex)
+        createArrayOperation(il, arrayType, ArrayAccessMode.LENGTH)
+        il.add(VarInsnNode(Opcodes.ASTORE, operationIndex))
+
+        addHandlerOwner(il)
+        loadFromVariable(il, arrayType, arrayIndex)
+        il.add(VarInsnNode(Opcodes.ALOAD, operationIndex))
+        loadTargetMethodParameters(il, target, targetParamCount)
+        il.add(
+            MethodInsnNode(
+                handlerOpcode(),
+                Type.getType(asmInfo.asmClass).internalName,
+                asmMethod.name,
+                Type.getMethodDescriptor(asmMethod),
+                false,
+            ),
+        )
 
         return il
     }
@@ -2626,6 +2714,46 @@ class WrapOperationInjector(
                     )
                 }
             }
+        }
+        return targetParamCount
+    }
+
+    /**
+     * 校验裸 `ARRAYLENGTH` 包裹 handler 签名。
+     *
+     * handler 需接收数组引用、[Operation] 与可选目标方法参数，并返回 `Int`。
+     * 因为裸 `ARRAYLENGTH` 不携带数组静态类型，数组引用固定按 `Any` / `Object` 契约暴露。
+     *
+     * @param target 目标方法
+     * @return handler 追加请求的目标方法参数数量
+     * @throws IllegalArgumentException handler 参数、[Operation] 位置、追加参数或返回类型不兼容时抛出
+     */
+    private fun validateArrayLengthInstructionHandlerSignature(target: MethodNode): Int {
+        val expectedStackParams = arrayOf(Type.getType(Any::class.java))
+        val operationType = Type.getType(Operation::class.java)
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        val operationIndex = expectedStackParams.size
+        if (actualParams.size <= operationIndex || actualParams[operationIndex] != operationType) {
+            throw IllegalArgumentException(
+                "@WrapOperation ARRAY_LENGTH handler ${asmMethod.name} parameter #$operationIndex must be Operation, " +
+                    "actual ${actualParams.toList()}",
+            )
+        }
+
+        if (!isHandlerParameterCompatible(expectedStackParams[0], actualParams[0])) {
+            throw IllegalArgumentException(
+                "@WrapOperation ARRAY_LENGTH handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected ${expectedStackParams[0]}, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, operationIndex + 1)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (!isReturnCompatible(Type.INT_TYPE, handlerReturnType)) {
+            throw IllegalArgumentException(
+                "@WrapOperation ARRAY_LENGTH handler ${asmMethod.name} return type mismatch: " +
+                    "original ${Type.INT_TYPE}, handler $handlerReturnType",
+            )
         }
         return targetParamCount
     }

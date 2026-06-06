@@ -56,7 +56,7 @@ object AsmInjectorFactory {
             InjectionPoint.THROW,
             -> InstructionPointInjector(method, asmInfo, injectionPoint)
             InjectionPoint.ARRAY_LENGTH -> throw IllegalArgumentException(
-                "ARRAY_LENGTH is currently supported only by @ModifyExpressionValue",
+                "ARRAY_LENGTH is not supported by ordinary @AsmInject; use @Redirect, @WrapOperation, @WrapWithCondition, or @ModifyExpressionValue",
             )
         }
 

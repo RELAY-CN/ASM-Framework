@@ -42,9 +42,10 @@ import java.lang.reflect.Modifier
  * 方法调用和 `invokedynamic` 调用目标使用 `owner.name(desc)` 或 `name(desc)` 格式；`invokedynamic`
  * 会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。字段读取目标使用
  * `owner.field:desc`、`field:desc` 或 `field` 格式。字段写入目标格式与字段读取相同，
- * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素读取和数组长度使用 [InjectionPoint.FIELD]
- * 匹配产生数组引用的字段读取，并通过 [args] 中的 `array=get` 或 `array=length` 区分；数组元素写入使用
- * [InjectionPoint.FIELD_ASSIGN] 与 `array=set`。
+ * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素读取与数组长度重定向通过 [InjectionPoint.FIELD] 与
+ * `array=get` / `array=length` 指定；数组元素写入重定向通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`。
+ * 上述数组长度会限定数组来源字段；非字段来源的裸 `ARRAYLENGTH` 使用 [InjectionPoint.ARRAY_LENGTH]，
+ * handler 首参按 `Any` / `Object` 接收数组引用并返回 `Int`。
  * 构造器重定向可通过 [InjectionPoint.INVOKE] 与 `<init>` 目标匹配，也可通过 [InjectionPoint.NEW]
  * 与构造类型 internal name 或 binary name 匹配。类型转换使用 [InjectionPoint.CAST] 与类型 internal name 或 binary name 匹配；
  * 未指定类型目标时，会按 handler 返回类型筛选兼容的 `CHECKCAST` 候选。类型判断使用 [InjectionPoint.INSTANCEOF]
@@ -68,7 +69,8 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.CAST] 会按类型转换语义解析目标，[InjectionPoint.INSTANCEOF] 会按类型判断语义解析目标，
  * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 会按局部变量读写值语义解析目标，
  * [InjectionPoint.JUMP] 会按条件跳转语义解析目标，[InjectionPoint.SWITCH] 会按 switch selector 语义解析目标，
- * [InjectionPoint.CONSTANT] 会按常量加载语义解析目标，[InjectionPoint.THROW] 会按抛异常语义解析目标
+ * [InjectionPoint.CONSTANT] 会按常量加载语义解析目标，[InjectionPoint.THROW] 会按抛异常语义解析目标，
+ * [InjectionPoint.ARRAY_LENGTH] 不使用目标签名
  * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
@@ -113,6 +115,9 @@ class RedirectInjector(
         val arrayAccessMode = arrayAccessMode()
         if (arrayAccessMode != null) {
             return injectArrayAccessCount(target, arrayAccessMode)
+        }
+        if (isArrayLengthInstructionRedirect()) {
+            return injectArrayLengthInstructionCount(target)
         }
         if (isJumpRedirect()) {
             return injectJumpCount(target)
@@ -406,6 +411,15 @@ class RedirectInjector(
     private fun isConstantRedirect(): Boolean = injectionPoint == InjectionPoint.CONSTANT
 
     /**
+     * 判断当前配置是否直接重定向裸 `ARRAYLENGTH` 指令。
+     *
+     * 裸指令不携带数组静态类型，只能按通用引用值交给 handler；字段来源限定仍使用 `FIELD + array=length`。
+     *
+     * @return 当前定位点为 [InjectionPoint.ARRAY_LENGTH] 时返回 `true`
+     */
+    private fun isArrayLengthInstructionRedirect(): Boolean = injectionPoint == InjectionPoint.ARRAY_LENGTH
+
+    /**
      * 解析数组访问重定向模式。
      *
      * `array=get` / `array=length` 必须配合字段读取语义，`array=set` 必须配合字段写入语义。
@@ -526,6 +540,52 @@ class RedirectInjector(
             }
 
             replaceArrayAccess(target, instructions, insn, fieldInsn, mode)
+            injectionCount++
+        }
+
+        return injectionCount
+    }
+
+    /**
+     * 直接重定向裸 `ARRAYLENGTH` 指令。
+     *
+     * 该入口不追踪数组来源，适合局部数组、参数数组或方法返回数组等非字段来源；
+     * 需要限定数组字段来源时仍应使用 [InjectionPoint.FIELD] 与 `array=length`。
+     *
+     * @param target 目标方法
+     * @return 实际重定向的裸数组长度指令数量
+     * @throws IllegalArgumentException 声明了无意义的目标，或 handler 签名不兼容时抛出
+     */
+    private fun injectArrayLengthInstructionCount(target: MethodNode): Int {
+        if (redirectTarget.isNotBlank()) {
+            throw IllegalArgumentException(
+                "@Redirect ARRAY_LENGTH does not use target; use FIELD with array=length for array field matching",
+            )
+        }
+
+        val instructions = target.instructions
+        var injectionCount = 0
+        val insns = instructions.toArray()
+        val (sliceStartIndex, sliceEndIndex) = resolveSliceRange(insns)
+        var matchedOrdinal = 0
+
+        for ((index, insn) in insns.withIndex()) {
+            if (index < sliceStartIndex || index >= sliceEndIndex) {
+                continue
+            }
+            if (insn.opcode != Opcodes.ARRAYLENGTH) {
+                continue
+            }
+
+            val currentOrdinal = matchedOrdinal++
+            if (!matchesOrdinal(currentOrdinal)) {
+                continue
+            }
+
+            val targetParamCount = validateArrayLengthInstructionHandlerSignature(target)
+            val il = buildArrayLengthInstructionRedirect(target, targetParamCount)
+            instructions.insertBefore(insn, il)
+            instructions.remove(insn)
             injectionCount++
         }
 
@@ -2053,6 +2113,37 @@ class RedirectInjector(
     }
 
     /**
+     * 构造裸 `ARRAYLENGTH` 重定向指令序列。
+     *
+     * `ARRAYLENGTH` 消费前的栈顶只有数组引用；由于裸指令没有描述符，这里把数组暂存为通用引用，
+     * 再交给返回 `Int` 的 handler 替代原长度结果。
+     *
+     * @param target 目标方法
+     * @param targetParamCount handler 追加接收的目标方法参数数量
+     * @return 可替换原 `ARRAYLENGTH` 的指令列表
+     */
+    private fun buildArrayLengthInstructionRedirect(
+        target: MethodNode,
+        targetParamCount: Int,
+    ): InsnList {
+        val il = InsnList()
+        val arrayType = Type.getType(Any::class.java)
+        val arrayIndex = nextLocalIndex(target)
+
+        storeStackValue(il, arrayType, arrayIndex)
+        addHandlerOwner(il)
+        loadFromVariable(il, arrayType, arrayIndex)
+        loadTargetMethodParameters(il, target, targetParamCount)
+        if (isHandlerStatic()) {
+            addStaticHandlerCall(il)
+        } else {
+            addVirtualHandlerCall(il)
+        }
+
+        return il
+    }
+
+    /**
      * 校验普通方法调用重定向的 handler 签名。
      *
      * handler 必须是静态方法、`@JvmStatic` 方法或 Kotlin `object` 实例方法；
@@ -2594,6 +2685,48 @@ class RedirectInjector(
             throw IllegalStateException(
                 "Redirect $pointName handler ${asmMethod.name} return type mismatch: " +
                     "original $valueType, handler $handlerReturnType",
+            )
+        }
+        return targetParamCount
+    }
+
+    /**
+     * 校验裸 `ARRAYLENGTH` 重定向 handler 签名。
+     *
+     * handler 首参接收被 `ARRAYLENGTH` 消费的数组引用。裸指令没有静态数组描述符，
+     * 因此该参数固定按 `Any` / `Object` 契约处理；返回值必须为 `Int`。
+     *
+     * @param target 目标方法
+     * @return handler 追加接收的目标方法参数数量
+     * @throws IllegalStateException handler 形态、参数或返回值不兼容时抛出
+     */
+    private fun validateArrayLengthInstructionHandlerSignature(target: MethodNode): Int {
+        if (!isHandlerStatic() && !isKotlinObject()) {
+            throw IllegalStateException(
+                "Redirect handler ${asmMethod.name} must be static, @JvmStatic, or a Kotlin object instance method",
+            )
+        }
+
+        val expectedParams = arrayOf(Type.getType(Any::class.java))
+        val actualParams = Type.getArgumentTypes(asmMethod)
+        if (actualParams.size < expectedParams.size) {
+            throw IllegalStateException(
+                "Redirect ARRAY_LENGTH handler ${asmMethod.name} parameter count mismatch: " +
+                    "expected at least ${expectedParams.toList()}, actual ${actualParams.toList()}",
+            )
+        }
+        if (!isHandlerParameterCompatible(expectedParams[0], actualParams[0])) {
+            throw IllegalStateException(
+                "Redirect ARRAY_LENGTH handler ${asmMethod.name} parameter #0 mismatch: " +
+                    "expected stack type ${expectedParams[0]}, actual ${actualParams[0]}",
+            )
+        }
+
+        val targetParamCount = validateTargetMethodParameters(target, actualParams, expectedParams.size)
+        val handlerReturnType = Type.getReturnType(asmMethod)
+        if (handlerReturnType != Type.INT_TYPE) {
+            throw IllegalStateException(
+                "Redirect ARRAY_LENGTH handler ${asmMethod.name} must return int, actual $handlerReturnType",
             )
         }
         return targetParamCount

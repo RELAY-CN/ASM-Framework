@@ -21,17 +21,17 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 ## 特性
 
 - **类似 Fabric Mixin 的注解系统** - 简洁易用的注解驱动编程，无需直接操作字节码
-- **强大的注入点支持** - HEAD, TAIL, RETURN, INVOKE, INVOKE_ASSIGN, INVOKE_STRING, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, JUMP, SWITCH, CONSTANT, THROW，以及表达式改写使用的 ARRAY_LENGTH，满足各种场景需求
+- **强大的注入点支持** - HEAD, TAIL, RETURN, INVOKE, INVOKE_ASSIGN, INVOKE_STRING, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, JUMP, SWITCH, CONSTANT, THROW，以及裸数组长度使用的 ARRAY_LENGTH，满足各种场景需求
 - **注入命中数契约** - `@AsmInject`、`@ModifyArg`、`@ModifyArgs`、`@ModifyReceiver`、`@WrapOperation`、`@WrapMethod`、`@WrapWithCondition`、`@ModifyVariable`、`@ModifyReturnValue`、`@ModifyExpressionValue`、`@ModifyConstant` 与 `@Redirect` 支持 `require`、`allow` 与 `expect`，可在目标字节码漂移时快速发现补丁失效
 - **组级命中数契约** - `@Group` 可把同一 Mixin 内多个候选处理器合并为一个总命中数契约，适合多版本字节码适配中的“当前版本命中一个候选即可”场景
 - **精确定位能力** - 普通 `@AsmInject(INVOKE/INVOKE_ASSIGN/INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW)`、`@Redirect`、参数/receiver/表达式/变量/返回值/常量修改、操作包裹与条件包裹可用 `Slice` 把候选点限制在指定 `INVOKE` 调用边界内；普通 `@AsmInject(INVOKE_STRING)` 可通过 `ldc=` / `string=` 精确观察带直接字符串常量实参的普通调用点，且不接收或替换字符串，不匹配局部变量、字符串拼接、方法返回值或 `invokedynamic`；仅 `@ModifyConstant` 额外支持字段读写或常量文本作为切片边界；普通 `@AsmInject(LOAD/STORE)`、`@Redirect(LOAD/STORE)`、`@WrapOperation(LOAD/STORE)`、`@ModifyExpressionValue(LOAD/STORE)` 与 `@ModifyVariable` 可按局部变量槽位或调试变量名过滤
 - **丰富的转换类型** - Inject, Overwrite, Redirect, RedirectAllMethods, ModifyArg, ModifyArgs, ModifyReceiver, WrapOperation, WrapMethod, WrapWithCondition, ModifyExpressionValue, ModifyVariable, ModifyReturnValue, Unique, AddInterface, RemoveInterface, AddField, RemoveField 等十多种转换类型
 - **参数修改能力** - `@ModifyArg` 可修改入口参数、普通调用参数、构造器参数或 `invokedynamic` 调用参数；`@ModifyArgs` 可批量修改普通调用、构造器调用或 `invokedynamic` 调用参数组
 - **receiver 改写能力** - `@ModifyReceiver` 可替换实例方法调用、实例字段读取与实例字段写入的 receiver，保留原参数、字段值与原操作逻辑
-- **实用的重定向能力** - `@Redirect` 可替换方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、简单数组元素读写、数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、`tableswitch` / `lookupswitch` selector、常量加载或即将抛出的异常，并支持追加目标方法参数前缀；`@RedirectAllMethods` 可把同一组重定向规则应用到目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
-- **可控的操作包裹能力** - `@WrapOperation` 可替换匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、`tableswitch` / `lookupswitch` selector、常量读取或即将抛出的异常，并通过 `Operation` 按需调用、跳过或多次执行原操作
+- **实用的重定向能力** - `@Redirect` 可替换方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、简单数组元素读写、字段来源或裸 `ARRAYLENGTH` 数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、`tableswitch` / `lookupswitch` selector、常量加载或即将抛出的异常，并支持追加目标方法参数前缀；`@RedirectAllMethods` 可把同一组重定向规则应用到目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
+- **可控的操作包裹能力** - `@WrapOperation` 可替换匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、字段来源或裸 `ARRAYLENGTH` 数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、`tableswitch` / `lookupswitch` selector、常量读取或即将抛出的异常，并通过 `Operation` 按需调用、跳过或多次执行原操作
 - **整方法包裹能力** - `@WrapMethod` 可把整个目标方法体迁移为 `private synthetic` 原方法句柄，并用 handler 统一决定是否调用、改写参数或多次执行原方法；生成的 wrapper 会保留 `synchronized`、`varargs` 等 JVM 方法契约
-- **实用的条件包裹能力** - `@WrapWithCondition` 可按条件跳过普通方法调用、`invokedynamic` 调用，或在调用完成后条件保留返回值，也可条件保留字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、对象构造结果、局部变量读取或写入、类型转换、类型判断、常量加载/常量值、条件跳转、switch selector 或即将抛出的异常，适合保留原逻辑但控制副作用、调用返回值、构造表达式结果、局部状态、类型转换结果、类型判断结果、分支流向、switch 分派与异常抛出
+- **实用的条件包裹能力** - `@WrapWithCondition` 可按条件跳过普通方法调用、`invokedynamic` 调用，或在调用完成后条件保留返回值，也可条件保留字段读取、字段写入、数组元素读取、数组元素写入、字段来源或裸 `ARRAYLENGTH` 数组长度读取、对象构造结果、局部变量读取或写入、类型转换、类型判断、常量加载/常量值、条件跳转、switch selector 或即将抛出的异常，适合保留原逻辑但控制副作用、调用返回值、构造表达式结果、局部状态、类型转换结果、类型判断结果、分支流向、switch 分派与异常抛出
 - **表达式改写能力** - `@ModifyExpressionValue` 可改写普通调用或 `invokedynamic` 调用返回值、字段读取值、字段写入值、数组元素读取值、数组元素待写入值、字段数组长度、裸 `ARRAYLENGTH` 长度结果、对象构造结果、类型转换结果、类型判断结果、局部变量读取或待写入表达式值、条件跳转分支结果、`tableswitch` / `lookupswitch` selector、常量表达式值或即将抛出的异常
 - **常量替换能力** - `@ModifyConstant`、`@Redirect(CONSTANT)`、`@ModifyExpressionValue(CONSTANT)` 与 `@WrapOperation(CONSTANT)` 可基于原常量值修改常量；`@ModifyConstant` 的 `Slice` 支持调用、字段读写与常量文本边界；普通 `@AsmInject(CONSTANT, shift = Shift.REPLACE)` 可直接用 handler 返回值替换匹配常量加载
 - **访问器与调用器能力** - `@Accessor` 可生成字段 getter/setter；final 字段 setter 需要配合 `@Mutable`，接口字段只支持 getter；`@Invoker` 可生成私有方法桥接和构造器工厂方法

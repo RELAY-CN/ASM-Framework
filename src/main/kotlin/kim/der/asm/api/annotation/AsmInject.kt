@@ -148,7 +148,8 @@ annotation class AsmInject(
  * 用于描述代码注入的位置。普通注入支持 [HEAD]、[TAIL]、[RETURN]、[INVOKE]、[INVOKE_ASSIGN]、[FIELD]、
  * [INVOKE_STRING]、[FIELD_ASSIGN]、[LOAD]、[STORE]、[NEW]、[CAST]、[INSTANCEOF]、[JUMP]、[SWITCH]、[CONSTANT] 与 [THROW]。
  * [kim.der.asm.api.annotation.ModifyExpressionValue] 可通过 [FIELD_ASSIGN] 改写字段待写入值，也可配合数组字段目标改写数组读取、数组写入或数组长度表达式，通过 [LOAD] 改写局部变量读取表达式值，通过 [STORE] 改写局部变量待写入表达式值，通过 [INSTANCEOF] 改写类型判断结果，通过 [JUMP] 改写条件跳转分支结果，通过 [SWITCH] 改写 `tableswitch` / `lookupswitch` selector，
- * 通过 [CONSTANT] 改写常量表达式，通过 [ARRAY_LENGTH] 直接改写任意 `ARRAYLENGTH` 产生的 `Int` 长度结果，
+ * 通过 [CONSTANT] 改写常量表达式，通过 [ARRAY_LENGTH] 直接改写任意 `ARRAYLENGTH` 产生的 `Int` 长度结果；
+ * [Redirect]、[WrapOperation] 与 [WrapWithCondition] 也可通过 [ARRAY_LENGTH] 直接替换、包裹或条件保留裸 `ARRAYLENGTH`，
  * 也可通过 [THROW] 改写即将抛出的异常。
  * [INVOKE_STRING] 只匹配目标方法调用实参中的直接 `LDC String`，不会追踪局部变量、字符串拼接或方法返回值。
  * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
@@ -255,10 +256,12 @@ enum class InjectionPoint {
  * - [Redirect] 可通过 [InjectionPoint.FIELD] 与 `array=get` / `array=length`
  *   把数组字段目标解释为数组元素读取或数组长度读取，通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`
  *   把数组字段目标解释为数组元素写入；
+ *   也可通过 [InjectionPoint.ARRAY_LENGTH] 直接替换任意裸 `ARRAYLENGTH`，handler 首参按 `Any` / `Object` 接收数组引用；
  *   也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 与 `index=N`、`var=N`
  *   或 `name=localName` 重定向指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值或待写入值。
  * - [WrapOperation] 可通过 [args] 中的 `array=get`、`array=set` 或 `array=length`，
  *   把 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 目标解释为数组元素读取、写入或数组长度读取。
+ *   也可通过 [InjectionPoint.ARRAY_LENGTH] 直接包裹任意裸 `ARRAYLENGTH`，handler 接收 `Any` / `Object` 数组引用与 [Operation]；
  *   也可通过 [InjectionPoint.LOAD] 与 `index=N`、`var=N` 或 `name=localName`
  *   包裹指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值，
  *   handler 返回值只替换这一次读取结果，不写回槽位；通过 [InjectionPoint.STORE] 与同样的槽位或名称过滤包裹本次待写入值，
@@ -266,6 +269,7 @@ enum class InjectionPoint {
  * - [WrapWithCondition] 可通过 [InjectionPoint.INVOKE_ASSIGN] 在调用完成后条件保留返回值；
  *   通过 [args] 中的 `array=get` 或 `array=length`，把 [InjectionPoint.FIELD] 目标解释为数组元素读取或数组长度读取；
  *   通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set` 把数组字段目标解释为数组元素写入；
+ *   也可通过 [InjectionPoint.ARRAY_LENGTH] 直接条件保留任意裸 `ARRAYLENGTH` 产生的 `Int` 长度结果；
  *   也可通过 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 与 `index=N`、`var=N` 或 `name=localName`
  *   按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤本次局部变量读取或写入；
  *   [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.SWITCH]
@@ -369,11 +373,11 @@ enum class Shift {
  * [InjectionPoint.FIELD_ASSIGN] receiver 改写，
  * [WrapOperation] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、
- * [InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 操作包裹、
+ * [InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH] 与 [InjectionPoint.THROW] 操作包裹、
  * [WrapWithCondition] 的 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、
  * [InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、
- * [InjectionPoint.SWITCH] 与 [InjectionPoint.THROW] 条件包裹，
+ * [InjectionPoint.SWITCH]、[InjectionPoint.ARRAY_LENGTH] 与 [InjectionPoint.THROW] 条件包裹，
  * [ModifyExpressionValue] 的 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组读取、数组写入值、数组字段长度、[InjectionPoint.ARRAY_LENGTH] 裸数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
  * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
