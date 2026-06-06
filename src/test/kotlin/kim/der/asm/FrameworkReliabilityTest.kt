@@ -4353,6 +4353,35 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("WrapOperation SWITCH 应支持 slice 限定边界内 selector")
+    fun wrapOperationAtSwitchSliceLimitsSelectorsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(WrapOperationSwitchSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform(
+                "SliceSwitchSelectorTarget",
+                sliceSwitchSelectorTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("SliceSwitchSelectorTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+
+        // Then
+        assertThat(method.invoke(instance, 0, false))
+            .`as`("Then: slice 外第一个 switch 保持 zero，slice 内第二个 selector 经 Operation.call 后转到 one")
+            .isEqualTo("zero:one")
+        assertThat(method.invoke(instance, 1, false))
+            .`as`("Then: slice 外第一个 switch 保持 one，slice 内第二个 selector 被改到 default 分支")
+            .isEqualTo("one:fallback")
+        assertThat(method.invoke(instance, 0, true))
+            .`as`("Then: handler 使用目标方法参数时也只应影响 slice 内第二个 switch")
+            .isEqualTo("zero:fallback")
+    }
+
+    @Test
     fun redirectAtSwitchReplacesTableSwitchSelector() {
         AsmRegistry.register(RedirectSwitchMixin::class.java)
 
@@ -5219,6 +5248,24 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("wrap-store-raw", result)
+    }
+
+    @Test
+    @DisplayName("WrapOperation STORE 应支持 slice 限定局部变量写入")
+    fun wrapOperationStoreSliceLimitsLocalStoresBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(WrapOperationStoreSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceStoreVariableTarget", sliceStoreVariableTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceStoreVariableTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: slice 只应包裹边界内 slot 1 写入，边界外 pre/outside 写入保持原值")
+            .isEqualTo("pre:wrapped-inside:outside")
     }
 
     @Test
@@ -10190,6 +10237,38 @@ class FrameworkReliabilityTest {
         assertThat(method.invoke(instance, -1, false))
             .`as`("Then: 负数原本跳转，取反后应继续走 positive 分支")
             .isEqualTo("positive")
+    }
+
+    @Test
+    @DisplayName("Redirect JUMP 应同时遵守 slice 边界和 opcode 目标")
+    fun redirectAtJumpRespectsSliceAndOpcodeTarget() {
+        // Given
+        AsmRegistry.register(SliceJumpRedirectMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform(
+                "SliceJumpOperationTarget",
+                sliceJumpOperationTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("SliceJumpOperationTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val method = clazz.getMethod("choose", Int::class.javaPrimitiveType)
+
+        // Then
+        assertThat(method.invoke(instance, 120))
+            .`as`("Then: slice 前同 opcode IF_ICMPGT 不应被替换，仍返回 pre-high")
+            .isEqualTo("pre-high")
+        assertThat(method.invoke(instance, 20))
+            .`as`("Then: slice 内目标 IF_ICMPGT 被 handler 改为不跳转后，应落到 slice 后同 opcode 分支")
+            .isEqualTo("post-high")
+        assertThat(method.invoke(instance, -1))
+            .`as`("Then: slice 内不同 opcode IFLE 不应被 target=IF_ICMPGT 命中")
+            .isEqualTo("inside-low")
+        assertThat(method.invoke(instance, 5))
+            .`as`("Then: 普通 fallthrough 路径在 slice 和 opcode 过滤后保持 fallback")
+            .isEqualTo("fallback")
     }
 
     @Test
@@ -15503,6 +15582,31 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceSwitchSelectorTarget")
+    object WrapOperationSwitchSliceMixin {
+        @WrapOperation(
+            method = "choose(IZ)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            selector: Int,
+            operation: Operation<Int>,
+            value: Int,
+            forceFallback: Boolean,
+        ): Int {
+            value.hashCode()
+            val original = operation.call(selector)
+            return if (forceFallback) 2 else original + 1
+        }
+    }
+
     @AsmMixin("SwitchSelectorTarget")
     object RedirectSwitchMixin {
         @Redirect(
@@ -15719,6 +15823,29 @@ class FrameworkReliabilityTest {
             value.hashCode()
             forceNegative.hashCode()
             return !original
+        }
+    }
+
+    @AsmMixin("SliceJumpOperationTarget")
+    object SliceJumpRedirectMixin {
+        @Redirect(
+            method = "choose(I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.JUMP, target = "IF_ICMPGT"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "SliceJumpOperationTarget.startMarker()V"),
+                to = At(value = InjectionPoint.INVOKE, target = "SliceJumpOperationTarget.endMarker()V"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            original: Boolean,
+            value: Int,
+        ): Boolean {
+            original.hashCode()
+            value.hashCode()
+            return false
         }
     }
 
@@ -16447,6 +16574,25 @@ class FrameworkReliabilityTest {
             original: String,
             operation: Operation<String>,
         ): String = operation.call("wrap-store-$original")
+    }
+
+    @AsmMixin("SliceStoreVariableTarget")
+    object WrapOperationStoreSliceMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=1"]),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = operation.call("wrapped-$original")
     }
 
     @AsmMixin("NamedLoadVariableTarget")
@@ -24616,6 +24762,63 @@ class FrameworkReliabilityTest {
             visitInsn(Opcodes.ARETURN)
             visitLabel(negative)
             visitLdcInsn("negative")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun sliceJumpOperationTargetBytes(): ByteArray {
+        val cw = ClassWriter(ClassWriter.COMPUTE_FRAMES)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceJumpOperationTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "startMarker", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "endMarker", "()V", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "choose", "(I)Ljava/lang/String;", null, null).apply {
+            val preHigh = org.objectweb.asm.Label()
+            val insideHigh = org.objectweb.asm.Label()
+            val insideLow = org.objectweb.asm.Label()
+            val postHigh = org.objectweb.asm.Label()
+            visitCode()
+            // 同 opcode 分布在 slice 内外，不同 opcode 放在 slice 内，确保同时验证边界与 target 过滤。
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitIntInsn(Opcodes.BIPUSH, 100)
+            visitJumpInsn(Opcodes.IF_ICMPGT, preHigh)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "SliceJumpOperationTarget", "startMarker", "()V", false)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitIntInsn(Opcodes.BIPUSH, 10)
+            visitJumpInsn(Opcodes.IF_ICMPGT, insideHigh)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitJumpInsn(Opcodes.IFLE, insideLow)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "SliceJumpOperationTarget", "endMarker", "()V", false)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitIntInsn(Opcodes.BIPUSH, 10)
+            visitJumpInsn(Opcodes.IF_ICMPGT, postHigh)
+            visitLdcInsn("fallback")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(preHigh)
+            visitLdcInsn("pre-high")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(insideHigh)
+            visitLdcInsn("inside-high")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(insideLow)
+            visitLdcInsn("inside-low")
+            visitInsn(Opcodes.ARETURN)
+            visitLabel(postHigh)
+            visitLdcInsn("post-high")
             visitInsn(Opcodes.ARETURN)
             visitMaxs(0, 0)
             visitEnd()
