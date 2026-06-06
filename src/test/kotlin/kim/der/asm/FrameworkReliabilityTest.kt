@@ -2517,6 +2517,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("WrapWithCondition CONSTANT 应支持 slice 只替换边界内常量默认值")
+    fun wrapWithConditionAtConstantSliceUsesDefaultOnlyInsideBoundary() {
+        // Given
+        AsmRegistry.register(WrapConditionConstantSliceDenyMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("SliceConstantTarget", sliceConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: slice 内同值常量被条件替换为 String 默认值，slice 外常量保持原始业务值")
+            .isEqualTo("target::target")
+    }
+
+    @Test
     fun wrapWithConditionAtConstantInfersBooleanWhenTargetOmitted() {
         AsmRegistry.register(WrapConditionConstantBooleanDenyMixin::class.java)
 
@@ -3851,6 +3868,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ModifyExpressionValue ARRAY_LENGTH 应支持 slice 限定裸数组长度")
+    fun modifyExpressionValueAtArrayLengthInstructionSliceLimitsBareLengthsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueArrayLengthInstructionSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceLocalArrayLengthTarget", sliceLocalArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceLocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countSelected").invoke(instance))
+            .`as`("Then: slice 只应改写边界内裸 ARRAYLENGTH 的表达式值，边界外长度仍保持原值")
+            .isEqualTo(10)
+    }
+
+    @Test
     fun modifyExpressionValueAtArrayLengthCanUseTargetMethodParameters() {
         AsmRegistry.register(ModifyExpressionValueArrayLengthWithTargetParamsMixin::class.java)
 
@@ -4515,6 +4550,29 @@ class FrameworkReliabilityTest {
 
         assertEquals(true, exception.cause is IllegalArgumentException)
         assertEquals("modified-inside", exception.cause?.message)
+    }
+
+    @Test
+    @DisplayName("WrapOperation THROW 应支持 target 与 slice 同时限定直接构造异常")
+    fun wrapOperationAtThrowSliceFiltersDirectlyConstructedThrowableAfterFrom() {
+        // Given
+        AsmRegistry.register(WrapOperationThrowSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceThrowInstructionTarget", sliceThrowInstructionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceThrowInstructionTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        val exception =
+            assertThrows(java.lang.reflect.InvocationTargetException::class.java) {
+                clazz.getMethod("failSelected").invoke(instance)
+            }
+        assertThat(exception.cause)
+            .`as`("Then: slice 内直接构造的 IllegalStateException 应被 WrapOperation 通过 Operation.call 后替换")
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("wrapped-inside")
     }
 
     @Test
@@ -13242,6 +13300,25 @@ class FrameworkReliabilityTest {
         fun shouldKeep(value: String): Boolean = true
     }
 
+    @AsmMixin("SliceConstantTarget")
+    object WrapConditionConstantSliceDenyMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "target"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
     @AsmMixin("TrueBooleanConstantTarget")
     object WrapConditionConstantBooleanDenyMixin {
         @WrapWithCondition(
@@ -14562,6 +14639,22 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original
+    }
+
+    @AsmMixin("SliceLocalArrayLengthTarget")
+    object ModifyExpressionValueArrayLengthInstructionSliceMixin {
+        @ModifyExpressionValue(
+            method = "countSelected()I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original + 5
     }
 
     @AsmMixin("LocalArrayLengthTarget")
@@ -20362,6 +20455,24 @@ class FrameworkReliabilityTest {
         @WrapOperation(
             method = "fail(Z)V",
             at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: Throwable,
+            operation: Operation<Throwable>,
+        ): Throwable = IllegalArgumentException("wrapped-${operation.call(original).message}")
+    }
+
+    @AsmMixin("SliceThrowInstructionTarget")
+    object WrapOperationThrowSliceMixin {
+        @WrapOperation(
+            method = "failSelected()V",
+            at = At(value = InjectionPoint.THROW, target = "java/lang/IllegalStateException"),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
             require = 1,
             allow = 1,
         )
