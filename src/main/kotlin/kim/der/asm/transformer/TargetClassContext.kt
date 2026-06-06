@@ -1462,7 +1462,7 @@ class TargetClassContext(
         annotation: AsmInject,
         copyMethodNames: Map<String, String>,
     ): Int {
-        val il =
+        val inlineCode =
             InlineCodeGenerator.inlineMethodCode(
                 target,
                 asmMethod,
@@ -1477,9 +1477,9 @@ class TargetClassContext(
                 // 在方法开头插入
                 // 注意：HEAD 注入在最后处理，所以此时 RETURN 注入已经完成
                 if (target.instructions.size() == 0) {
-                    target.instructions.add(il)
+                    addInlineCode(target, inlineCode)
                 } else {
-                    target.instructions.insertBefore(target.instructions.first, il)
+                    insertInlineCodeBefore(target, target.instructions.first, inlineCode)
                 }
                 1
             }
@@ -1490,14 +1490,14 @@ class TargetClassContext(
                 var injectionCount = 0
                 for (insn in insns) {
                     if (insn is InsnNode && insn.opcode in RETURN_OPS) {
-                        target.instructions.insertBefore(insn, il)
+                        insertInlineCodeBefore(target, insn, inlineCode)
                         injectionCount = 1
                         break
                     }
                 }
                 // 如果没有找到 RETURN，在末尾添加
                 if (injectionCount == 0) {
-                    target.instructions.add(il)
+                    addInlineCode(target, inlineCode)
                     injectionCount = 1
                 }
                 injectionCount
@@ -1511,7 +1511,7 @@ class TargetClassContext(
                 for (insn in insns) {
                     if (insn is InsnNode && insn.opcode in RETURN_OPS) {
                         // 为每个 RETURN 创建新的指令列表副本
-                        target.instructions.insertBefore(insn, cloneInsnList(il))
+                        insertInlineCodeBefore(target, insn, inlineCode.deepCopy())
                         injectionCount++
                     }
                 }
@@ -1520,26 +1520,38 @@ class TargetClassContext(
             else -> {
                 // 默认在方法开头插入
                 if (target.instructions.size() == 0) {
-                    target.instructions.add(il)
+                    addInlineCode(target, inlineCode)
                 } else {
-                    target.instructions.insertBefore(target.instructions.first, il)
+                    insertInlineCodeBefore(target, target.instructions.first, inlineCode)
                 }
                 1
             }
         }
     }
 
-    private fun cloneInsnList(source: InsnList): InsnList {
-        val labelMap = mutableMapOf<LabelNode, LabelNode>()
-        source.toArray().filterIsInstance<LabelNode>().forEach { label ->
-            labelMap[label] = LabelNode()
-        }
+    private fun addInlineCode(
+        target: MethodNode,
+        inlineCode: InlineCodeGenerator.InlineCode,
+    ) {
+        target.instructions.add(inlineCode.instructions)
+        addInlineTryCatchBlocks(target, inlineCode)
+    }
 
-        val cloned = InsnList()
-        for (insn in source) {
-            cloned.add(insn.clone(labelMap))
-        }
-        return cloned
+    private fun insertInlineCodeBefore(
+        target: MethodNode,
+        location: AbstractInsnNode,
+        inlineCode: InlineCodeGenerator.InlineCode,
+    ) {
+        target.instructions.insertBefore(location, inlineCode.instructions)
+        addInlineTryCatchBlocks(target, inlineCode)
+    }
+
+    private fun addInlineTryCatchBlocks(
+        target: MethodNode,
+        inlineCode: InlineCodeGenerator.InlineCode,
+    ) {
+        // try/catch block 的 label 必须引用已经插入到目标方法中的同一批 LabelNode。
+        target.tryCatchBlocks.addAll(inlineCode.tryCatchBlocks)
     }
 
     companion object {

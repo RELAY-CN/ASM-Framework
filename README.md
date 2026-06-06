@@ -38,6 +38,7 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **唯一辅助方法能力** - `@Copy` 会复制 helper 并保留 `static`、`synchronized` 与 `varargs` 等 JVM 契约；
   `@Unique` 可配合 `@Copy` 在目标类已有同签名方法时自动复制为私有 synthetic 方法，
   并改写同一 Mixin 内 `@Overwrite`、`@Copy` 与 inline `@AsmInject` 方法体中的调用点
+- **内联注入能力** - `@AsmInject(inline = true)` 可直接复制 handler 字节码，普通 try/catch 异常表会随 handler 一起内联且只覆盖 handler 自身指令
 - **影子引用能力** - `@Shadow` 可校验并引用目标字段/方法，支持声明名、`shadow_` 前缀和显式目标名
 - **高性能** - 基于 ASM 9.9 的高效字节码转换，最小化运行时开销
 - **类型安全** - 完善的 Kotlin 类型系统支持，编译时类型检查

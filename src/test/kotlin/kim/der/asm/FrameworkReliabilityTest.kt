@@ -783,13 +783,19 @@ class FrameworkReliabilityTest {
             AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
         }
     }
+
     @Test
-    fun inlineMethodWithTryCatchFailsDuringTransform() {
+    @DisplayName("inline handler 内部 try/catch 应只拦截 handler 自身异常并继续执行目标方法")
+    fun inlineMethodWithTryCatchKeepsHandlerExceptionLocal() {
         AsmRegistry.register(InlineTryCatchMixin::class.java)
 
-        assertThrows(AsmTransformException::class.java) {
-            AsmProcessor().transform("InlineTarget", inlineTargetBytes(), javaClass.classLoader)
-        }
+        val transformed = AsmProcessor().transform("ReturnTarget", returnTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReturnTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: inline handler 的 try/catch 应捕获自身异常，目标方法仍继续返回原业务值")
+            .isEqualTo("value")
     }
 
     @Test
@@ -10985,15 +10991,15 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun copied(): Int = 1
     }
-    @AsmMixin("InlineTarget")
+    @AsmMixin("ReturnTarget")
     object InlineTryCatchMixin {
-        @AsmInject(method = "run()V", inline = true)
+        @AsmInject(method = "value()Ljava/lang/String;", inline = true)
         @JvmStatic
         fun injectInline() {
             try {
-                " value ".trim()
-            } catch (_: RuntimeException) {
-                // ignored for test fixture
+                throw IllegalStateException("inline-handler")
+            } catch (_: IllegalStateException) {
+                "recovered".length
             }
         }
     }

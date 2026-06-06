@@ -376,7 +376,7 @@ object RemoveInterfacesMixin
 - `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
-- `inline: Boolean = false` - 是否内联代码
+- `inline: Boolean = false` - 是否内联代码；handler 内部普通 try/catch 会随内联字节码一起复制，异常范围只覆盖 handler 自身指令
 
 handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 `CallbackInfoReturnable<T>` 标注返回值类型。
 普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
@@ -1564,7 +1564,8 @@ priority 相同时保持注册顺序。
 
 ### 内联代码注入
 
-使用 `inline = true` 可以将字节码直接插入，而不是方法调用。
+使用 `inline = true` 可以将字节码直接插入，而不是方法调用。handler 内部的普通 try/catch 异常表会随内联字节码一起复制；
+异常处理范围只覆盖内联 handler 自身指令，不会把目标方法后续业务代码纳入 handler 的 catch 范围。
 
 ### Transformer API
 

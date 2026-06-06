@@ -60,7 +60,8 @@ package kim.der.asm.api.annotation
  * [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
- * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用
+ * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用；
+ * 普通 try/catch 异常表会随 handler 方法体一起复制，异常范围只覆盖内联的 handler 指令
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -136,6 +137,7 @@ annotation class AsmInject(
      * 是否内联 handler 字节码。
      *
      * 开启后转换器复制 handler 方法体到目标方法，而不是生成一次普通方法调用。
+     * handler 内部的普通 try/catch 会同步复制；异常处理范围只覆盖内联 handler 自身指令。
      */
     val inline: Boolean = false,
 )

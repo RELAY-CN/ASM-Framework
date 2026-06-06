@@ -1699,6 +1699,7 @@ Shadow 目标名称解析规则：
 
 - 避免在注入方法中执行耗时操作
 - 使用 `inline = true` 减少方法调用开销
+- inline handler 内部可以保留普通 try/catch；异常范围只覆盖 handler 自身指令，目标方法后续业务代码不会被该 catch 包住
 - 合理使用 `require` / `allow` 约束关键注入点数量
 
 ### 9. 测试 Mixin

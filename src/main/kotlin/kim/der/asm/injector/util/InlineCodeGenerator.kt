@@ -23,6 +23,39 @@ import java.lang.reflect.Method
  */
 object InlineCodeGenerator {
     /**
+     * 一次 inline 生成结果。
+     *
+     * try/catch block 的 label 必须和实际插入的指令副本同源；RETURN 注入可能复制多份指令，
+     * 因此不能只把异常表挂到原始指令上复用。
+     */
+    data class InlineCode(
+        val instructions: InsnList,
+        val tryCatchBlocks: List<TryCatchBlockNode>,
+    ) {
+        fun deepCopy(): InlineCode {
+            val labelMap = mutableMapOf<LabelNode, LabelNode>()
+            instructions.toArray().filterIsInstance<LabelNode>().forEach { label ->
+                labelMap[label] = LabelNode()
+            }
+            tryCatchBlocks.forEach { tryCatch ->
+                labelMap.getOrPut(tryCatch.start) { LabelNode() }
+                labelMap.getOrPut(tryCatch.end) { LabelNode() }
+                tryCatch.handler?.let { labelMap.getOrPut(it) { LabelNode() } }
+            }
+
+            val clonedInstructions = InsnList()
+            for (insn in instructions) {
+                clonedInstructions.add(insn.clone(labelMap))
+            }
+
+            return InlineCode(
+                instructions = clonedInstructions,
+                tryCatchBlocks = cloneTryCatchBlocks(tryCatchBlocks, labelMap),
+            )
+        }
+    }
+
+    /**
      * 提取并内联 ASM 方法的字节码
      *
      * @param target 目标方法节点
@@ -38,17 +71,12 @@ object InlineCodeGenerator {
         asmInfo: AsmInfo,
         targetClassName: String,
         copyMethodNames: Map<String, String> = emptyMap(),
-    ): InsnList {
+    ): InlineCode {
         // 获取 ASM 方法的字节码
         val asmMethodNode =
             extractAsmMethodNode(asmInfo, asmMethod)
                 ?: throw IllegalStateException("Cannot extract method ${asmMethod.name} from asm class ${asmInfo.asmClass.name}")
 
-        if (asmMethodNode.tryCatchBlocks.isNotEmpty()) {
-            throw IllegalStateException(
-                "Cannot inline method ${asmMethod.name} from ${asmInfo.asmClass.name}: try/catch blocks are not supported by inline injection",
-            )
-        }
         // 创建标签映射
         val labelMap = mutableMapOf<LabelNode, LabelNode>()
 
@@ -57,6 +85,11 @@ object InlineCodeGenerator {
             if (insn is LabelNode) {
                 labelMap[insn] = LabelNode()
             }
+        }
+        asmMethodNode.tryCatchBlocks.forEach { tryCatch ->
+            labelMap.getOrPut(tryCatch.start) { LabelNode() }
+            labelMap.getOrPut(tryCatch.end) { LabelNode() }
+            tryCatch.handler?.let { labelMap.getOrPut(it) { LabelNode() } }
         }
 
         // 复制指令
@@ -89,8 +122,24 @@ object InlineCodeGenerator {
         normalizeInlineReturns(il)
         adaptKotlinObjectSelfReceivers(il, target, asmInfo, targetClassName)
 
-        return il
+        return InlineCode(
+            instructions = il,
+            tryCatchBlocks = cloneTryCatchBlocks(asmMethodNode.tryCatchBlocks, labelMap),
+        )
     }
+
+    private fun cloneTryCatchBlocks(
+        tryCatchBlocks: List<TryCatchBlockNode>,
+        labelMap: Map<LabelNode, LabelNode>,
+    ): List<TryCatchBlockNode> =
+        tryCatchBlocks.map { tryCatch ->
+            TryCatchBlockNode(
+                labelMap.getValue(tryCatch.start),
+                labelMap.getValue(tryCatch.end),
+                tryCatch.handler?.let { labelMap.getValue(it) },
+                tryCatch.type,
+            )
+        }
 
     /**
      * inline handler 的 return 只表示 handler 结束，不能变成目标方法 return。
