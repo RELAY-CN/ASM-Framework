@@ -259,6 +259,10 @@ class FrameworkReliabilityTest {
             api
                 .substringAfter("非字段来源的裸 `ARRAYLENGTH` 使用 `ARRAY_LENGTH`")
                 .substringBefore("`LOAD` 模式")
+        val apiAtTargetFormatSection =
+            api
+                .substringAfter("**`target` 格式：**")
+                .substringBefore("`@Redirect` 可在 `FIELD` 目标上使用")
         val guideRedirectBareArrayLengthSection =
             guide
                 .substringAfter("裸 `ARRAYLENGTH` 使用 `at.value = InjectionPoint.ARRAY_LENGTH`")
@@ -275,7 +279,11 @@ class FrameworkReliabilityTest {
         // Then
         assertThat(readmeArrayLengthSummary)
             .`as`("Then: README 能力摘要应提示裸 ARRAY_LENGTH 与字段来源数组长度是两个不同定位契约")
-            .contains("裸数组长度使用的 ARRAY_LENGTH")
+            .contains(
+                "裸数组长度使用的 ARRAY_LENGTH",
+                "普通 `@AsmInject` 不支持 `ARRAY_LENGTH`",
+                "裸 `ARRAYLENGTH` 请使用 `@Redirect`、`@WrapOperation`、`@WrapWithCondition` 或 `@ModifyExpressionValue`",
+            )
         assertThat(redirectArraySection)
             .`as`("Then: @Redirect 数组写入必须绑定 FIELD_ASSIGN，避免把 array=set 误导为 FIELD 定位")
             .contains("`FIELD_ASSIGN` 目标上使用 `args = [\"array=set\"]`")
@@ -336,6 +344,13 @@ class FrameworkReliabilityTest {
                 "不使用 `At.target` 或 `At.args`",
                 "字段来源数组长度继续使用 `FIELD + at.args = [\"array=length\"]`",
             )
+        assertThat(apiAtTargetFormatSection)
+            .`as`("Then: API 的 At target 格式总表应区分普通 JUMP 观察点与条件跳转表达式改写，并说明 ARRAY_LENGTH 不消费 args")
+            .contains(
+                "普通 `@AsmInject(JUMP)` 省略时匹配所有跳转",
+                "`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)`、`@WrapOperation(JUMP)` 与 `@WrapWithCondition(JUMP)` 省略时只匹配切片内全部条件跳转",
+                "`ARRAY_LENGTH`: 不使用 `target` 或 `args`",
+            )
         assertThat(guideRedirectBareArrayLengthSection)
             .`as`("Then: GUIDE 的 Redirect 段应说明裸 ARRAY_LENGTH 不消费 At.target 或 At.args")
             .contains("不使用 `At.target` 或 `At.args`")
@@ -349,6 +364,267 @@ class FrameworkReliabilityTest {
                 "不使用 `At.target` 或 `At.args`",
                 "`FIELD + args = [\"array=length\"]`",
             )
+    }
+
+    @Test
+    @DisplayName("公开 KDoc 应保持 ARRAY_LENGTH 与 JUMP 定位契约一致")
+    fun publicKDocKeepsArrayLengthAndJumpTargetContractsAligned() {
+        // Given
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val injectorFactoryKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "AsmInjectorFactory.kt"))
+        val redirectKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 重定向方法调用、",
+                "annotation class Redirect",
+            )
+        val redirectTargetPropertySection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 兼容旧式写法的重定向目标组件。",
+                "val target: String = \"\"",
+            )
+        val wrapWithConditionKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 条件包裹注解。",
+                "annotation class WrapWithCondition",
+            )
+        val modifyExpressionValueKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 修改表达式值注解。",
+                "annotation class ModifyExpressionValue",
+            )
+        val wrapOperationFactorySection =
+            requiredSection(
+                injectorFactoryKDoc,
+                "* 创建 WrapOperation 注入器。",
+                "fun createWrapOperationInjector",
+            )
+        val wrapWithConditionFactorySection =
+            requiredSection(
+                injectorFactoryKDoc,
+                "* 创建 WrapWithCondition 注入器。",
+                "fun createWrapWithConditionInjector",
+            )
+        val redirectFactorySection =
+            requiredSection(
+                injectorFactoryKDoc,
+                "* 创建 Redirect 注入器。",
+                "fun createRedirectInjector",
+            )
+
+        // Then
+        assertThat(redirectTargetPropertySection)
+            .`as`("Then: Redirect.target 兼容字段应明确 ARRAY_LENGTH 不应设置旧 target 字段，避免迁移旧写法时误配裸 ARRAYLENGTH")
+            .contains("LOAD、STORE、SWITCH 和 ARRAY_LENGTH 模式不应设置该字段，非空会在转换阶段失败")
+        assertThat(redirectKDocSection)
+            .`as`("Then: Redirect KDoc 应同时说明裸 ARRAY_LENGTH 不使用 At.target / At.args，以及 JUMP 空 target 匹配全部条件跳转")
+            .contains(
+                "[InjectionPoint.ARRAY_LENGTH] 可直接重定向任意裸 `ARRAYLENGTH`，不使用 [At.target] 或 [At.args]",
+                "[At.target] 为空时会匹配切片内全部条件跳转",
+                "[InjectionPoint.SWITCH] 不使用 [At.target]，[InjectionPoint.ARRAY_LENGTH] 不使用 [At.target] 或 [At.args]",
+            )
+        assertThat(wrapWithConditionKDocSection)
+            .`as`("Then: WrapWithCondition KDoc 应说明 ARRAY_LENGTH 默认值语义和 JUMP target 可省略语义")
+            .contains(
+                "裸数组长度读取",
+                "[InjectionPoint.ARRAY_LENGTH] 直接匹配任意裸 `ARRAYLENGTH` 产生的 `Int` 长度结果，不使用 [At.target] 或 [At.args]",
+                "[InjectionPoint.JUMP] 模式匹配条件跳转，[At.target] 可写条件跳转操作码名或数字",
+                "省略 [At.target] 时匹配切片内全部条件跳转",
+                "[InjectionPoint.SWITCH] 不支持 [At.target]，[InjectionPoint.ARRAY_LENGTH] 不使用 [At.target] 或 [At.args]",
+            )
+        assertThat(modifyExpressionValueKDocSection)
+            .`as`("Then: ModifyExpressionValue KDoc 应说明 ARRAY_LENGTH 不消费定位参数，且 JUMP 空 target 不是必填")
+            .contains(
+                "[InjectionPoint.ARRAY_LENGTH] 直接匹配任意裸 `ARRAYLENGTH` 产生的 `Int` 长度结果，不使用 [At.target] 或 [At.args]",
+                "[InjectionPoint.JUMP] 的 [At.target] 为条件跳转操作码名或数字；省略 [At.target] 时匹配切片内全部条件跳转",
+            )
+        assertThat(wrapOperationFactorySection)
+            .`as`("Then: AsmInjectorFactory WrapOperation KDoc 应同步 ARRAY_LENGTH 支持范围，避免工厂 API 使用者看到旧列表")
+            .contains("ARRAY_LENGTH", "裸 ARRAYLENGTH")
+        assertThat(wrapWithConditionFactorySection)
+            .`as`("Then: AsmInjectorFactory WrapWithCondition KDoc 应同步 ARRAY_LENGTH 支持范围")
+            .contains("ARRAY_LENGTH")
+        assertThat(redirectFactorySection)
+            .`as`("Then: AsmInjectorFactory Redirect KDoc 应同步 ARRAY_LENGTH 不使用 target/args 与 slice 支持范围")
+            .contains(
+                "LOAD、STORE、SWITCH 与 ARRAY_LENGTH 不使用该参数",
+                "裸 ARRAYLENGTH",
+                "ARRAY_LENGTH 不使用该参数",
+            )
+    }
+
+    @Nested
+    @DisplayName("真实 Test.class 字节码场景")
+    inner class RealTestFixtureBytecodeScenarios {
+        @Test
+        @DisplayName("Redirect JUMP 应在真实递归方法中替换条件跳转")
+        fun redirectJumpInRecursiveMethodFallsBackToBaseCase() {
+            // Given
+            AsmRegistry.register(TestRecursiveJumpRedirectMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeRecursiveMethod(instance, 5)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: recursiveMethod(5) 原本会进入递归分支，Redirect JUMP 改写为 false 后应落到 base case")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("WrapOperation JUMP 应在真实递归方法中可调用原条件并覆盖结果")
+        fun wrapOperationJumpInRecursiveMethodCanCallOriginalAndOverrideBranch() {
+            // Given
+            AsmRegistry.register(TestRecursiveWrapOperationJumpMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeRecursiveMethod(instance, 5)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: handler 调用原 JUMP 判断后覆盖为 false，recursiveMethod(5) 应停止在 base case")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("WrapWithCondition JUMP 应在真实递归方法中阻止原条件跳转")
+        fun wrapWithConditionJumpInRecursiveMethodCanDenyOriginalBranch() {
+            // Given
+            AsmRegistry.register(TestRecursiveWrapConditionJumpMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeRecursiveMethod(instance, 5)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: WrapWithCondition 返回 false 后应拒绝 IF_ICMPGT 原跳转，递归方法返回 base case")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("ModifyExpressionValue LOAD 应在真实局部变量表中只改写 second 读取")
+        fun modifyExpressionValueLoadNameSecondInTestClassOnlyChangesReturnRead() {
+            // Given
+            AsmRegistry.register(ModifyExpressionValueTestLoadSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: first 局部变量保持原值，只有 return 表达式读取 second 时被 ModifyExpressionValue 改写")
+                .isEqualTo("value-first:expr-value-second")
+        }
+
+        @Test
+        @DisplayName("ModifyExpressionValue STORE 应在真实局部变量表中只改写 second 写入")
+        fun modifyExpressionValueStoreNameSecondInTestClassOnlyChangesStoredValue() {
+            // Given
+            AsmRegistry.register(ModifyExpressionValueTestStoreSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: first 写入保持原值，只有 second 的 STORE 表达式值被 ModifyExpressionValue 改写")
+                .isEqualTo("value-first:store-value-second")
+        }
+
+        @Test
+        @DisplayName("Redirect LOAD 应在真实局部变量表中只替换 second 读取")
+        fun redirectLoadNameSecondInTestClassOnlyChangesReturnRead() {
+            // Given
+            AsmRegistry.register(RedirectTestLoadSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Redirect LOAD 的 name=second 只替换 second 的返回读取，不应污染 first")
+                .isEqualTo("value-first:redirect-value-second")
+        }
+
+        @Test
+        @DisplayName("Redirect STORE 应在真实局部变量表中只替换 second 写入")
+        fun redirectStoreNameSecondInTestClassOnlyChangesStoredValue() {
+            // Given
+            AsmRegistry.register(RedirectTestStoreSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Redirect STORE 的 name=second 只替换 second 写入值，first 应保持 value-first")
+                .isEqualTo("value-first:redirect-store-value-second")
+        }
+
+        @Test
+        @DisplayName("WrapOperation LOAD 应在真实局部变量表中包裹 second 读取")
+        fun wrapOperationLoadNameSecondInTestClassCanCallOriginalRead() {
+            // Given
+            AsmRegistry.register(WrapOperationTestLoadSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: WrapOperation LOAD 应通过 Operation 读取原 second，再只改写返回表达式中的 second")
+                .isEqualTo("value-first:wrap-value-second")
+        }
+
+        @Test
+        @DisplayName("WrapOperation STORE 应在真实局部变量表中包裹 second 写入")
+        fun wrapOperationStoreNameSecondInTestClassCanCallOriginalStore() {
+            // Given
+            AsmRegistry.register(WrapOperationTestStoreSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: WrapOperation STORE 应通过 Operation 写入替换后的 second，first 保持原始写入")
+                .isEqualTo("value-first:wrap-store-value-second")
+        }
+
+        private fun newTransformedTestFixtureInstance(): Any {
+            val clazz = transformAndLoadTestFixture()
+            return clazz.getDeclaredConstructor().newInstance()
+        }
+
+        private fun invokeRecursiveMethod(
+            instance: Any,
+            value: Int,
+        ): Int =
+            instance.javaClass
+                .getMethod("recursiveMethod", Int::class.javaPrimitiveType)
+                .invoke(instance, value) as Int
+
+        private fun invokeLocalNameDiscriminator(
+            instance: Any,
+            value: String,
+        ): String =
+            instance.javaClass
+                .getMethod("localNameDiscriminatorTest", String::class.java)
+                .invoke(instance, value) as String
     }
 
     @Test
@@ -13902,6 +14178,25 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("Test")
+    object TestRecursiveWrapConditionJumpMixin {
+        @WrapWithCondition(
+            method = "recursiveMethod(I)I",
+            at = At(value = InjectionPoint.JUMP, target = "IF_ICMPGT"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldJump(
+            original: Boolean,
+            n: Int,
+        ): Boolean {
+            original.hashCode()
+            n.hashCode()
+            return false
+        }
+    }
+
     @AsmMixin("JumpOperationTarget")
     object WrapConditionGotoMixin {
         @WrapWithCondition(
@@ -14195,6 +14490,30 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "store-$original"
     }
 
+    @AsmMixin("Test")
+    object ModifyExpressionValueTestLoadSecondNameMixin {
+        @ModifyExpressionValue(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=second"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expr-$original"
+    }
+
+    @AsmMixin("Test")
+    object ModifyExpressionValueTestStoreSecondNameMixin {
+        @ModifyExpressionValue(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=second"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "store-$original"
+    }
+
     @AsmMixin("LoadExpressionValueTarget")
     object RedirectLoadMixin {
         @Redirect(
@@ -14238,6 +14557,30 @@ class FrameworkReliabilityTest {
         @Redirect(
             method = "value()Ljava/lang/String;",
             at = At(value = InjectionPoint.STORE, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-store-$original"
+    }
+
+    @AsmMixin("Test")
+    object RedirectTestLoadSecondNameMixin {
+        @Redirect(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=second"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-$original"
+    }
+
+    @AsmMixin("Test")
+    object RedirectTestStoreSecondNameMixin {
+        @Redirect(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=second"]),
             require = 1,
             allow = 1,
         )
@@ -15806,6 +16149,25 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("Test")
+    object TestRecursiveJumpRedirectMixin {
+        @Redirect(
+            method = "recursiveMethod(I)I",
+            at = At(value = InjectionPoint.JUMP, target = "IF_ICMPGT"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            original: Boolean,
+            n: Int,
+        ): Boolean {
+            original.hashCode()
+            n.hashCode()
+            return false
+        }
+    }
+
     @AsmMixin("JumpOperationTarget")
     object UntargetedJumpRedirectMixin {
         @Redirect(
@@ -15940,6 +16302,25 @@ class FrameworkReliabilityTest {
         ): Boolean {
             value.hashCode()
             return forceNegative || operation.call(original)
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestRecursiveWrapOperationJumpMixin {
+        @WrapOperation(
+            method = "recursiveMethod(I)I",
+            at = At(value = InjectionPoint.JUMP, target = "IF_ICMPGT"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: Boolean,
+            operation: Operation<Boolean>,
+            n: Int,
+        ): Boolean {
+            n.hashCode()
+            return operation.call(original) && false
         }
     }
 
@@ -16615,6 +16996,36 @@ class FrameworkReliabilityTest {
         @WrapOperation(
             method = "value()Ljava/lang/String;",
             at = At(value = InjectionPoint.STORE, args = ["name=target"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = operation.call("wrap-store-$original")
+    }
+
+    @AsmMixin("Test")
+    object WrapOperationTestLoadSecondNameMixin {
+        @WrapOperation(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["name=second"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: String,
+            operation: Operation<String>,
+        ): String = "wrap-${operation.call(original)}"
+    }
+
+    @AsmMixin("Test")
+    object WrapOperationTestStoreSecondNameMixin {
+        @WrapOperation(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name=second"]),
             require = 1,
             allow = 1,
         )
@@ -26146,6 +26557,22 @@ class FrameworkReliabilityTest {
                 }
             }
         return loader.loadClass(primaryClassName)
+    }
+
+    private fun requiredSection(
+        source: String,
+        startMarker: String,
+        endMarker: String,
+    ): String {
+        val start = source.indexOf(startMarker)
+        assertThat(start)
+            .`as`("Given: 文档段落起始锚点应存在，避免锚点变化后扩大搜索范围")
+            .isGreaterThanOrEqualTo(0)
+        val end = source.indexOf(endMarker, start + startMarker.length)
+        assertThat(end)
+            .`as`("Given: 文档段落结束锚点应存在且位于起始锚点之后")
+            .isGreaterThan(start)
+        return source.substring(start, end)
     }
 
     private fun transformAndLoadTestFixture(): Class<*> {

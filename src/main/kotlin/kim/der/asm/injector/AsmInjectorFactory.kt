@@ -130,9 +130,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 操作点定位；当前支持 INVOKE、FIELD、FIELD_ASSIGN、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
+     * @param at 操作点定位；当前支持 INVOKE、FIELD、FIELD_ASSIGN、NEW、CAST、INSTANCEOF、ARRAY_LENGTH、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前调用、字段、数组、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
+     * @param slice 切片范围；当前调用、字段、数组、裸 ARRAYLENGTH、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
      * 操作包裹支持 INVOKE 边界切片
      * @return WrapOperation 注入器
      *
@@ -152,9 +152,9 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param at 调用点定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW
+     * @param at 调用点定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、ARRAY_LENGTH、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW
      * @param ordinal 匹配点序号；负数表示处理全部匹配点
-     * @param slice 切片范围；当前 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW 条件包裹支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、ARRAY_LENGTH、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW 条件包裹支持 INVOKE 边界切片
      * @return WrapWithCondition 注入器
      *
      * @author Dr (dr@der.kim)
@@ -232,12 +232,12 @@ object AsmInjectorFactory {
      *
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
-     * @param target 目标调用、构造器、字段、构造类型、类型签名、跳转操作码、常量文本或直接构造异常类型；LOAD、STORE 与 SWITCH 不使用该参数
+     * @param target 目标调用、构造器、字段、构造类型、类型签名、跳转操作码、常量文本或直接构造异常类型；LOAD、STORE、SWITCH 与 ARRAY_LENGTH 不使用该参数
      * @param injectionPoint Redirect 的定位点类型
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向支持
+     * @param slice 切片范围；当前方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、裸 ARRAYLENGTH、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向支持
      * INVOKE 边界切片
-     * @param args 调用点附加参数；数组模式支持 `array=get`、`array=set` 与 `array=length`，LOAD / STORE 支持 `index=N` 与 `var=N` 槽位过滤
+     * @param args 调用点附加参数；数组模式支持 `array=get`、`array=set` 与 `array=length`，LOAD / STORE 支持 `index=N` 与 `var=N` 槽位过滤，ARRAY_LENGTH 不使用该参数
      * @return Redirect 注入器
      *
      * @author Dr (dr@der.kim)
