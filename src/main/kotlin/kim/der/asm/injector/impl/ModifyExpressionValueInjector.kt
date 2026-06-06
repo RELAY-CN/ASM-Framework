@@ -51,7 +51,8 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.FIELD_ASSIGN] 可匹配 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，省略字段目标时会按 handler 首参与返回类型筛选兼容字段写入；
  * [InjectionPoint.FIELD] 也可通过 `array=get` 匹配数组元素读取值，通过 `array=length` 匹配数组长度值；
  * [InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 匹配数组元素写入前的待写入值，
- * [InjectionPoint.ARRAY_LENGTH] 会直接匹配任意 `ARRAYLENGTH` 指令产生的 `Int` 长度结果，不要求数组来自字段读取；
+ * [InjectionPoint.ARRAY_LENGTH] 会直接匹配任意 `ARRAYLENGTH` 指令产生的 `Int` 长度结果，不要求数组来自字段读取，
+ * 且不使用 [At.target] 或 [At.args]；
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 可显式匹配普通调用或按 bootstrap owner、动态调用名、bootstrap 名
  * 以及动态调用点描述符匹配 `invokedynamic` 返回值；未指定调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；
  * [InjectionPoint.NEW] 匹配对象构造完成后的实例，未指定类型目标时，会按 handler 首参与返回类型筛选兼容的 `NEW` 候选；
@@ -444,6 +445,12 @@ class ModifyExpressionValueInjector(
         if (at.target.isNotBlank()) {
             throw IllegalArgumentException(
                 "@ModifyExpressionValue ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+        }
+        if (at.args.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "@ModifyExpressionValue ARRAY_LENGTH does not use at.args; " +
+                    "use FIELD with array=length for array field matching",
             )
         }
 

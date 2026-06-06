@@ -52,6 +52,9 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.Arguments
+import org.junit.jupiter.params.provider.MethodSource
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.MethodVisitor
@@ -66,6 +69,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.jar.JarEntry
 import java.util.jar.JarOutputStream
+import java.util.stream.Stream
 
 class FrameworkReliabilityTest {
     @AfterEach
@@ -213,12 +217,18 @@ class FrameworkReliabilityTest {
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
         // Given
+        val readme = Files.readString(Path.of("README.md"))
         val api = Files.readString(Path.of("API.md"))
         val guide = Files.readString(Path.of("GUIDE.md"))
+        val migration = Files.readString(Path.of("REDIRECTION_MIGRATION.md"))
         val asmMixinKDoc =
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
         val asmInjectKDoc =
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
+        val readmeArrayLengthSummary =
+            readme
+                .substringAfter("- **强大的注入点支持**")
+                .substringBefore("- **注入命中数契约**")
         val redirectArraySection =
             api
                 .substringAfter("`@Redirect` 可在")
@@ -245,8 +255,27 @@ class FrameworkReliabilityTest {
             guide
                 .substringAfter("引用类型参数可使用精确类型")
                 .substringBefore("\n\n### 场景 10")
+        val apiBareArrayLengthSection =
+            api
+                .substringAfter("非字段来源的裸 `ARRAYLENGTH` 使用 `ARRAY_LENGTH`")
+                .substringBefore("`LOAD` 模式")
+        val guideRedirectBareArrayLengthSection =
+            guide
+                .substringAfter("裸 `ARRAYLENGTH` 使用 `at.value = InjectionPoint.ARRAY_LENGTH`")
+                .substringBefore("局部变量读取使用")
+        val guideWrapConditionBareArrayLengthSection =
+            guide
+                .substringAfter("数组长度读取使用")
+                .substringBefore("局部变量读取使用")
+        val migrationBareArrayLengthSection =
+            migration
+                .substringAfter("若旧逻辑不限定数组来自字段读取")
+                .substringBefore("### 3. 参数与 receiver 迁移")
 
         // Then
+        assertThat(readmeArrayLengthSummary)
+            .`as`("Then: README 能力摘要应提示裸 ARRAY_LENGTH 与字段来源数组长度是两个不同定位契约")
+            .contains("裸数组长度使用的 ARRAY_LENGTH")
         assertThat(redirectArraySection)
             .`as`("Then: @Redirect 数组写入必须绑定 FIELD_ASSIGN，避免把 array=set 误导为 FIELD 定位")
             .contains("`FIELD_ASSIGN` 目标上使用 `args = [\"array=set\"]`")
@@ -300,6 +329,25 @@ class FrameworkReliabilityTest {
                 "`SWITCH`",
                 "`THROW`",
                 "`array=set` 跟随 `FIELD_ASSIGN`",
+            )
+        assertThat(apiBareArrayLengthSection)
+            .`as`("Then: API 应说明裸 ARRAY_LENGTH 不消费 At.target 或 At.args，并引导字段来源长度继续使用 FIELD + array=length")
+            .contains(
+                "不使用 `At.target` 或 `At.args`",
+                "字段来源数组长度继续使用 `FIELD + at.args = [\"array=length\"]`",
+            )
+        assertThat(guideRedirectBareArrayLengthSection)
+            .`as`("Then: GUIDE 的 Redirect 段应说明裸 ARRAY_LENGTH 不消费 At.target 或 At.args")
+            .contains("不使用 `At.target` 或 `At.args`")
+        assertThat(guideWrapConditionBareArrayLengthSection)
+            .`as`("Then: GUIDE 的 WrapWithCondition 段应说明裸 ARRAY_LENGTH 不消费 At.target 或 At.args")
+            .contains("裸 `ARRAYLENGTH`", "不使用 `At.target` 或 `At.args`")
+        assertThat(migrationBareArrayLengthSection)
+            .`as`("Then: 迁移文档应把字段来源数组长度和裸 ARRAY_LENGTH 的配置边界讲清楚")
+            .contains(
+                "`At(value = InjectionPoint.ARRAY_LENGTH)`",
+                "不使用 `At.target` 或 `At.args`",
+                "`FIELD + args = [\"array=length\"]`",
             )
     }
 
@@ -3625,6 +3673,27 @@ class FrameworkReliabilityTest {
             )
     }
 
+    @ParameterizedTest(name = "{0} 直接 ARRAY_LENGTH 声明 At.args 时应快速失败")
+    @MethodSource("arrayLengthInstructionWithArgsCases")
+    @DisplayName("直接 ARRAY_LENGTH 不应静默忽略 At.args")
+    fun arrayLengthInstructionRejectsAtArgs(
+        annotationName: String,
+        mixinClass: Class<*>,
+        expectedRootCauseMessage: String,
+    ) {
+        // Given
+        AsmRegistry.register(mixinClass)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        }.`as`(
+            "Then: $annotationName 直接 ARRAY_LENGTH 不应消费 at.args；字段来源数组长度必须继续使用 FIELD + array=length",
+        )
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(expectedRootCauseMessage)
+    }
+
     @Test
     @DisplayName("Redirect 应能直接替换局部数组 ARRAYLENGTH")
     fun redirectAtArrayLengthInstructionReplacesLocalArrayLength() {
@@ -3677,6 +3746,108 @@ class FrameworkReliabilityTest {
         assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
             .`as`("Then: WrapWithCondition ARRAY_LENGTH 返回 false 时应把本次数组长度结果替换为 Int 默认值")
             .isEqualTo(0)
+    }
+
+    @Test
+    @DisplayName("Redirect ARRAY_LENGTH 声明 at.target 时应快速失败")
+    fun redirectAtArrayLengthInstructionRejectsTarget() {
+        // Given
+        AsmRegistry.register(RedirectArrayLengthInstructionWithTargetMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        }.`as`("Then: Redirect ARRAY_LENGTH 不应静默忽略 at.target，字段来源数组长度应继续使用 FIELD + array=length")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@Redirect ARRAY_LENGTH does not use target; use FIELD with array=length for array field matching",
+            )
+    }
+
+    @Test
+    @DisplayName("WrapOperation ARRAY_LENGTH 声明 at.target 时应快速失败")
+    fun wrapOperationAtArrayLengthInstructionRejectsTarget() {
+        // Given
+        AsmRegistry.register(WrapOperationArrayLengthInstructionWithTargetMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        }.`as`("Then: WrapOperation ARRAY_LENGTH 不应静默忽略 at.target，字段来源数组长度应继续使用 FIELD + array=length")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@WrapOperation ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+    }
+
+    @Test
+    @DisplayName("WrapWithCondition ARRAY_LENGTH 声明 at.target 时应快速失败")
+    fun wrapWithConditionAtArrayLengthInstructionRejectsTarget() {
+        // Given
+        AsmRegistry.register(WrapWithConditionArrayLengthInstructionWithTargetMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        }.`as`("Then: WrapWithCondition ARRAY_LENGTH 不应静默忽略 at.target，字段来源数组长度应继续使用 FIELD + array=length")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@WrapWithCondition ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+    }
+
+    @Test
+    @DisplayName("Redirect ARRAY_LENGTH 应支持 slice 限定裸数组长度")
+    fun redirectAtArrayLengthInstructionSliceLimitsBareLengthsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(RedirectArrayLengthInstructionSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceLocalArrayLengthTarget", sliceLocalArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceLocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countSelected").invoke(instance))
+            .`as`("Then: slice 只应重定向边界内的裸 ARRAYLENGTH，边界外长度仍保持原值")
+            .isEqualTo(10)
+    }
+
+    @Test
+    @DisplayName("WrapOperation ARRAY_LENGTH 应支持 slice 限定裸数组长度")
+    fun wrapOperationAtArrayLengthInstructionSliceLimitsBareLengthsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(WrapOperationArrayLengthInstructionSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceLocalArrayLengthTarget", sliceLocalArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceLocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countSelected").invoke(instance))
+            .`as`("Then: slice 只应包裹边界内的裸 ARRAYLENGTH，Operation.call 不应影响边界外长度")
+            .isEqualTo(10)
+    }
+
+    @Test
+    @DisplayName("WrapWithCondition ARRAY_LENGTH 应支持 slice 限定裸数组长度")
+    fun wrapWithConditionAtArrayLengthInstructionSliceLimitsBareLengthsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(WrapWithConditionArrayLengthInstructionSliceMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("SliceLocalArrayLengthTarget", sliceLocalArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceLocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countSelected").invoke(instance))
+            .`as`("Then: slice 内 ARRAYLENGTH 被条件丢弃时应替换为 0，slice 外长度仍保持原值")
+            .isEqualTo(3)
     }
 
     @Test
@@ -14292,6 +14463,19 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("LocalArrayLengthTarget")
+    object ModifyExpressionValueArrayLengthInstructionWithArgsMixin {
+        @ModifyExpressionValue(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
     object RedirectArrayLengthInstructionMixin {
         @Redirect(
             method = "countWithBonus(I)I",
@@ -14304,6 +14488,48 @@ class FrameworkReliabilityTest {
             array: Any,
             bonus: Int,
         ): Int = java.lang.reflect.Array.getLength(array) + bonus
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object RedirectArrayLengthInstructionWithArgsMixin {
+        @Redirect(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun redirect(array: Any): Int = java.lang.reflect.Array.getLength(array)
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object RedirectArrayLengthInstructionWithTargetMixin {
+        @Redirect(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                target = "LocalArrayLengthTarget.names:[Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun redirect(array: Any): Int = java.lang.reflect.Array.getLength(array)
+    }
+
+    @AsmMixin("SliceLocalArrayLengthTarget")
+    object RedirectArrayLengthInstructionSliceMixin {
+        @Redirect(
+            method = "countSelected()I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(array: Any): Int = java.lang.reflect.Array.getLength(array) + 5
     }
 
     @AsmMixin("LocalArrayLengthTarget")
@@ -14323,6 +14549,57 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("LocalArrayLengthTarget")
+    object WrapOperationArrayLengthInstructionWithArgsMixin {
+        @WrapOperation(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Any,
+            operation: Operation<Int>,
+        ): Int = operation.call(array)
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object WrapOperationArrayLengthInstructionWithTargetMixin {
+        @WrapOperation(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                target = "LocalArrayLengthTarget.names:[Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            array: Any,
+            operation: Operation<Int>,
+        ): Int = operation.call(array)
+    }
+
+    @AsmMixin("SliceLocalArrayLengthTarget")
+    object WrapOperationArrayLengthInstructionSliceMixin {
+        @WrapOperation(
+            method = "countSelected()I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Any,
+            operation: Operation<Int>,
+        ): Int = operation.call(array) + 5
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
     object WrapWithConditionArrayLengthInstructionMixin {
         @WrapWithCondition(
             method = "countWithBonus(I)I",
@@ -14335,6 +14612,48 @@ class FrameworkReliabilityTest {
             length: Int,
             bonus: Int,
         ): Boolean = length + bonus < 0
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object WrapWithConditionArrayLengthInstructionWithArgsMixin {
+        @WrapWithCondition(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun keep(length: Int): Boolean = length >= 0
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object WrapWithConditionArrayLengthInstructionWithTargetMixin {
+        @WrapWithCondition(
+            method = "count()I",
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                target = "LocalArrayLengthTarget.names:[Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun keep(length: Int): Boolean = length >= 0
+    }
+
+    @AsmMixin("SliceLocalArrayLengthTarget")
+    object WrapWithConditionArrayLengthInstructionSliceMixin {
+        @WrapWithCondition(
+            method = "countSelected()I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            slice = Slice(
+                from = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+                to = At(value = InjectionPoint.INVOKE, target = "java/lang/String.toString()Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun keep(length: Int): Boolean = length < 0
     }
 
     @AsmMixin("ArrayAccessTarget")
@@ -23595,6 +23914,39 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun sliceLocalArrayLengthTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceLocalArrayLengthTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "countSelected", "()I", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ICONST_3)
+            visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/String")
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitVarInsn(Opcodes.ISTORE, 1)
+            visitLdcInsn(" start ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitInsn(Opcodes.ICONST_2)
+            visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_INT)
+            visitInsn(Opcodes.ARRAYLENGTH)
+            visitVarInsn(Opcodes.ISTORE, 2)
+            visitLdcInsn(" end ")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "toString", "()Ljava/lang/String;", false)
+            visitInsn(Opcodes.POP)
+            visitVarInsn(Opcodes.ILOAD, 1)
+            visitVarInsn(Opcodes.ILOAD, 2)
+            visitInsn(Opcodes.IADD)
+            visitInsn(Opcodes.IRETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun sliceArrayExpressionValueTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceArrayExpressionValueTarget", null, "java/lang/Object", null)
@@ -25235,6 +25587,35 @@ class FrameworkReliabilityTest {
     }
 
     companion object {
+        @JvmStatic
+        fun arrayLengthInstructionWithArgsCases(): Stream<Arguments> =
+            Stream.of(
+                Arguments.of(
+                    "ModifyExpressionValue",
+                    ModifyExpressionValueArrayLengthInstructionWithArgsMixin::class.java,
+                    "@ModifyExpressionValue ARRAY_LENGTH does not use at.args; " +
+                        "use FIELD with array=length for array field matching",
+                ),
+                Arguments.of(
+                    "Redirect",
+                    RedirectArrayLengthInstructionWithArgsMixin::class.java,
+                    "@Redirect ARRAY_LENGTH does not use at.args; " +
+                        "use FIELD with array=length for array field matching",
+                ),
+                Arguments.of(
+                    "WrapOperation",
+                    WrapOperationArrayLengthInstructionWithArgsMixin::class.java,
+                    "@WrapOperation ARRAY_LENGTH does not use at.args; " +
+                        "use FIELD with array=length for array field matching",
+                ),
+                Arguments.of(
+                    "WrapWithCondition",
+                    WrapWithConditionArrayLengthInstructionWithArgsMixin::class.java,
+                    "@WrapWithCondition ARRAY_LENGTH does not use at.args; " +
+                        "use FIELD with array=length for array field matching",
+                ),
+            )
+
         @JvmStatic
         fun bootstrapVoidInvokeDynamic(
             lookup: java.lang.invoke.MethodHandles.Lookup,

@@ -51,7 +51,8 @@ import java.lang.reflect.Modifier
  * handler 只接收读取出的字段值，不接收 `GETFIELD` receiver，不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.FIELD] 也可通过 [At.args] 中的 `array=get` 或 `array=length` 匹配目标数组字段后的数组元素读取或数组长度读取；
  * handler 分别只接收已读取的元素值或 `Int` 长度，不接收数组引用或索引。
- * [InjectionPoint.ARRAY_LENGTH] 可直接条件保留非字段来源的裸 `ARRAYLENGTH` 结果，handler 同样接收 `Int` 长度值。
+ * [InjectionPoint.ARRAY_LENGTH] 可直接条件保留非字段来源的裸 `ARRAYLENGTH` 结果，handler 同样接收 `Int` 长度值，
+ * 且不使用 [At.target] 或 [At.args]。
  * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选
  * 兼容的字段写入，且不兼容候选不会计入 [WrapWithCondition.ordinal] 或命中数。
  * [InjectionPoint.LOAD] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName`
@@ -72,10 +73,10 @@ import java.lang.reflect.Modifier
  * 如需按构造完成后的对象决定是否保留表达式，应使用 [InjectionPoint.NEW]。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * 条件包裹使用
  * INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
@@ -144,7 +145,7 @@ class WrapWithConditionInjector(
             InjectionPoint.SWITCH -> injectSwitch(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapWithCondition supports only INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, CONSTANT, JUMP, SWITCH and THROW injection points",
+                "@WrapWithCondition supports only INVOKE, INVOKE_ASSIGN, FIELD, FIELD_ASSIGN, LOAD, STORE, NEW, CAST, INSTANCEOF, ARRAY_LENGTH, CONSTANT, JUMP, SWITCH and THROW injection points",
             )
         }
     }
@@ -605,6 +606,12 @@ class WrapWithConditionInjector(
         if (at.target.isNotBlank()) {
             throw IllegalArgumentException(
                 "@WrapWithCondition ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+        }
+        if (at.args.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapWithCondition ARRAY_LENGTH does not use at.args; " +
+                    "use FIELD with array=length for array field matching",
             )
         }
 

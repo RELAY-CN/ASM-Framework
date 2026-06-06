@@ -47,7 +47,7 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.FIELD_ASSIGN] 字段写入。[InjectionPoint.FIELD] 可通过 `array=get` 包裹数组元素读取，
  * 通过 `array=length` 包裹数组长度读取；[InjectionPoint.FIELD_ASSIGN] 可通过 `array=set` 包裹数组元素写入；
  * [InjectionPoint.ARRAY_LENGTH] 可直接包裹非字段来源的裸 `ARRAYLENGTH`，handler 首参按 `Any` / `Object`
- * 接收数组引用并通过 `Operation<Int>` 调用原长度；
+ * 接收数组引用并通过 `Operation<Int>` 调用原长度，且不使用 [At.target] 或 [At.args]；
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 栈参数、[Operation] 位置与返回类型筛选兼容的普通调用、
  * `invokedynamic` 调用或构造器调用，且不兼容候选不会计入 [WrapOperation.ordinal] 或命中数；
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 字段 owner 参数、[Operation] 位置与返回类型筛选兼容的字段读取，
@@ -72,7 +72,7 @@ import java.lang.reflect.Modifier
  * 与 [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW]
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
- * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、
+ * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.JUMP]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用 INVOKE 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -140,7 +140,7 @@ class WrapOperationInjector(
             InjectionPoint.CONSTANT -> injectConstant(target)
             InjectionPoint.THROW -> injectThrow(target)
             else -> throw IllegalArgumentException(
-                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, LOAD, STORE, JUMP, SWITCH, CONSTANT and THROW injection points",
+                "@WrapOperation currently supports only INVOKE, FIELD, FIELD_ASSIGN, NEW, CAST, INSTANCEOF, ARRAY_LENGTH, LOAD, STORE, JUMP, SWITCH, CONSTANT and THROW injection points",
             )
         }
 
@@ -527,6 +527,12 @@ class WrapOperationInjector(
         if (at.target.isNotBlank()) {
             throw IllegalArgumentException(
                 "@WrapOperation ARRAY_LENGTH does not use at.target; use FIELD with array=length for array field matching",
+            )
+        }
+        if (at.args.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "@WrapOperation ARRAY_LENGTH does not use at.args; " +
+                    "use FIELD with array=length for array field matching",
             )
         }
 

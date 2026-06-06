@@ -45,7 +45,7 @@ import java.lang.reflect.Modifier
  * 但需要将 [injectionPoint] 设置为 [InjectionPoint.FIELD_ASSIGN]。数组元素读取与数组长度重定向通过 [InjectionPoint.FIELD] 与
  * `array=get` / `array=length` 指定；数组元素写入重定向通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`。
  * 上述数组长度会限定数组来源字段；非字段来源的裸 `ARRAYLENGTH` 使用 [InjectionPoint.ARRAY_LENGTH]，
- * handler 首参按 `Any` / `Object` 接收数组引用并返回 `Int`。
+ * handler 首参按 `Any` / `Object` 接收数组引用并返回 `Int`，且不使用目标签名或 [args]。
  * 构造器重定向可通过 [InjectionPoint.INVOKE] 与 `<init>` 目标匹配，也可通过 [InjectionPoint.NEW]
  * 与构造类型 internal name 或 binary name 匹配。类型转换使用 [InjectionPoint.CAST] 与类型 internal name 或 binary name 匹配；
  * 未指定类型目标时，会按 handler 返回类型筛选兼容的 `CHECKCAST` 候选。类型判断使用 [InjectionPoint.INSTANCEOF]
@@ -74,8 +74,9 @@ import java.lang.reflect.Modifier
  * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
- * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配数组长度；
- * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 支持 `index=N`、`var=N` 槽位过滤或 `name=localName` 变量名过滤
+ * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配字段来源数组长度；
+ * [InjectionPoint.ARRAY_LENGTH] 直接匹配裸数组长度指令，不使用附加参数；[InjectionPoint.LOAD] / [InjectionPoint.STORE]
+ * 支持 `index=N`、`var=N` 槽位过滤或 `name=localName` 变量名过滤
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -112,12 +113,12 @@ class RedirectInjector(
      * @date 2025-11-24
      */
     override fun injectCount(target: MethodNode): Int {
+        if (isArrayLengthInstructionRedirect()) {
+            return injectArrayLengthInstructionCount(target)
+        }
         val arrayAccessMode = arrayAccessMode()
         if (arrayAccessMode != null) {
             return injectArrayAccessCount(target, arrayAccessMode)
-        }
-        if (isArrayLengthInstructionRedirect()) {
-            return injectArrayLengthInstructionCount(target)
         }
         if (isJumpRedirect()) {
             return injectJumpCount(target)
@@ -560,6 +561,11 @@ class RedirectInjector(
         if (redirectTarget.isNotBlank()) {
             throw IllegalArgumentException(
                 "@Redirect ARRAY_LENGTH does not use target; use FIELD with array=length for array field matching",
+            )
+        }
+        if (args.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "@Redirect ARRAY_LENGTH does not use at.args; use FIELD with array=length for array field matching",
             )
         }
 

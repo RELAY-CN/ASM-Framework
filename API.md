@@ -539,7 +539,8 @@ handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必
 数组元素写入使用 `FIELD_ASSIGN + at.args = ["array=set"]`，handler 先接收数组引用、`Int` 索引、
 待写入元素值与 `Operation<Unit>`，并必须返回 `Unit` / `void`。字段来源的数组长度读取使用 `FIELD + at.args = ["array=length"]`，
 handler 先接收数组引用与 `Operation<Int>`，返回类型必须为 `Int`。非字段来源的裸 `ARRAYLENGTH` 使用 `ARRAY_LENGTH`，
-不使用 `At.target`，handler 首参按 `Any` / `Object` 接收实际数组引用，再接收 `Operation<Int>`，
+不使用 `At.target` 或 `At.args`；字段来源数组长度继续使用 `FIELD + at.args = ["array=length"]`。
+handler 首参按 `Any` / `Object` 接收实际数组引用，再接收 `Operation<Int>`，
 `operation.call(array)` 返回原始长度。字段数组访问当前匹配简单数组字段访问形态，
 即数组引用来自最近的目标 `GETFIELD` / `GETSTATIC`。数组读取、数组长度与数组写入也可用 `slice.from` / `slice.to`
 把候选数组访问或裸 `ARRAYLENGTH` 限制在一段 `INVOKE` 边界之间。

@@ -69,7 +69,8 @@
 返回 `true` 时保留该值，返回 `false` 时框架压入字段类型默认值；该模式不把 `GETFIELD` receiver 传给 handler。
 数组元素读取和字段来源数组长度读取可分别使用 `FIELD + args = ["array=get"]` 与 `FIELD + args = ["array=length"]`；
 handler 只接收已经读取出的元素值或 `Int` 长度，不接收数组引用或索引。若旧逻辑不限定数组来自字段读取，
-可使用 `At(value = InjectionPoint.ARRAY_LENGTH)` 直接匹配裸 `ARRAYLENGTH`。
+可使用 `At(value = InjectionPoint.ARRAY_LENGTH)` 直接匹配裸 `ARRAYLENGTH`，不使用 `At.target` 或 `At.args`；
+字段来源数组长度仍用 `FIELD + args = ["array=length"]`。
 
 方法调用这类“原调用必须执行，但某些上下文下不要采纳返回值”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.INVOKE_ASSIGN, target = "..."))`。handler 首参接收调用完成后的返回值，
