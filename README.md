@@ -58,7 +58,7 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 - **AsmTransformer** - 字节码转换器基类，封装了 ASM Tree API 的常用操作
 - **Injector 系统** - 各种注入器实现，处理不同类型的字节码转换
 
-框架通过注解处理器扫描 `@AsmMixin` 注解，将 Mixin 类注册到 `AsmRegistry` 中。当需要转换类时，`AsmProcessor` 会查找所有相关的
+框架通过 `AsmRegistry` 手动注册，或通过 `AsmScanner` 在运行期扫描 `@AsmMixin` 类后写入注册表。当需要转换类时，`AsmProcessor` 会查找所有相关的
 Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转换规则；同一匹配来源内按 `@AsmMixin(priority = ...)`
 从高到低排序，priority 相同时保持注册顺序，最终生成转换后的字节码。
 

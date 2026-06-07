@@ -270,6 +270,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("README 应把 Mixin 注册描述为运行期注册或扫描")
+    fun readmeDocumentsRuntimeMixinRegistrationInsteadOfAnnotationProcessor() {
+        // Given
+        val readme = Files.readString(Path.of("README.md"))
+        val architectureSection =
+            readme
+                .substringAfter("## 架构设计")
+                .substringBefore("## 工作原理")
+
+        // Then
+        assertThat(architectureSection)
+            .`as`("Then: README 架构说明不应把运行期注册误写成编译期注解处理器")
+            .contains("通过 `AsmRegistry` 手动注册，或通过 `AsmScanner` 在运行期扫描")
+            .doesNotContain("注解处理器")
+    }
+
+    @Test
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
         // Given
