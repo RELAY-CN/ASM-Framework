@@ -706,21 +706,25 @@ class FrameworkReliabilityTest {
             AsmRegistry.register(TestComprehensiveModifyReceiverInvokeMixin::class.java)
             val clazz = transformAndLoadTestFixture()
             val original = clazz.getDeclaredConstructor(String::class.java).newInstance("OriginalReceiver")
-            TestComprehensiveModifyReceiverInvokeMixin.replacement =
-                clazz.getDeclaredConstructor(String::class.java).newInstance("ReplacementReceiver")
+            try {
+                TestComprehensiveModifyReceiverInvokeMixin.replacement =
+                    clazz.getDeclaredConstructor(String::class.java).newInstance("ReplacementReceiver")
 
-            // When
-            val result = invokeComprehensiveTest(original)
+                // When
+                val result = invokeComprehensiveTest(original)
 
-            // Then
-            assertThat(result)
-                .`as`("Then: receiver 迁移只应让 testA0() 使用替换实例，静态调用和其他实例读取仍保持原对象语义")
-                .contains(
-                    "StaticFinalString|ReplacementReceiver|",
-                    "InterfaceImpl-Test|",
-                    "PrivateMethod-OriginalReceiver|",
-                )
-                .doesNotContain("StaticFinalString|OriginalReceiver|")
+                // Then
+                assertThat(result)
+                    .`as`("Then: receiver 迁移只应让 testA0() 使用替换实例，静态调用和其他实例读取仍保持原对象语义")
+                    .isEqualTo(
+                        "StaticFinalString|ReplacementReceiver|ParentMethod|" +
+                            "ChildOverride-ParentOverridable|InterfaceImpl-Test|DefaultMethod|" +
+                            "LambdaSupplier-LambdaFunction-Test-5-30|PrivateMethod-OriginalReceiver|" +
+                            "StaticInnerClass|InnerClass-OriginalReceiver|Generic-Integer-123|First-VALUE2",
+                    )
+            } finally {
+                TestComprehensiveModifyReceiverInvokeMixin.reset()
+            }
         }
 
         @Test
