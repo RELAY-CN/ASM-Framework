@@ -22,8 +22,9 @@ package kim.der.asm.api.annotation
  * ## Handler 参数
  *
  * - HEAD、TAIL、RETURN 与普通指令点注入可在 [CallbackInfo] 后按顺序接收目标方法参数前缀。
- * - [InjectionPoint.RETURN] 注入可在 [CallbackInfo] 后用 [Local] 标记 handler 参数，只读捕获当前 RETURN
- *   指令位置可见的 LocalVariableTable 局部变量；缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败。
+ * - [InjectionPoint.TAIL]、[InjectionPoint.RETURN] 与普通指令点注入可在 [CallbackInfo] 后用 [Local]
+ *   标记 handler 参数，只读捕获当前注入锚点可见的 LocalVariableTable 局部变量；
+ *   缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败。
  * - INVOKE 的 BEFORE/AFTER 与 INVOKE_ASSIGN 注入会先接收匹配普通方法调用、构造器调用或 `invokedynamic`
  *   调用点的方法参数前缀，再继续接收目标方法参数前缀；引用或数组参数
  *   可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。实例调用的 receiver 会被框架保存和恢复，
@@ -155,7 +156,8 @@ annotation class AsmInject(
  * 也可通过 [THROW] 改写即将抛出的异常。
  * [INVOKE_STRING] 只匹配目标方法调用实参中的直接 `LDC String`，不会追踪局部变量、字符串拼接或方法返回值。
  * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
- * [InjectionPoint.RETURN] handler 可通过显式 [Local] 参数只读捕获当前作用域内的局部变量。
+ * [InjectionPoint.TAIL]、[InjectionPoint.RETURN] 与普通指令点注入的 handler
+ * 可通过显式 [Local] 参数只读捕获当前作用域内的局部变量。
  * [CONSTANT] 搭配 [Shift.REPLACE] 时可用 handler 返回值替换原常量加载。
  * 普通 [AsmInject] 的 [STORE] 只表示 `xSTORE` 指令位置；
  * [kim.der.asm.api.annotation.ModifyExpressionValue]、[Redirect]、[WrapOperation] 与 [WrapWithCondition] 的 [STORE] 表示 `xSTORE` 消费前的待写入值；

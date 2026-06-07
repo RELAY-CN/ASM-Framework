@@ -131,8 +131,8 @@ class InstructionPointInjector(
                     instructions.remove(insn)
                 }
                 else -> {
-                    val il = buildHandlerCall(target)
                     val anchor = resolveByAnchor(insns, index, injectAnnotation.at.by)
+                    val il = buildHandlerCall(target, anchor)
                     when (injectAnnotation.at.shift) {
                         Shift.BEFORE, Shift.REPLACE -> instructions.insertBefore(anchor, il)
                         Shift.AFTER -> instructions.insert(anchor, il)
@@ -673,11 +673,16 @@ class InstructionPointInjector(
      * 构造普通指令点注入的 handler 调用指令。
      *
      * 如 handler 需要 [CallbackInfo]，会先创建并暂存 callback；handler 非 `void` 返回值会被丢弃。
+     * [kim.der.asm.api.annotation.Local] 参数会以最终插入锚点为准判断 LocalVariableTable 可见范围。
      *
      * @param target 目标方法
+     * @param localCaptureAnchor 当前实际插入锚点
      * @return 可插入到匹配指令附近的 handler 调用指令列表
      */
-    private fun buildHandlerCall(target: MethodNode): InsnList {
+    private fun buildHandlerCall(
+        target: MethodNode,
+        localCaptureAnchor: AbstractInsnNode,
+    ): InsnList {
         val il = InsnList()
         val callbackVarIndex =
             if (AsmMethodCallGenerator.needsCallbackInfo(asmMethod)) {
@@ -689,7 +694,14 @@ class InstructionPointInjector(
                 null
             }
 
-        AsmMethodCallGenerator.generateMethodCall(il, asmMethod, asmInfo, target, callbackVarIndex)
+        AsmMethodCallGenerator.generateMethodCall(
+            il = il,
+            asmMethod = asmMethod,
+            asmInfo = asmInfo,
+            targetMethod = target,
+            callbackVarIndex = callbackVarIndex,
+            localCaptureAnchor = localCaptureAnchor,
+        )
 
         if (Type.getReturnType(asmMethod) != Type.VOID_TYPE) {
             AsmMethodCallGenerator.generatePopReturnValue(il, asmMethod)
@@ -737,7 +749,14 @@ class InstructionPointInjector(
                 null
             }
 
-        AsmMethodCallGenerator.generateMethodCall(il, asmMethod, asmInfo, target, callbackVarIndex)
+        AsmMethodCallGenerator.generateMethodCall(
+            il = il,
+            asmMethod = asmMethod,
+            asmInfo = asmInfo,
+            targetMethod = target,
+            callbackVarIndex = callbackVarIndex,
+            localCaptureAnchor = constantInsn,
+        )
         addConstantReplacementCastIfNeeded(il, constantInsn, constantType, handlerReturnType)
         return il
     }

@@ -7,9 +7,10 @@ package kim.der.asm.api.annotation
 /**
  * 显式捕获目标方法当前注入点可见的局部变量。
  *
- * 该注解用于普通 [AsmInject] handler 参数。当前实现先支持 [InjectionPoint.RETURN]
- * 注入点的只读局部变量捕获：框架会在当前 RETURN 指令位置读取 LocalVariableTable 中仍处于作用域内的变量，
- * 并把该槽位的当前值传给被标记的 handler 参数。捕获值不会写回目标方法局部变量；需要修改局部变量时应使用
+ * 该注解用于普通 [AsmInject] handler 参数。当前实现支持 [InjectionPoint.TAIL]、[InjectionPoint.RETURN]
+ * 与普通指令点注入的只读局部变量捕获：框架会在当前注入锚点读取 LocalVariableTable
+ * 中仍处于作用域内的变量，并把该槽位的当前值传给被标记的 handler 参数。
+ * 捕获值不会写回目标方法局部变量；需要修改局部变量时应使用
  * [ModifyVariable]、[ModifyExpressionValue]、[Redirect]、[WrapOperation] 或 [WrapWithCondition]。
  *
  * 必须至少设置 [name] / [value] 或 [index] 之一。[name] 与 [value] 语义相同，[name] 优先；

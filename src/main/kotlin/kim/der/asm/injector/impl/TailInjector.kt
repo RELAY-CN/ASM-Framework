@@ -60,6 +60,7 @@ class TailInjector(
                         returnType = returnType,
                         needsCallbackInfo = needsCallbackInfo,
                         cancellable = injectAnnotation?.cancellable == true,
+                        localCaptureAnchor = insn,
                     ),
                 )
                 injectionCount++
@@ -75,6 +76,7 @@ class TailInjector(
                     returnType = returnType,
                     needsCallbackInfo = needsCallbackInfo,
                     cancellable = injectAnnotation?.cancellable == true,
+                    localCaptureAnchor = instructions.last,
                 ),
             )
             injectionCount = 1
@@ -85,6 +87,7 @@ class TailInjector(
                     returnType = returnType,
                     needsCallbackInfo = needsCallbackInfo,
                     cancellable = injectAnnotation?.cancellable == true,
+                    localCaptureAnchor = null,
                 ),
             )
             injectionCount = 1
@@ -103,6 +106,7 @@ class TailInjector(
      * @param returnType 目标方法返回类型
      * @param needsCallbackInfo handler 是否需要回调首参
      * @param cancellable 回调是否允许取消
+     * @param localCaptureAnchor 当前 TAIL 返回点指令，用于 [kim.der.asm.api.annotation.Local] 作用域判断
      * @return 可插入到目标返回点前的指令列表
      *
      * @author Dr (dr@der.kim)
@@ -113,6 +117,7 @@ class TailInjector(
         returnType: Type,
         needsCallbackInfo: Boolean,
         cancellable: Boolean,
+        localCaptureAnchor: AbstractInsnNode?,
     ): InsnList {
         val il = InsnList()
         var returnVarIndex: Int? = null
@@ -147,6 +152,7 @@ class TailInjector(
             asmInfo,
             target,
             callbackVarIndex,
+            localCaptureAnchor = localCaptureAnchor,
         )
 
         // TAIL handler 的返回值不参与目标方法返回，必须始终丢弃以保持返回值栈顶不变。
@@ -258,7 +264,8 @@ class TailInjector(
     /**
      * 分配新的局部变量槽位。
      *
-     * 该方法根据目标方法参数和返回值占用的槽位推算可用位置，适合为 TAIL 注入创建 CallbackInfo 临时变量。
+     * 该方法会避开目标方法参数、LocalVariableTable、已有变量访问指令，以及调用方指定的已分配槽位。
+     * TAIL 注入会先暂存返回值，不能覆盖当前返回点仍可见的业务局部变量。
      *
      * @param target 目标方法
      * @param type 待分配局部变量的类型
@@ -284,10 +291,26 @@ class TailInjector(
             varIndex += if (paramType.sort == Type.LONG || paramType.sort == Type.DOUBLE) 2 else 1
         }
 
-        // 返回类型占用的局部变量数量
-        val returnType = Type.getReturnType(target.desc)
-        if (returnType != Type.VOID_TYPE) {
-            varIndex += if (returnType.sort == Type.LONG || returnType.sort == Type.DOUBLE) 2 else 1
+        varIndex = maxOf(varIndex, target.maxLocals)
+
+        // 查找局部变量表中的最大占用槽位，避免覆盖当前仍可见的业务局部变量。
+        for (localVar in target.localVariables) {
+            val needsDoubleSlot = localVar.desc == "J" || localVar.desc == "D"
+            val end = localVar.index + if (needsDoubleSlot) 2 else 1
+            varIndex = maxOf(varIndex, end)
+        }
+
+        // 查找已有 Var 指令引用的最大槽位，兼容缺失或不完整的 LocalVariableTable。
+        for (insn in target.instructions.toArray()) {
+            if (insn is VarInsnNode) {
+                val needsDoubleSlot =
+                    when (insn.opcode) {
+                        Opcodes.LLOAD, Opcodes.LSTORE, Opcodes.DLOAD, Opcodes.DSTORE -> true
+                        else -> false
+                    }
+                val end = insn.`var` + if (needsDoubleSlot) 2 else 1
+                varIndex = maxOf(varIndex, end)
+            }
         }
 
         if (existingVarIndex != null && existingType != null) {

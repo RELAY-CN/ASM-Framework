@@ -379,13 +379,15 @@ object RemoveInterfacesMixin
 - `inline: Boolean = false` - 是否内联代码；handler 内部普通 try/catch 会随内联字节码一起复制，异常范围只覆盖 handler 自身指令
 
 handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 `CallbackInfoReturnable<T>` 标注返回值类型。
-普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
+普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW`
 指令点注入，可在回调参数后按顺序接收目标方法参数前缀。
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入和 `INVOKE_ASSIGN` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入；`invokedynamic` 调用没有 receiver，handler 参数来自动态调用点描述符。
-`@AsmInject(RETURN)` handler 参数可显式标记 `@Local(name = "localName")`，用于只读观察局部变量。
-`@Local` 只读捕获当前 RETURN 注入点可见的 LocalVariableTable 局部变量，不会写回局部变量槽位；
+`@AsmInject(TAIL/RETURN)` handler 参数可显式标记 `@Local(name = "localName")`，用于只读观察局部变量。
+普通指令点注入也可在 handler 参数上使用 `@Local`，按最终插入锚点判断局部变量作用域；`INVOKE` /
+`INVOKE_ASSIGN` 仍优先使用调用点参数协议，不属于本地变量捕获入口。
+`@Local` 只读捕获当前注入锚点可见的 LocalVariableTable 局部变量，不会写回局部变量槽位；
 缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败。名称捕获依赖目标 class 保留调试变量表；
 变量名不稳定但 LocalVariableTable 仍保留时，可改用 `@Local(index = N)` 按槽位过滤。完全缺少
 LocalVariableTable 时当前无法捕获普通局部变量。需要写回局部变量时应使用
@@ -1140,8 +1142,9 @@ private val aliasField: String? = null
 
 显式捕获普通 `@AsmInject` handler 参数对应的目标方法局部变量。
 
-当前实现支持在 `@AsmInject(RETURN)` handler 参数上使用，用于只读捕获当前 RETURN 注入点可见的
-LocalVariableTable 局部变量。它不会写回局部变量槽位；需要修改局部变量时应使用
+当前实现支持在 `TAIL` / `RETURN` 与普通指令点注入的 handler 参数上使用，用于只读捕获当前注入锚点可见的
+LocalVariableTable 局部变量。它不会写回局部变量槽位；`INVOKE` / `INVOKE_ASSIGN` 注入仍按调用点参数协议传参。
+需要修改局部变量时应使用
 `@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`。
 
 **参数：**
@@ -1491,7 +1494,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(INVOKE_STRING)` 只作为直接字符串常量实参调用点附近的观察 hook，
 不会把字符串实参传给 handler，也可以用
 `at.args = ["ldc=value"]` 或 `["string=value"]` 按调用实参中的直接 `LDC String` 过滤。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
-不会把局部变量值传给 handler，也可以用
+不会自动把局部变量值传给 handler；只读观察同作用域局部变量时可显式使用 `@Local`，也可以用
 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。需要只替换本次读取表达式值时使用 `@ModifyExpressionValue(LOAD)`，需要改写本次写入前栈值并让原 `xSTORE` 继续写入时使用 `@ModifyExpressionValue(STORE)`，需要保留可调用原读取值的操作句柄时使用 `@WrapOperation(LOAD)`，需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时使用 `@WrapOperation(STORE)`，需要读取并写回变量值时使用 `@ModifyVariable`。
 普通 `@AsmInject(NEW)` 只观察对象创建指令，不接收构造完成后的对象；只需要按额外条件决定是否保留构造结果时使用 `@WrapWithCondition(at = At(value = InjectionPoint.NEW, target = "..."))`，handler 首参接收构造完成后的引用，返回 `false` 会把本次构造表达式替换为 `null`。
 普通 `@AsmInject(CAST)` 只在匹配类型转换指令前后插入 handler，不接收也不替换转换结果；需要替换类型转换时使用 `@Redirect`，需要按需调用原转换时使用 `@WrapOperation`，只需要改写转换结果时使用 `@ModifyExpressionValue(at = At(value = InjectionPoint.CAST, target = "..."))`，只需要按额外条件决定是否保留转换结果时使用 `@WrapWithCondition(at = At(value = InjectionPoint.CAST, target = "..."))`。普通 `@AsmInject(INSTANCEOF)` 只在匹配类型判断指令前后插入 handler，不接收也不修改 boolean 结果；需要替换类型判断时使用 `@Redirect`，需要按需调用原判断时使用 `@WrapOperation`，只需要改写类型判断结果时使用
@@ -1533,7 +1536,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 可使用 `FIELD + array=get` 包裹数组元素读取，使用 `FIELD_ASSIGN + array=set` 包裹数组元素写入，使用 `FIELD + array=length` 包裹字段来源数组长度读取；也可使用 `ARRAY_LENGTH` 包裹裸 `ARRAYLENGTH`，handler 接收 `Any` / `Object` 数组引用与 `Operation<Int>`，`operation.call(array)` 返回原始长度。也可使用 `LOAD` 与 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 包裹指定 JVM 局部变量槽位或 LocalVariableTable 变量名的本次读取值，handler 接收 `xLOAD` 读取出的栈顶表达式值与 `Operation<T>`，`operation.call(original)` 返回传入的原读取值，handler 返回值只替换这一次读取结果，不写回槽位；使用 `STORE` 与同样的槽位或名称过滤包裹 `xSTORE` 消费前的待写入栈顶值，handler 返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。
 `@ModifyExpressionValue` 可在 `FIELD_ASSIGN` 目标上改写 `PUTFIELD` / `PUTSTATIC` 消费前的字段待写入值。也可在 `FIELD` 目标上使用 `args = ["array=get"]`，改写紧随目标数组字段后的数组元素读取值；在 `FIELD_ASSIGN` 目标上使用 `args = ["array=set"]`，改写紧随目标数组字段后的 `xASTORE` 待写入元素值；或使用 `FIELD + args = ["array=length"]`，改写紧随目标数组字段后的 `ARRAYLENGTH` 结果。若不需要限定字段来源，可使用 `At(value = InjectionPoint.ARRAY_LENGTH)` 改写任意裸 `ARRAYLENGTH` 的 `Int` 结果，不使用 `At.target` 或 `At.args`。`@ModifyExpressionValue(LOAD)` 可用 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 改写指定槽位或 LocalVariableTable 变量名的本次 `xLOAD` 读取表达式值，不写回局部变量槽位；`@ModifyExpressionValue(STORE)` 可用同样的槽位或名称过滤改写 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。
 普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
-的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会把槽位值传入 handler，也不会写回槽位。
+的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会自动把槽位值传入 handler，也不会写回槽位；只读读取同作用域局部变量时可在 handler 参数上显式使用 `@Local`。
 普通 `@AsmInject(INVOKE_STRING)` 必须且只能使用一个 `args = ["ldc=value"]` 或 `args = ["string=value"]`，只在目标调用的实参栈来源包含直接 `LDC String` 时插入 handler；它不会追踪先保存到局部变量再传入的同值字符串，也不会追踪拼接字符串、方法返回值或 `invokedynamic` 生成的字符串。
 
 **示例：**

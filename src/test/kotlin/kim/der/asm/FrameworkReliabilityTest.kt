@@ -697,6 +697,52 @@ class FrameworkReliabilityTest {
             )
         }
 
+        @Test
+        @DisplayName("@AsmInject TAIL 应在真实局部变量表中只读捕获 second")
+        fun asmInjectTailCanCaptureLocalByNameInTestClassWithoutModifyingReturn() {
+            // Given
+            TestTailLocalSecondNameMixin.reset()
+            AsmRegistry.register(TestTailLocalSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: TAIL 的 @Local 只读捕获不应改变 localNameDiscriminatorTest 的真实业务返回值")
+                .isEqualTo("value-first:value-second")
+            assertThat(TestTailLocalSecondNameMixin.capturedSecond)
+                .`as`("Then: @AsmInject(TAIL) 应在返回点读取当前作用域中的 second")
+                .isEqualTo("value-second")
+            assertThat(TestTailLocalSecondNameMixin.capturedReturn)
+                .`as`("Then: TAIL CallbackInfoReturnable 应继续携带原始返回值")
+                .isEqualTo("value-first:value-second")
+        }
+
+        @Test
+        @DisplayName("@AsmInject LOAD 指令点应在真实局部变量表中只读捕获 first")
+        fun asmInjectLoadPointCanCaptureLocalByNameInTestClassWithoutModifyingRead() {
+            // Given
+            TestLoadPointLocalFirstNameMixin.reset()
+            AsmRegistry.register(TestLoadPointLocalFirstNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 普通 LOAD 指令点的 @Local 只读捕获不应替换 second 的读取结果")
+                .isEqualTo("value-first:value-second")
+            assertThat(TestLoadPointLocalFirstNameMixin.capturedFirst)
+                .`as`("Then: @AsmInject(LOAD) 应在读取 second 的指令点捕获同作用域中的 first")
+                .isEqualTo("value-first")
+            assertThat(TestLoadPointLocalFirstNameMixin.capturedInput)
+                .`as`("Then: @Local 参数之后仍应能继续接收目标方法参数前缀")
+                .isEqualTo("value")
+        }
+
         private fun newTransformedTestFixtureInstance(): Any {
             val clazz = transformAndLoadTestFixture()
             return clazz.getDeclaredConstructor().newInstance()
@@ -916,8 +962,8 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    @DisplayName("公开文档应说明 @AsmInject RETURN 的 @Local 只读捕获契约")
-    fun documentationContractsDescribeAsmInjectReturnLocalCapture() {
+    @DisplayName("公开文档应说明 @AsmInject 的 @Local 只读捕获契约")
+    fun documentationContractsDescribeAsmInjectLocalCapture() {
         // Given
         val readme = Files.readString(Path.of("README.md"))
         val api = Files.readString(Path.of("API.md"))
@@ -942,12 +988,13 @@ class FrameworkReliabilityTest {
         // Then
         assertThat(readme)
             .`as`("Then: README 特性列表应把 @Local 作为普通 @AsmInject 的可用性提升暴露给使用者")
-            .contains("`@AsmInject(RETURN)` 可通过 `@Local` 只读捕获当前作用域内的局部变量")
+            .contains("`@AsmInject(TAIL/RETURN)` 与普通指令点注入可通过 `@Local` 只读捕获当前作用域内的局部变量")
         assertThat(apiAsmInjectSection)
             .`as`("Then: API 的 @AsmInject 段落应说明 @Local 的范围、只读语义和失败方式")
             .contains(
-                "`@AsmInject(RETURN)` handler 参数可显式标记 `@Local(name = \"localName\")`",
-                "`@Local` 只读捕获当前 RETURN 注入点可见的 LocalVariableTable 局部变量",
+                "`@AsmInject(TAIL/RETURN)` handler 参数可显式标记 `@Local(name = \"localName\")`",
+                "普通指令点注入也可在 handler 参数上使用 `@Local`",
+                "`@Local` 只读捕获当前注入锚点可见的 LocalVariableTable 局部变量",
                 "缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败",
             )
         assertThat(guideAsmInjectSection)
@@ -962,16 +1009,17 @@ class FrameworkReliabilityTest {
             .`as`("Then: API 应为新的公开 @Local 参数注解提供独立参考小节")
             .contains(
                 "显式捕获普通 `@AsmInject` handler 参数对应的目标方法局部变量",
+                "`TAIL` / `RETURN` 与普通指令点注入",
                 "`name` / `value` 与 `index` 至少声明一个",
                 "当同时声明名称与槽位时",
                 "两者必须匹配同一个可见局部变量",
             )
         assertThat(asmInjectKDoc)
             .`as`("Then: AsmInject KDoc 应把 @Local 纳入 handler 参数契约")
-            .contains("[Local]", "[InjectionPoint.RETURN] 注入")
+            .contains("[Local]", "[InjectionPoint.TAIL]", "[InjectionPoint.RETURN]", "普通指令点注入")
         assertThat(localKDoc)
             .`as`("Then: Local 注解 KDoc 应说明当前支持范围和只读边界")
-            .contains("[InjectionPoint.RETURN]", "只读局部变量捕获", "[ModifyVariable]")
+            .contains("[InjectionPoint.TAIL]", "[InjectionPoint.RETURN]", "普通指令点", "只读局部变量捕获", "[ModifyVariable]")
     }
 
     @Test
@@ -14770,6 +14818,59 @@ class FrameworkReliabilityTest {
         ) {
             callback.hashCode()
             second.hashCode()
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestTailLocalSecondNameMixin {
+        var capturedSecond: String? = null
+        var capturedReturn: String? = null
+
+        fun reset() {
+            capturedSecond = null
+            capturedReturn = null
+        }
+
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.TAIL,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfoReturnable<String>,
+            @Local(name = "second") second: String,
+        ) {
+            capturedSecond = second
+            capturedReturn = callback.value
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestLoadPointLocalFirstNameMixin {
+        var capturedFirst: String? = null
+        var capturedInput: String? = null
+
+        fun reset() {
+            capturedFirst = null
+            capturedInput = null
+        }
+
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.LOAD,
+            at = At(value = InjectionPoint.LOAD, args = ["name=second"]),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            @Local(name = "first") first: String,
+            input: String,
+        ) {
+            capturedFirst = first
+            capturedInput = input
         }
     }
 

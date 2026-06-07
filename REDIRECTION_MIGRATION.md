@@ -128,6 +128,9 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
   真正想在写入之后读取并写回变量，应迁移到 `@ModifyVariable(at = At(value = InjectionPoint.STORE, ...))`，不要把两种时机混用。
 - `LOAD` / `STORE` 的变量名过滤依赖目标 class 保留 LocalVariableTable；线上混淆或裁剪调试信息时，应优先用 `index=N`
   或 `var=N`，再通过切片和命中数契约降低误命中风险。
+- 如果旧 listener 只是想在返回点或普通指令点旁边读取局部变量做日志、诊断或取消判断，可在普通 `@AsmInject`
+  handler 参数上使用 `@Local` 只读捕获；它不会写回槽位。需要改变局部状态时仍应迁移到
+  `@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`。
 
 字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`。它只匹配调用实参中的直接 `LDC String`，
 且 `At.target` 必须写包含 owner 的 `owner.name(desc)`，
