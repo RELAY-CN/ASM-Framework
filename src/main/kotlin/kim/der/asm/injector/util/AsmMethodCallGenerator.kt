@@ -35,6 +35,7 @@ object AsmMethodCallGenerator {
      * @param targetMethod 目标方法
      * @param callbackVarIndex CallbackInfo 局部变量索引（如果存在）
      * @param targetClassName 目标类 internal name；为空时从 [AsmInfo.targets] 推断
+     * @param localCaptureAnchor 当前注入点指令；非空时允许 handler 参数通过 `@Local` 读取可见局部变量
      * @throws IllegalStateException 参数映射失败时由 [ParameterMapper] 抛出
      *
      * @author Dr (dr@der.kim)
@@ -47,6 +48,7 @@ object AsmMethodCallGenerator {
         targetMethod: MethodNode,
         callbackVarIndex: Int? = null,
         targetClassName: String? = null,
+        localCaptureAnchor: AbstractInsnNode? = null,
     ) {
         val instanceType = Type.getType(asmInfo.asmClass)
         val isKotlinObject = isKotlinObject(asmInfo)
@@ -136,7 +138,23 @@ object AsmMethodCallGenerator {
         val targetClassInternalName =
             targetClassName?.replace('.', '/')
                 ?: asmInfo.targets.firstOrNull()?.replace('.', '/')
-        ParameterMapper.loadParameters(il, targetMethod, asmMethod, needsCallbackInfo, targetClassInternalName)
+        val localCaptureContext =
+            if (localCaptureAnchor != null && targetClassInternalName != null) {
+                ParameterMapper.LocalCaptureContext(
+                    anchor = localCaptureAnchor,
+                    targetClassName = targetClassInternalName.replace('/', '.'),
+                )
+            } else {
+                null
+            }
+        ParameterMapper.loadParameters(
+            il = il,
+            targetMethod = targetMethod,
+            asmMethod = asmMethod,
+            skipCallbackInfo = needsCallbackInfo,
+            targetClassName = targetClassInternalName,
+            localCaptureContext = localCaptureContext,
+        )
 
         // 调用方法
         il.add(

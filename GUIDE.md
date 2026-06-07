@@ -208,6 +208,33 @@ handler 可用 `callback.isCancellable()` 判断当前回调是否允许取消�
 方法，也可使用 `value` 属性、`setTypedReturnValue(value)`、`getTypedReturnValue()` 以及 `getReturnValueI()` 等 primitive getter，
 适合让 handler 签名直接表达目标返回值类型并迁移 Mixin 风格代码。
 
+需要在普通 `@AsmInject` 中只读观察局部变量时，可以在 `RETURN` handler 参数上显式标记 `@Local`：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object ReturnLocalAuditMixin {
+    @AsmInject(
+        method = "format(Ljava/lang/String;)Ljava/lang/String;",
+        target = InjectionPoint.RETURN,
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun afterFormat(
+        callback: CallbackInfoReturnable<String>,
+        @Local(name = "second") second: String,
+        input: String,
+    ) {
+        println("input=$input second=$second result=${callback.value}")
+    }
+}
+```
+
+`@Local` 适合日志、诊断和取消判断这类只读观察局部变量的场景。它读取当前 RETURN 注入点可见的
+LocalVariableTable 局部变量，缺少调试变量表、缺少匹配名称或槽位类型不兼容时会在转换阶段失败；变量名不稳定但
+LocalVariableTable 仍保留时，可改用 `@Local(index = N)` 按槽位过滤。如果需要写回局部变量，应使用
+`@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`。
+
 当目标方法内有多个相同调用、字符串实参调用点、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、switch、常量或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT` 或 `THROW`
 注入限制在一段调用边界内：
 `@ModifyConstant` 还可在常量修改场景中使用字段读写或常量文本作为切片边界。

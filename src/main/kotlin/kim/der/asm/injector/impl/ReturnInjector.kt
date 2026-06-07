@@ -135,6 +135,7 @@ class ReturnInjector(
                     asmInfo,
                     target,
                     callbackVarIndex,
+                    localCaptureAnchor = insn,
                 )
 
                 // RETURN handler 的返回值不参与目标方法结果，目标返回值由 CallbackInfo 或原返回值恢复。

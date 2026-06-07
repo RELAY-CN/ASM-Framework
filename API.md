@@ -384,6 +384,12 @@ handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入和 `INVOKE_ASSIGN` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入；`invokedynamic` 调用没有 receiver，handler 参数来自动态调用点描述符。
+`@AsmInject(RETURN)` handler 参数可显式标记 `@Local(name = "localName")`，用于只读观察局部变量。
+`@Local` 只读捕获当前 RETURN 注入点可见的 LocalVariableTable 局部变量，不会写回局部变量槽位；
+缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败。名称捕获依赖目标 class 保留调试变量表；
+变量名不稳定但 LocalVariableTable 仍保留时，可改用 `@Local(index = N)` 按槽位过滤。完全缺少
+LocalVariableTable 时当前无法捕获普通局部变量。需要写回局部变量时应使用
+`@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`。
 `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。普通 `INVOKE_ASSIGN` 默认在调用完成后插入；需要调用前插入时使用普通 `INVOKE`。`Shift.REPLACE` 对普通 `INVOKE` 按替换原调用处理，
 handler 参数对应原调用参数，返回值需要与原调用返回类型兼容；普通 `INVOKE_STRING` 使用 `At.target` 匹配普通方法调用，并用唯一一个 `at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用实参中的直接 `LDC String`，它不接收或替换该字符串，也不追踪局部变量、字符串拼接、方法返回值或 `invokedynamic`；对普通 `CONSTANT` 按替换原常量加载处理，handler 返回值需要与原常量类型兼容，且不接收原常量值。
 除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD` / `TAIL` / `RETURN`、`INVOKE` 的 `BEFORE` / `AFTER`、`INVOKE_ASSIGN`
@@ -1128,6 +1134,37 @@ private val field: String? = null
 @Final
 @Shadow("actualField")
 private val aliasField: String? = null
+```
+
+### @Local
+
+显式捕获普通 `@AsmInject` handler 参数对应的目标方法局部变量。
+
+当前实现支持在 `@AsmInject(RETURN)` handler 参数上使用，用于只读捕获当前 RETURN 注入点可见的
+LocalVariableTable 局部变量。它不会写回局部变量槽位；需要修改局部变量时应使用
+`@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`。
+
+**参数：**
+
+- `value: String = ""` - 局部变量名的简写别名；当 `name` 为空时使用
+- `name: String = ""` - LocalVariableTable 中的局部变量名
+- `index: Int = -1` - JVM 局部变量槽位；`-1` 表示不按槽位过滤
+
+`name` / `value` 与 `index` 至少声明一个。捕获依赖目标 class 保留 LocalVariableTable，用于判断局部变量
+作用域和类型；缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败。当同时声明名称与槽位时，
+两者必须匹配同一个可见局部变量。
+
+**示例：**
+
+```kotlin
+@AsmInject(method = "format(Ljava/lang/String;)Ljava/lang/String;", target = InjectionPoint.RETURN)
+fun afterReturn(
+    callback: CallbackInfoReturnable<String>,
+    @Local(name = "second") second: String,
+    input: String,
+) {
+    println("input=$input second=$second result=${callback.value}")
+}
 ```
 
 ## 工具类

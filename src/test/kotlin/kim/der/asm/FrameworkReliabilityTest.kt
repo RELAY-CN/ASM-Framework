@@ -16,6 +16,7 @@ import kim.der.asm.api.annotation.CallbackInfoReturnable
 import kim.der.asm.api.annotation.Group
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Invoker
+import kim.der.asm.api.annotation.Local
 import kim.der.asm.api.annotation.ModifyArg
 import kim.der.asm.api.annotation.ModifyArgs
 import kim.der.asm.api.annotation.ModifyConstant
@@ -605,6 +606,97 @@ class FrameworkReliabilityTest {
                 .isEqualTo("value-first:wrap-store-value-second")
         }
 
+        @Test
+        @DisplayName("@AsmInject RETURN 应在真实局部变量表中只读捕获 second")
+        fun asmInjectReturnCanCaptureLocalByNameInTestClassWithoutModifyingReturn() {
+            // Given
+            TestReturnLocalSecondNameMixin.reset()
+            AsmRegistry.register(TestReturnLocalSecondNameMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: @Local 只读捕获不应改变 localNameDiscriminatorTest 的真实业务返回值")
+                .isEqualTo("value-first:value-second")
+            assertThat(TestReturnLocalSecondNameMixin.capturedSecond)
+                .`as`("Then: @Local(name=second) 应在 RETURN 注入点读取当前作用域中的 second")
+                .isEqualTo("value-second")
+            assertThat(TestReturnLocalSecondNameMixin.capturedInput)
+                .`as`("Then: @Local 参数之后仍应能继续按顺序接收目标方法参数前缀")
+                .isEqualTo("value")
+            assertThat(TestReturnLocalSecondNameMixin.capturedReturn)
+                .`as`("Then: CallbackInfoReturnable 应继续携带原始返回值，和 @Local 捕获互不干扰")
+                .isEqualTo("value-first:value-second")
+        }
+
+        @Test
+        @DisplayName("@AsmInject RETURN 应支持按 JVM 槽位只读捕获局部变量")
+        fun asmInjectReturnCanCaptureLocalByIndexInTestClassWithoutNameFilter() {
+            // Given
+            TestReturnLocalSecondIndexMixin.reset()
+            AsmRegistry.register(TestReturnLocalSecondIndexMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: @Local(index=3) 只读取 second 槽位，不应改变方法返回值")
+                .isEqualTo("value-first:value-second")
+            assertThat(TestReturnLocalSecondIndexMixin.capturedSecond)
+                .`as`("Then: 实例方法槽位 0 是 this，input/first/second 依次占用 1/2/3，应捕获 second")
+                .isEqualTo("value-second")
+        }
+
+        @Test
+        @DisplayName("@AsmInject RETURN 捕获缺失局部变量名时应快速失败")
+        fun asmInjectReturnLocalNameMissingInTestClassFailsFast() {
+            // Given
+            AsmRegistry.register(TestReturnMissingLocalNameMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }.hasRootCauseMessage(
+                "@Local(name=missing) cannot find visible local variable for " +
+                    "Test.localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            )
+        }
+
+        @Test
+        @DisplayName("@AsmInject RETURN 捕获未声明名称或槽位时应快速失败")
+        fun asmInjectReturnLocalWithoutDiscriminatorInTestClassFailsFast() {
+            // Given
+            AsmRegistry.register(TestReturnLocalWithoutDiscriminatorMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }.hasRootCauseMessage(
+                "@Local parameter #1 in handler inject must declare name/value or index",
+            )
+        }
+
+        @Test
+        @DisplayName("@AsmInject RETURN 捕获局部变量类型不兼容时应快速失败")
+        fun asmInjectReturnLocalTypeMismatchInTestClassFailsFast() {
+            // Given
+            AsmRegistry.register(TestReturnLocalSecondWrongTypeMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                transformAndLoadTestFixture()
+            }.hasRootCauseMessage(
+                "@Local(name=second) cannot assign visible local variable for " +
+                    "Test.localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String; " +
+                    "to handler parameter #1 I; candidates: second:Ljava/lang/String;@3",
+            )
+        }
+
         private fun newTransformedTestFixtureInstance(): Any {
             val clazz = transformAndLoadTestFixture()
             return clazz.getDeclaredConstructor().newInstance()
@@ -821,6 +913,65 @@ class FrameworkReliabilityTest {
         assertThat(guideModifyVariableSection)
             .`as`("Then: ModifyVariable STORE 应说明它处理的是写入后的槽位状态，而不是写入前栈值")
             .contains("`STORE` 会在匹配的 `xSTORE` 指令后读取刚写入的局部变量，调用 handler，并写回同一槽位")
+    }
+
+    @Test
+    @DisplayName("公开文档应说明 @AsmInject RETURN 的 @Local 只读捕获契约")
+    fun documentationContractsDescribeAsmInjectReturnLocalCapture() {
+        // Given
+        val readme = Files.readString(Path.of("README.md"))
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val asmInjectKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
+        val localKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "Local.kt"))
+        val apiAsmInjectSection =
+            api
+                .substringAfter("### @AsmInject")
+                .substringBefore("### @Overwrite")
+        val guideAsmInjectSection =
+            guide
+                .substringAfter("普通 `@AsmInject` handler 首参可以是 `CallbackInfo`")
+                .substringBefore("### 场景 2: 修改参数与局部变量")
+        val apiLocalSection =
+            api
+                .substringAfter("### @Local")
+                .substringBefore("## 工具类")
+
+        // Then
+        assertThat(readme)
+            .`as`("Then: README 特性列表应把 @Local 作为普通 @AsmInject 的可用性提升暴露给使用者")
+            .contains("`@AsmInject(RETURN)` 可通过 `@Local` 只读捕获当前作用域内的局部变量")
+        assertThat(apiAsmInjectSection)
+            .`as`("Then: API 的 @AsmInject 段落应说明 @Local 的范围、只读语义和失败方式")
+            .contains(
+                "`@AsmInject(RETURN)` handler 参数可显式标记 `@Local(name = \"localName\")`",
+                "`@Local` 只读捕获当前 RETURN 注入点可见的 LocalVariableTable 局部变量",
+                "缺少匹配局部变量、类型不兼容或名称不唯一时会在转换阶段失败",
+            )
+        assertThat(guideAsmInjectSection)
+            .`as`("Then: GUIDE 应给出 @Local 的迁移使用形态，并提示写回变量仍走专用注解")
+            .contains(
+                "@Local(name = \"second\") second: String",
+                "只读观察局部变量",
+                "如果需要写回局部变量，应使用",
+                "`@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`",
+            )
+        assertThat(apiLocalSection)
+            .`as`("Then: API 应为新的公开 @Local 参数注解提供独立参考小节")
+            .contains(
+                "显式捕获普通 `@AsmInject` handler 参数对应的目标方法局部变量",
+                "`name` / `value` 与 `index` 至少声明一个",
+                "当同时声明名称与槽位时",
+                "两者必须匹配同一个可见局部变量",
+            )
+        assertThat(asmInjectKDoc)
+            .`as`("Then: AsmInject KDoc 应把 @Local 纳入 handler 参数契约")
+            .contains("[Local]", "[InjectionPoint.RETURN] 注入")
+        assertThat(localKDoc)
+            .`as`("Then: Local 注解 KDoc 应说明当前支持范围和只读边界")
+            .contains("[InjectionPoint.RETURN]", "只读局部变量捕获", "[ModifyVariable]")
     }
 
     @Test
@@ -14512,6 +14663,114 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "store-$original"
+    }
+
+    @AsmMixin("Test")
+    object TestReturnLocalSecondNameMixin {
+        var capturedSecond: String? = null
+        var capturedInput: String? = null
+        var capturedReturn: String? = null
+
+        fun reset() {
+            capturedSecond = null
+            capturedInput = null
+            capturedReturn = null
+        }
+
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.RETURN,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfoReturnable<String>,
+            @Local(name = "second") second: String,
+            input: String,
+        ) {
+            capturedSecond = second
+            capturedInput = input
+            capturedReturn = callback.value
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestReturnLocalSecondIndexMixin {
+        var capturedSecond: String? = null
+
+        fun reset() {
+            capturedSecond = null
+        }
+
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.RETURN,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfoReturnable<String>,
+            @Local(index = 3) second: String,
+        ) {
+            callback.hashCode()
+            capturedSecond = second
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestReturnMissingLocalNameMixin {
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.RETURN,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfoReturnable<String>,
+            @Local(name = "missing") missing: String,
+        ) {
+            callback.hashCode()
+            missing.hashCode()
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestReturnLocalWithoutDiscriminatorMixin {
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.RETURN,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfoReturnable<String>,
+            @Local local: String,
+        ) {
+            callback.hashCode()
+            local.hashCode()
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestReturnLocalSecondWrongTypeMixin {
+        @AsmInject(
+            method = "localNameDiscriminatorTest(Ljava/lang/String;)Ljava/lang/String;",
+            target = InjectionPoint.RETURN,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(
+            callback: CallbackInfoReturnable<String>,
+            @Local(name = "second") second: Int,
+        ) {
+            callback.hashCode()
+            second.hashCode()
+        }
     }
 
     @AsmMixin("LoadExpressionValueTarget")
