@@ -371,7 +371,7 @@ object RemoveInterfacesMixin
 - `target: InjectionPoint = InjectionPoint.HEAD` - 注入点位置
 - `cancellable: Boolean = false` - 是否允许 handler 调用 `CallbackInfo.cancel()` 或通过 `CallbackInfo.setReturnValue(...)` 触发取消；当前 `HEAD`、`TAIL` 与普通 `INVOKE` / `INVOKE_ASSIGN` 的 `BEFORE` / `AFTER` 注入会据此生成提前返回分支
 - `require: Int = 0` - 最小命中数；大于 0 时实际命中数必须不少于该值。默认仍要求至少命中 1 个注入点
-- `at: At = At()` - 精确注入位置；普通 `INVOKE_STRING` 必须且只能通过一个 `at.args = ["ldc=value"]` 或 `["string=value"]` 过滤直接字符串常量实参；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可通过 `["name=localName"]` 按 LocalVariableTable 变量名过滤
+- `at: At = At()` - 精确注入位置；普通 `INVOKE_STRING` 必须且只能通过一个 `at.args = ["ldc=value"]` 或 `["string=value"]` 过滤直接字符串常量实参；`ldc=` / `string=` 后的文本按字面量保留，前后空格也参与匹配；普通 `LOAD` / `STORE` 可通过 `at.args = ["index=N"]` 或 `["var=N"]` 按 JVM 局部变量槽位过滤，也可通过 `["name=localName"]` 按 LocalVariableTable 变量名过滤
 - `ordinal: Int = -1` - 匹配点序号；`-1` 表示处理全部匹配点，`0` 及以上表示只处理第 N 个匹配点（当前对 `RETURN` / `INVOKE` / `INVOKE_ASSIGN` 与指令点注入生效）
 - `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `THROW` 指令点注入支持用 `INVOKE` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
@@ -1542,7 +1542,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
 的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会自动把槽位值传入 handler，也不会写回槽位；只读读取同作用域局部变量时可在 handler 参数上显式使用 `@Local`。
 普通 `@AsmInject(INVOKE_STRING)` 必须且只能使用一个 `args = ["ldc=value"]` 或 `args = ["string=value"]`，只在目标调用的实参栈来源包含直接 `LDC String` 时插入 handler；它不会追踪先保存到局部变量再传入的同值字符串，也不会追踪拼接字符串、方法返回值或 `invokedynamic` 生成的字符串。
-`@ModifyArg(INVOKE)`、`@ModifyArgs(INVOKE)`、`@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 与 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 的直接字符串实参过滤同样只检查调用参数来源，不匹配 receiver；配置多个 `args` 或未知前缀会在转换阶段失败。
+`@ModifyArg(INVOKE)`、`@ModifyArgs(INVOKE)`、`@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 与 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 的直接字符串实参过滤同样只检查调用参数来源，不匹配 receiver；过滤值按 `ldc=` / `string=` 后的完整文本精确匹配，前后空格不会被修剪；配置多个 `args` 或未知前缀会在转换阶段失败。
 
 **示例：**
 

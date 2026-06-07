@@ -34,6 +34,7 @@ internal object DirectStringArgumentMatcher {
      * 解析必须存在的直接字符串过滤条件。
      *
      * `ldc=` 与 `string=` 是等价写法；调用方要求必须声明过滤值时，空参数会快速失败。
+     * 前缀后的内容按业务字符串精确保留，不能修剪前后空格。
      *
      * @param args 注解声明的 `At.args`
      * @param annotationName 用于错误消息的注解与注入点名称
@@ -60,6 +61,7 @@ internal object DirectStringArgumentMatcher {
      * 解析可选的直接字符串过滤条件。
      *
      * 空参数表示不启用过滤；一旦声明参数，就只能是唯一的 `ldc=<string>` 或 `string=<string>`。
+     * 前缀后的内容按业务字符串精确保留，不能修剪前后空格。
      *
      * @param args 注解声明的 `At.args`
      * @param annotationName 用于错误消息的注解与注入点名称
@@ -135,10 +137,9 @@ internal object DirectStringArgumentMatcher {
         arg: String,
         message: String,
     ): String {
-        val normalized = arg.trim()
         return when {
-            normalized.startsWith(LDC_PREFIX) -> normalized.substringAfter(LDC_PREFIX)
-            normalized.startsWith(STRING_PREFIX) -> normalized.substringAfter(STRING_PREFIX)
+            arg.startsWith(LDC_PREFIX) -> arg.substringAfter(LDC_PREFIX)
+            arg.startsWith(STRING_PREFIX) -> arg.substringAfter(STRING_PREFIX)
             else -> throw IllegalArgumentException(message)
         }
     }

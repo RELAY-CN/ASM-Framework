@@ -245,6 +245,7 @@ enum class InjectionPoint {
  * - [ModifyArg] / [ModifyArgs] 的 INVOKE 模式，以及 [Redirect]、[WrapOperation]、[WrapWithCondition] 与
  *   [ModifyExpressionValue] 的调用路径，也可通过 [args] 中唯一的 `ldc=<string>` 或 `string=<string>`
  *   只匹配调用参数直接来自该 `LDC String` 的调用点；该过滤会先于 `ordinal` 与命中数契约生效。
+ * - `ldc=` / `string=` 前缀后的文本按业务字面量精确保留，前后空格也参与匹配。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 支持 Slice 缩小候选范围，不支持 AFTER 与 by；REPLACE 仍按匹配前观察插入处理。AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
@@ -355,7 +356,7 @@ annotation class At(
      * 附加定位参数。
      *
      * 典型值包括 `array=get`、`array=set`、`array=length`、`index=N`、`var=N`、`name=localName`、
-     * `ldc=<string>` 或 `string=<string>`。
+     * `ldc=<string>` 或 `string=<string>`；字符串过滤值会保留 `=` 后的完整文本。
      */
     val args: Array<String> = [],
 )

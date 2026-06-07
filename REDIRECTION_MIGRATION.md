@@ -155,6 +155,7 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
   `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或
   `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 的 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`。
   该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver、局部变量、拼接字符串、方法返回值或 bootstrap 常量。
+  `ldc=` / `string=` 后面的过滤值按字面量精确匹配，前后空格也会保留。
 - `INVOKE_STRING` 只用于观察直接字符串常量实参调用点；它不会把字符串传给 handler，也不会替换字符串参数。
   替换字符串实参时使用 `@ModifyArg` 或 `@ModifyArgs`。
 - 只替换实例调用或实例字段访问 receiver 时使用 `@ModifyReceiver`。它保留原调用参数、字段读取值或字段待写入值，
@@ -320,7 +321,8 @@ object TargetMixin {
 ```
 
 上例只会在 `Audit.emit("marker")` 这类直接字符串常量实参调用点附近插入 handler。同值字符串如果先写入局部变量、
-由字符串拼接得到，或来自方法返回值，都不会被该规则命中。
+由字符串拼接得到，或来自方法返回值，都不会被该规则命中。过滤值按 `ldc=` / `string=` 后的完整文本匹配，
+前后空格不会被修剪。
 
 ## 兼容性说明
 

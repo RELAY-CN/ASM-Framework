@@ -7395,6 +7395,33 @@ class FrameworkReliabilityTest {
                 .`as`("Then: ASM Frame 按值而非 JVM slot 计数，long 参数不应导致 marker 实参漏匹配")
                 .isEqualTo(1)
         }
+
+        @Test
+        @DisplayName("ldc 过滤值应保留前后空格精确匹配直接字符串")
+        fun ldcArgumentPreservesSurroundingSpaces() {
+            // Given
+            AsmRegistry.register(InvokeStringSpacedArgumentMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform(
+                "InvokeStringSpacedArgumentTarget",
+                invokeStringSpacedArgumentTargetBytes(),
+                javaClass.classLoader,
+            )
+            val classNode = readClass(transformed)
+            val method = classNode.methods.single { it.name == "run" && it.desc == "()V" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeStringSpacedArgumentMixin::class.java)
+            val handlerCallCount = method.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "inject"
+            }
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`("Then: 直接字符串过滤必须保留业务 marker 的前后空格，不能把尾随空格 trim 掉后漏命中")
+                .isEqualTo(1)
+        }
     }
 
     @Nested
@@ -21672,6 +21699,24 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("InvokeStringSpacedArgumentTarget")
+    object InvokeStringSpacedArgumentMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "InvokeStringSpacedArgumentTarget.target(Ljava/lang/String;)V",
+                args = ["ldc= marker "],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("Test")
     object InvokeAssignInjectMixin {
         @AsmInject(
@@ -26860,6 +26905,38 @@ class FrameworkReliabilityTest {
             )
             visitInsn(Opcodes.RETURN)
             visitMaxs(3, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun invokeStringSpacedArgumentTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "InvokeStringSpacedArgumentTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "target",
+            "(Ljava/lang/String;)V",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(0, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "run", "()V", null, null).apply {
+            visitCode()
+            visitLdcInsn(" marker ")
+            visitMethodInsn(Opcodes.INVOKESTATIC, "InvokeStringSpacedArgumentTarget", "target", "(Ljava/lang/String;)V", false)
+            visitLdcInsn(" marker ")
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitMethodInsn(Opcodes.INVOKESTATIC, "InvokeStringSpacedArgumentTarget", "target", "(Ljava/lang/String;)V", false)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 2)
             visitEnd()
         }
         cw.visitEnd()

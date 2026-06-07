@@ -194,6 +194,7 @@ object LoggingMixin {
 `At.args` 中声明唯一一个 `ldc=value` 或 `string=value`。它不会把字符串传给 handler，也不会替换字符串；
 handler 只能像上面的 `beforeMarkerAudit` 一样继续接收目标方法参数前缀。局部变量中的同值字符串、字符串拼接、
 方法返回值或 `invokedynamic` 生成的字符串不会被 `INVOKE_STRING` 匹配。
+`ldc=` / `string=` 后面的过滤值按字面量精确匹配，前后空格也会保留。
 需要替换、包裹、条件控制或改写调用返回时，可在 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、
 `@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 上使用同样格式过滤直接字符串实参调用点。
 除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD`、`TAIL`、`RETURN`、`INVOKE BEFORE/AFTER`、`INVOKE_ASSIGN`
@@ -1590,7 +1591,7 @@ object FieldPointMixin {
 
 只需要按额外条件决定是否保留原 `INSTANCEOF` 判断结果时，使用 `@WrapWithCondition(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；handler 首参接收原始 `Boolean` 判断结果，返回 `false` 会把本次判断替换为 `false`。
 
-普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。需要在同一类调用点上替换调用、包裹操作、条件保留或改写返回值时，使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 并声明同样的直接字符串实参过滤。
+普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；过滤值按 `=` 后的完整文本匹配，前后空格不会被修剪；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。需要在同一类调用点上替换调用、包裹操作、条件保留或改写返回值时，使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 并声明同样的直接字符串实参过滤。
 
 ## 最佳实践
 
