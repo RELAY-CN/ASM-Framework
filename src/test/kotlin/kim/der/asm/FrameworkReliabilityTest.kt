@@ -282,8 +282,8 @@ class FrameworkReliabilityTest {
             .`as`("Then: README 能力摘要应提示裸 ARRAY_LENGTH 与字段来源数组长度是两个不同定位契约")
             .contains(
                 "裸数组长度使用的 ARRAY_LENGTH",
-                "普通 `@AsmInject` 不支持 `ARRAY_LENGTH`",
-                "裸 `ARRAYLENGTH` 请使用 `@Redirect`、`@WrapOperation`、`@WrapWithCondition` 或 `@ModifyExpressionValue`",
+                "普通 `@AsmInject(ARRAY_LENGTH)` 可观察裸 `ARRAYLENGTH` 指令",
+                "需要改写裸 `ARRAYLENGTH` 时请使用 `@Redirect`、`@WrapOperation`、`@WrapWithCondition` 或 `@ModifyExpressionValue`",
             )
         assertThat(redirectArraySection)
             .`as`("Then: @Redirect 数组写入必须绑定 FIELD_ASSIGN，避免把 array=set 误导为 FIELD 定位")
@@ -4147,6 +4147,52 @@ class FrameworkReliabilityTest {
         assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
             .`as`("Then: ARRAY_LENGTH handler 应在原长度后继续接收目标方法参数前缀")
             .isEqualTo(7)
+    }
+
+    @Test
+    @DisplayName("@AsmInject ARRAY_LENGTH 应观察局部数组长度且不消费长度结果")
+    fun asmInjectAtArrayLengthInstructionObservesLocalArrayLengthWithoutChangingResult() {
+        // Given
+        AsmInjectArrayLengthInstructionMixin.reset()
+        AsmRegistry.register(AsmInjectArrayLengthInstructionMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("LocalArrayLengthTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("countWithBonus", Int::class.javaPrimitiveType).invoke(instance, 5))
+            .`as`("Then: 普通 @AsmInject(ARRAY_LENGTH) 只观察裸 ARRAYLENGTH，不应消费数组引用或替换长度结果")
+            .isEqualTo(2)
+        assertThat(AsmInjectArrayLengthInstructionMixin.observedBonus)
+            .`as`("Then: ARRAY_LENGTH 观察 handler 应能继续接收目标方法参数前缀")
+            .isEqualTo(5)
+        assertThat(AsmInjectArrayLengthInstructionMixin.injectCount)
+            .`as`("Then: require/allow=1 应只在唯一 ARRAYLENGTH 指令处执行一次")
+            .isEqualTo(1)
+    }
+
+    @ParameterizedTest(name = "普通 @AsmInject ARRAY_LENGTH 声明 {0} 时应快速失败")
+    @MethodSource("asmInjectArrayLengthInstructionInvalidLocatorCases")
+    @DisplayName("普通 @AsmInject ARRAY_LENGTH 不应混用字段数组长度定位参数")
+    fun asmInjectAtArrayLengthInstructionRejectsFieldArrayLengthLocators(
+        locatorName: String,
+        mixinClass: Class<*>,
+        expectedRootCauseMessage: String,
+    ) {
+        // Given
+        AsmRegistry.register(mixinClass)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("LocalArrayLengthTarget", localArrayLengthTargetBytes(), javaClass.classLoader)
+        }.`as`(
+            "Then: 普通 @AsmInject(ARRAY_LENGTH) 的 $locatorName 不应被静默忽略，字段来源数组长度必须继续使用 FIELD + array=length",
+        )
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(expectedRootCauseMessage)
     }
 
     @Test
@@ -15368,6 +15414,60 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 3
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object AsmInjectArrayLengthInstructionMixin {
+        var observedBonus: Int? = null
+        var injectCount: Int = 0
+
+        fun reset() {
+            observedBonus = null
+            injectCount = 0
+        }
+
+        @AsmInject(
+            method = "countWithBonus(I)I",
+            target = InjectionPoint.ARRAY_LENGTH,
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject(bonus: Int) {
+            observedBonus = bonus
+            injectCount++
+        }
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object AsmInjectArrayLengthInstructionWithTargetMixin {
+        @AsmInject(
+            method = "count()I",
+            target = InjectionPoint.ARRAY_LENGTH,
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                target = "LocalArrayLengthTarget.names:[Ljava/lang/String;",
+            ),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("LocalArrayLengthTarget")
+    object AsmInjectArrayLengthInstructionWithArgsMixin {
+        @AsmInject(
+            method = "count()I",
+            target = InjectionPoint.ARRAY_LENGTH,
+            at = At(
+                value = InjectionPoint.ARRAY_LENGTH,
+                args = ["array=length"],
+            ),
+        )
+        @JvmStatic
+        fun inject() {
+        }
     }
 
     @AsmMixin("LocalArrayLengthTarget")
@@ -26832,6 +26932,23 @@ class FrameworkReliabilityTest {
     }
 
     companion object {
+        @JvmStatic
+        fun asmInjectArrayLengthInstructionInvalidLocatorCases(): Stream<Arguments> =
+            Stream.of(
+                Arguments.of(
+                    "At.target",
+                    AsmInjectArrayLengthInstructionWithTargetMixin::class.java,
+                    "@AsmInject ARRAY_LENGTH does not use At.target; " +
+                        "use FIELD with array=length for array field matching",
+                ),
+                Arguments.of(
+                    "At.args",
+                    AsmInjectArrayLengthInstructionWithArgsMixin::class.java,
+                    "@AsmInject ARRAY_LENGTH does not use At.args; " +
+                        "use FIELD with array=length for array field matching",
+                ),
+            )
+
         @JvmStatic
         fun arrayLengthInstructionWithArgsCases(): Stream<Arguments> =
             Stream.of(

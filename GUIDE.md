@@ -282,7 +282,7 @@ fun process(value: String) {
 再接收目标方法参数前缀；引用或数组参数可用父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按注入点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
-`from` 边界之后、`to` 边界之前的调用点、带直接字符串常量实参的调用点、字段读写指令、局部变量读写指令、类型转换指令、跳转指令、switch 指令、常量加载或抛异常指令才会参与匹配，边界调用本身不会被注入；
+`from` 边界之后、`to` 边界之前的调用点、带直接字符串常量实参的调用点、字段读写指令、局部变量读写指令、对象创建、类型转换指令、跳转指令、switch 指令、常量加载、裸数组长度或抛异常指令才会参与匹配，边界调用本身不会被注入；
 `ordinal` 会在切片内重新计数。
 
 普通 `@AsmInject(JUMP)` 只在匹配跳转指令前后插入 handler，不接收也不改写跳转条件栈值或跳转目标；`At.target`
@@ -291,8 +291,9 @@ fun process(value: String) {
 普通 `@AsmInject(CONSTANT)` 的 `BEFORE` / `AFTER` 只在匹配常量加载指令前后插入 handler，不接收也不替换常量值；`Shift.REPLACE`
 会删除原常量加载，并把 handler 返回值作为新的常量表达式值。`At.target`
 可省略以匹配所有常量，也可写字符串、数字、`null`、类名或方法描述符等常量文本来过滤。需要基于原常量值计算新值时，应使用 `@ModifyConstant`、`@Redirect(CONSTANT)`、`@ModifyExpressionValue(CONSTANT)` 或 `@WrapOperation(CONSTANT)`。
-普通指令点的 `Shift.REPLACE` 只有 `CONSTANT` 会删除并替换匹配指令；`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH` 与 `THROW` 仍只按观察插入处理。
-如果需要替换字段、局部变量、类型判断、switch 或异常表达式，应改用 `@Redirect`、`@ModifyExpressionValue`、`@WrapOperation` 或 `@WrapWithCondition`。
+普通 `@AsmInject(ARRAY_LENGTH)` 只在裸 `ARRAYLENGTH` 指令前后插入 handler，不接收数组引用或长度值，不替换长度结果，也不使用 `At.target` 或 `At.args`；字段来源数组长度仍使用 `FIELD + args = ["array=length"]`。
+普通指令点的 `Shift.REPLACE` 只有 `CONSTANT` 会删除并替换匹配指令；`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`ARRAY_LENGTH` 与 `THROW` 仍只按观察插入处理。
+如果需要替换字段、局部变量、数组长度、类型判断、switch 或异常表达式，应改用 `@Redirect`、`@ModifyExpressionValue`、`@WrapOperation` 或 `@WrapWithCondition`。
 
 ### 场景 2: 修改参数与局部变量
 
@@ -1062,6 +1063,8 @@ switch 模式通过 `SWITCH` 指定，handler 先接收原始 `Int` selector，�
 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 只匹配指定 JVM 局部变量槽位或 LocalVariableTable 变量名。需要直接替换本次读取表达式值时可使用 `@Redirect(LOAD)` 或 `@ModifyExpressionValue(LOAD)`；需要改写本次写入前栈值并让原 `xSTORE` 继续写入时可使用 `@Redirect(STORE)` 或 `@ModifyExpressionValue(STORE)`；需要保留可调用原读取值的操作句柄时可使用 `@WrapOperation(LOAD)`；需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时可使用 `@WrapOperation(STORE)`；需要基于变量值计算新值并写回槽位时，
 应使用 `@ModifyVariable`。
 
+普通 `@AsmInject` 也可以使用 `InjectionPoint.ARRAY_LENGTH` 观察裸 `ARRAYLENGTH` 指令。该模式适合记录数组长度位置附近的目标方法参数或显式 `@Local` 捕获的局部状态，不接收数组引用或长度值，不改写长度结果，且不使用 `At.target` / `At.args`；字段来源数组长度仍使用 `FIELD + args = ["array=length"]`，需要读取或改写长度时使用 `@Redirect`、`@ModifyExpressionValue`、`@WrapOperation` 或 `@WrapWithCondition`。
+
 ### 场景 3: 修改返回值
 
 ```kotlin
@@ -1461,7 +1464,7 @@ object ConditionalMixin {
 switch 模式使用 `At(value = InjectionPoint.SWITCH)` 匹配 `tableswitch` / `lookupswitch`；handler 先接收原始 `Int` selector，返回 `true` 时保留原 selector，返回 `false` 时使用 `0` 继续分派，且不支持 `At.target`。
 抛异常模式使用 `At(value = InjectionPoint.THROW, target = "...")` 精确匹配直接构造后抛出的异常类型，也可省略异常类型按 handler 签名筛选兼容抛异常点；handler 先接收即将抛出的 `Throwable`，返回 `true` 时保留原 `ATHROW`，返回 `false` 时跳过原抛出。
 常量加载模式使用 `At(value = InjectionPoint.CONSTANT, target = "...")` 按常量文本过滤，也可省略 `target` 按 handler 首参筛选兼容常量；handler 首参接收原常量值，返回 `true` 时保留原值，返回 `false` 时用同类型默认值替换本次常量表达式。
-动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。省略调用目标时按 handler 参数筛选兼容的普通调用或 `invokedynamic` 调用，返回 `false` 跳过非 `void` 调用时会留下返回类型对应的默认值，不兼容调用不会参与 `ordinal` 计数；省略 `INVOKE_ASSIGN` 目标时按 handler 首参筛选兼容的非 `void` 调用返回值，`void` 或不兼容候选不会参与 `ordinal` 计数。构造器 `<init>` 不支持 `INVOKE` 条件包裹；命中构造器目标会在转换阶段失败。如需按构造完成后的对象决定是否保留表达式，应使用 `NEW`；如需替换或多次调用构造过程，应使用 `@Redirect` 或 `@WrapOperation`。引用类型参数可使用精确类型、父类型或 `Any` / `Object`；原始类型参数仍按 JVM 栈类型匹配。`INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`CONSTANT`、`JUMP`、`SWITCH` 与 `THROW` 都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内；数组 `array=get`、`array=length` 跟随 `FIELD`，`array=set` 跟随 `FIELD_ASSIGN`。
+动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。省略调用目标时按 handler 参数筛选兼容的普通调用或 `invokedynamic` 调用，返回 `false` 跳过非 `void` 调用时会留下返回类型对应的默认值，不兼容调用不会参与 `ordinal` 计数；省略 `INVOKE_ASSIGN` 目标时按 handler 首参筛选兼容的非 `void` 调用返回值，`void` 或不兼容候选不会参与 `ordinal` 计数。构造器 `<init>` 不支持 `INVOKE` 条件包裹；命中构造器目标会在转换阶段失败。如需按构造完成后的对象决定是否保留表达式，应使用 `NEW`；如需替换或多次调用构造过程，应使用 `@Redirect` 或 `@WrapOperation`。引用类型参数可使用精确类型、父类型或 `Any` / `Object`；原始类型参数仍按 JVM 栈类型匹配。`INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`CONSTANT`、`JUMP`、`SWITCH`、`ARRAY_LENGTH` 与 `THROW` 都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内；数组 `array=get`、`array=length` 跟随 `FIELD`，`array=set` 跟随 `FIELD_ASSIGN`，裸数组长度使用 `ARRAY_LENGTH`。
 
 ### 场景 10: 修改返回值
 

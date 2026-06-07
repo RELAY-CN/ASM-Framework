@@ -40,17 +40,17 @@ import java.lang.reflect.Method
 /**
  * 指令点注入器。
  *
- * 用于处理字符串实参调用点、字段访问、字段赋值、局部变量读写、对象创建、类型转换、类型判断、跳转、switch、常量与抛异常等单条字节码指令附近的普通 `@AsmInject`。
+ * 用于处理字符串实参调用点、字段访问、字段赋值、局部变量读写、对象创建、类型转换、类型判断、跳转、switch、常量、裸数组长度与抛异常等单条字节码指令附近的普通 `@AsmInject`。
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
  * 普通 [InjectionPoint.INVOKE_STRING] / [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] /
- * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
+ * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
  * 边界缩小候选指令查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；
  * 也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
  * `index=N` 或 `var=N` 限制 JVM 局部变量槽位，也可用 `name=localName` 按 LocalVariableTable 名称过滤；
  * INVOKE_STRING 使用 `At.target` 匹配普通方法调用，并用 `At.args` 中的 `ldc=<string>` 或 `string=<string>`
  * 匹配该调用实参里的直接 `LDC String`，不追踪局部变量、字符串拼接或 `invokedynamic`；
- * JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，SWITCH 不支持 `At.target`，CONSTANT
+ * JUMP 指定 `At.target` 时按跳转操作码名或数字过滤，SWITCH 和 ARRAY_LENGTH 不支持 `At.target`，CONSTANT
  * 指定 `At.target` 时按常量文本过滤，THROW 指定 `At.target`
  * 时只匹配 `ATHROW` 前直接构造出的同类型异常。
  * [InjectionPoint.CONSTANT] 搭配 [Shift.REPLACE] 时会删除原常量加载指令，并用 handler 返回值作为新的常量表达式值；
@@ -162,6 +162,7 @@ class InstructionPointInjector(
             point == InjectionPoint.JUMP ||
             point == InjectionPoint.SWITCH ||
             point == InjectionPoint.CONSTANT ||
+            point == InjectionPoint.ARRAY_LENGTH ||
             point == InjectionPoint.THROW
 
     /**
@@ -489,6 +490,15 @@ class InstructionPointInjector(
                 fun(insn: AbstractInsnNode): Boolean =
                     BytecodeUtil.isConstant(insn) &&
                         (target.isEmpty() || BytecodeUtil.matchesConstantText(insn, target))
+            }
+            InjectionPoint.ARRAY_LENGTH -> {
+                require(target.isEmpty()) {
+                    "@AsmInject ARRAY_LENGTH does not use At.target; use FIELD with array=length for array field matching"
+                }
+                require(args.isEmpty()) {
+                    "@AsmInject ARRAY_LENGTH does not use At.args; use FIELD with array=length for array field matching"
+                }
+                fun(insn: AbstractInsnNode): Boolean = insn.opcode == Opcodes.ARRAYLENGTH
             }
             InjectionPoint.LOAD -> {
                 fun(insn: AbstractInsnNode): Boolean =
