@@ -16,6 +16,7 @@
 - `@WrapOperation`
 - `@WrapWithCondition`
 - `@ModifyExpressionValue`
+- `@ModifyReturnValue`
 - `@ModifyConstant`
 - `@ModifyVariable`
 - `@ModifyArg`
@@ -34,6 +35,7 @@
 | 在 handler 内按需调用、跳过或多次执行原操作 | `@WrapOperation` | 需要 `Operation` 句柄、要组合原参数或多次调用时优先使用；`INVOKE` 可按直接字符串实参过滤 |
 | 只按条件决定是否保留原调用、调用返回值、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
+| 只改目标方法返回值 | `@ModifyReturnValue` | 原方法主体照常执行，只在每个返回点前改写返回值；支持 `ordinal`、`Slice` 与命中数契约 |
 | 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` | 保留原调用，只替换指定实参；可用 `at.args = ["ldc=value"]` / `["string=value"]` 锁定直接字符串实参调用点 |
 | 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数；同样支持直接字符串实参过滤 |
 | 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值；`INVOKE` 可按直接字符串实参过滤 |
@@ -45,10 +47,11 @@
 迁移时可按下面顺序快速选型：
 
 1. 只改调用参数或 receiver：优先 `@ModifyArg` / `@ModifyArgs` / `@ModifyReceiver`。
-2. 需要完整替换一次操作结果或副作用：使用 `@Redirect`。
-3. 需要在 handler 里按需调用、跳过或多次执行原操作：使用 `@WrapOperation`。
-4. 原操作应继续执行，但结果、副作用或控制流只在条件满足时保留：使用 `@WrapWithCondition`。
-5. 只是观察位置或追加日志、统计等副作用，不改表达式值和控制流：才使用 `@AsmInject`。
+2. 只改目标方法最终返回值：使用 `@ModifyReturnValue`。
+3. 需要完整替换一次操作结果或副作用：使用 `@Redirect`。
+4. 需要在 handler 里按需调用、跳过或多次执行原操作：使用 `@WrapOperation`。
+5. 原操作应继续执行，但结果、副作用或控制流只在条件满足时保留：使用 `@WrapWithCondition`。
+6. 只是观察位置或追加日志、统计等副作用，不改表达式值和控制流：才使用 `@AsmInject`。
 
 ### 1. 旧的调用替换逻辑
 
@@ -93,6 +96,10 @@ handler 只接收已经读取出的元素值或 `Int` 长度，不接收数组�
 `@WrapWithCondition(at = At(value = InjectionPoint.INVOKE_ASSIGN, target = "..."))`。handler 首参接收调用完成后的返回值，
 返回 `true` 时保留该返回值，返回 `false` 时把本次返回表达式替换为返回类型默认值；该模式不会跳过原调用。
 若旧逻辑要在条件不满足时连原调用副作用一起跳过，应使用 `@WrapWithCondition(at = At(value = InjectionPoint.INVOKE, target = "..."))`。
+
+目标方法返回值迁移优先使用 `@ModifyReturnValue`。它不替换整段方法体，也不会跳过原方法主体，只在目标方法返回前接收并改写返回值；
+如果旧逻辑只是在所有业务逻辑执行完成后归一化、兜底或替换返回对象，不应迁移成 `@WrapMethod` 或 `@ReplaceAllMethods`。
+存在多个返回点时，可用 `ordinal` 只处理第 N 个返回点，或用 `Slice` 把候选返回点限制在稳定调用、字段或常量边界之间。
 
 对象构造这类“原构造过程仍然执行，但某些上下文下不要采纳构造结果”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.NEW, target = "..."))`。handler 首参接收构造完成后的对象引用，
@@ -337,6 +344,26 @@ object TargetMixin {
 
 上例保留原 `Service.name()` 调用及其副作用，只改写调用返回表达式的值。
 
+目标方法返回值迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyReturnValue(
+        method = "render(Ljava/lang/String;)Ljava/lang/String;",
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun normalizeRenderResult(original: String, id: String): String {
+        return original.ifBlank { "fallback-$id" }
+    }
+}
+```
+
+上例保留 `render` 方法主体及其副作用，只在方法返回前改写最终返回值；这不同于 `@WrapMethod` 的整方法接管，
+也不同于 `@ReplaceAllMethods` 的整类默认返回。
+
 构造结果条件迁移示例：
 
 ```kotlin
@@ -471,9 +498,10 @@ object DisableLegacySubsystemMixin
 
 如果你的代码还在依赖旧 `Redirection` 设计，请按下面顺序迁移：
 
-1. 先按旧逻辑的真实意图区分调用替换、参数修改、receiver 修改、整方法接管和纯观察点
+1. 先按旧逻辑的真实意图区分调用替换、参数修改、receiver 修改、返回值修改、整方法接管和纯观察点
 2. 把调用替换改成注解式 `@Redirect` / `@WrapOperation`
 3. 把参数和 receiver 修改改成 `@ModifyArg` / `@ModifyArgs` / `@ModifyReceiver`
-4. 把整方法接管改成 `@WrapMethod` / `@ReplaceAllMethods`
-5. 把监听逻辑改成 `@AsmInject` / `@WrapWithCondition` / `@ModifyExpressionValue`
-6. 最后移除旧的描述对象和运行期 manager 引用
+4. 把返回值修改改成 `@ModifyReturnValue`
+5. 把整方法接管改成 `@WrapMethod` / `@ReplaceAllMethods`
+6. 把监听逻辑改成 `@AsmInject` / `@WrapWithCondition` / `@ModifyExpressionValue`
+7. 最后移除旧的描述对象和运行期 manager 引用
