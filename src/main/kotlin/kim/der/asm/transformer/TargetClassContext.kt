@@ -504,7 +504,7 @@ class TargetClassContext(
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             parentClass.methods.find {
-                "${it.name}${it.desc}" == methodSignature && (it.access and Opcodes.ACC_PRIVATE) == 0
+                "${it.name}${it.desc}" == methodSignature && isShadowInheritedClassMethodVisible(parentName, it)
             }?.let { return it }
             interfaceNames += parentClass.interfaces
             parentName = parentClass.superName
@@ -532,6 +532,11 @@ class TargetClassContext(
 
     private fun isShadowInheritedInterfaceMethodVisible(method: MethodNode): Boolean =
         (method.access and (Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC)) == 0
+
+    private fun isShadowInheritedClassMethodVisible(
+        owner: String,
+        method: MethodNode,
+    ): Boolean = isInheritedClassMemberVisible(owner, method.access)
 
     private fun resolveShadowTargetName(
         declaredName: String,
@@ -872,7 +877,7 @@ class TargetClassContext(
         val interfaceNames = classNode.interfaces.toMutableList()
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
-            parentClass.fields.find { it.name == fieldName && isAccessorInheritedFieldVisible(it) }?.let {
+            parentClass.fields.find { it.name == fieldName && isAccessorInheritedFieldVisible(parentName, it) }?.let {
                 return AccessorTargetField(
                     parentClass.name,
                     it,
@@ -922,12 +927,31 @@ class TargetClassContext(
         return (fieldAccess and Opcodes.ACC_FINAL) != 0
     }
 
-    private fun isAccessorInheritedFieldVisible(field: FieldNode): Boolean =
-        (field.access and Opcodes.ACC_PRIVATE) == 0
+    private fun isAccessorInheritedFieldVisible(
+        owner: String,
+        field: FieldNode,
+    ): Boolean = isInheritedClassMemberVisible(owner, field.access)
 
     private fun isAccessorInheritedInterfaceFieldVisible(field: FieldNode): Boolean =
         (field.access and (Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC)) ==
             (Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC)
+
+    private fun isInheritedClassMemberVisible(
+        owner: String,
+        access: Int,
+    ): Boolean {
+        if ((access and Opcodes.ACC_PRIVATE) != 0) {
+            return false
+        }
+        if ((access and (Opcodes.ACC_PUBLIC or Opcodes.ACC_PROTECTED)) != 0) {
+            return true
+        }
+        // package-private 成员只在同一 JVM internal package 内可见；跨包子类不能桥接访问。
+        return internalPackageName(owner) == internalPackageName(className)
+    }
+
+    private fun internalPackageName(internalName: String): String =
+        internalName.substringBeforeLast('/', missingDelimiterValue = "")
 
     /**
      * 应用 @Invoker 调用器
@@ -1025,7 +1049,7 @@ class TargetClassContext(
         while (parentName != null && parentName != "java/lang/Object") {
             val parentClass = loadParentClass(parentName) ?: return null
             val parentMethod = parentClass.methods.find { "${it.name}${it.desc}" == methodSignature }
-            if (parentMethod != null && isInvokerInheritedMethodVisible(parentMethod)) {
+            if (parentMethod != null && isInvokerInheritedMethodVisible(parentName, parentMethod)) {
                 return InvokerTargetMethod(parentName, parentMethod, isInterfaceOwner = false)
             }
             interfaceNames += parentClass.interfaces
@@ -1053,8 +1077,10 @@ class TargetClassContext(
         return null
     }
 
-    private fun isInvokerInheritedMethodVisible(method: MethodNode): Boolean =
-        (method.access and Opcodes.ACC_PRIVATE) == 0
+    private fun isInvokerInheritedMethodVisible(
+        owner: String,
+        method: MethodNode,
+    ): Boolean = isInheritedClassMemberVisible(owner, method.access)
 
     private fun isInvokerInheritedInterfaceMethodVisible(method: MethodNode): Boolean =
         (method.access and (Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC)) == 0

@@ -841,15 +841,41 @@ class FrameworkReliabilityTest {
     @DisplayName("公开文档应保持 ModifyExpressionValue 常量表达式契约一致")
     fun documentationContractsKeepModifyExpressionValueConstantSupportAligned() {
         // Given
+        val readme = Files.readString(Path.of("README.md"))
         val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val annotationKDoc =
+            Files.readString(
+                Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"),
+            )
+        val asmInjectKDoc =
+            Files.readString(
+                Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"),
+            )
+        val factoryKDoc =
+            Files.readString(
+                Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "AsmInjectorFactory.kt"),
+            )
         val injectorKDoc =
             Files.readString(
                 Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "impl", "ModifyExpressionValueInjector.kt"),
+            )
+        val instructionPointInjectorKDoc =
+            Files.readString(
+                Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "impl", "InstructionPointInjector.kt"),
             )
         val apiModifyExpressionValueIntro =
             api
                 .substringAfter("### @ModifyExpressionValue")
                 .substringBefore("**参数：**")
+        val apiAsmInjectParameters =
+            api
+                .substringAfter("### @AsmInject")
+                .substringBefore("handler 首参")
+        val guideSliceOverview =
+            guide
+                .substringAfter("当目标方法内有多个相同调用")
+                .substringBefore("```kotlin")
         val injectorIntro =
             injectorKDoc
                 .substringAfter("* ModifyExpressionValue 注入器。")
@@ -862,8 +888,70 @@ class FrameworkReliabilityTest {
             injectorKDoc
                 .substringAfter("* @param slice 切片范围；")
                 .substringBefore("* @author Dr")
+        val apiSliceSection =
+            api
+                .substringAfter("### Slice")
+                .substringBefore("**示例：**")
+        val annotationModifyExpressionValueSection =
+            annotationKDoc
+                .substringAfter("* 修改表达式值注解。")
+                .substringBefore("annotation class ModifyExpressionValue")
+        val asmInjectSliceParameter =
+            asmInjectKDoc
+                .substringAfter("* @param slice 切片范围；")
+                .substringBefore("* @param allow")
+        val asmInjectAtValueParameter =
+            asmInjectKDoc
+                .substringAfter("* @param value 注入点类型；")
+                .substringBefore("* @param target")
+        val instructionPointSliceParagraph =
+            instructionPointInjectorKDoc
+                .substringAfter("* 普通 [InjectionPoint.INVOKE_STRING]")
+                .substringBefore("* 也可通过 `At.by`")
 
         // Then
+        assertThat(readme)
+            .`as`("Then: README 不应继续把字段和常量边界描述成 ModifyConstant 专属能力")
+            .doesNotContain("仅 `@ModifyConstant` 额外支持字段读写或常量文本作为切片边界")
+            .contains("支持 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 与 `CONSTANT` 边界")
+        assertThat(guide)
+            .`as`("Then: GUIDE 应说明支持 slice 的注解共享通用边界集合")
+            .doesNotContain("边界调用本身")
+            .contains("支持 `Slice` 的注解可使用 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 与 `CONSTANT` 作为切片边界")
+        assertThat(guideSliceOverview)
+            .`as`("Then: GUIDE Slice 总览应把裸 ARRAY_LENGTH 也列入普通指令点注入范围")
+            .contains("`ARRAY_LENGTH` 或 `THROW`")
+        assertThat(apiAsmInjectParameters)
+            .`as`("Then: API 的 AsmInject 参数说明应把 ARRAY_LENGTH 纳入 slice 与普通指令点列表")
+            .contains(
+                "`ARRAY_LENGTH` / `THROW` 指令点注入支持",
+                "`ARRAY_LENGTH` / `THROW`",
+            )
+        assertThat(apiSliceSection)
+            .`as`("Then: API Slice 总说明应暴露通用边界集合，而不是只写 INVOKE 与 ModifyConstant 例外")
+            .contains("支持 `from` / `to` 为 `InjectionPoint.INVOKE`、`InjectionPoint.FIELD`、`InjectionPoint.FIELD_ASSIGN` 或 `InjectionPoint.CONSTANT` 的边界切片")
+        assertThat(annotationModifyExpressionValueSection)
+            .`as`("Then: 注解 KDoc 应把 ModifyExpressionValue 的通用边界同步给 IDE 用户")
+            .doesNotContain("边界调用本身")
+            .contains("[InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT]")
+        assertThat(asmInjectSliceParameter)
+            .`as`("Then: AsmInject slice KDoc 应把 ARRAY_LENGTH 纳入普通指令点注入范围")
+            .contains("[InjectionPoint.ARRAY_LENGTH]")
+        assertThat(asmInjectAtValueParameter)
+            .`as`("Then: At.value KDoc 不应继续声明 Slice 边界只支持 INVOKE")
+            .doesNotContain("当前仅支持 [InjectionPoint.INVOKE]")
+            .contains("[InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 与 [InjectionPoint.CONSTANT]")
+        assertThat(instructionPointSliceParagraph)
+            .`as`("Then: 普通指令点注入器 KDoc 应同步通用 Slice 边界与字段/常量匹配语义")
+            .doesNotContain("可使用 `Slice` 的 [InjectionPoint.INVOKE]\n * 边界")
+            .contains(
+                "[InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT]",
+                "字段边界按字段签名匹配",
+                "常量边界按常量文本匹配",
+            )
+        assertThat(factoryKDoc)
+            .`as`("Then: 注入器工厂 KDoc 应同步通用边界能力，避免内部 API 继续声明 INVOKE-only")
+            .contains("支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片")
         assertThat(apiModifyExpressionValueIntro)
             .`as`("Then: API 首段应列出 CONSTANT 产生的常量表达式值，避免公开能力与实现支持脱节")
             .contains("常量表达式值")
@@ -874,8 +962,11 @@ class FrameworkReliabilityTest {
             .`as`("Then: 注入器 at 参数 KDoc 应显式列出 CONSTANT 定位点")
             .contains("[InjectionPoint.CONSTANT]")
         assertThat(injectorSliceParameter)
-            .`as`("Then: 注入器 slice 参数 KDoc 应说明 CONSTANT 也支持 INVOKE 边界切片")
-            .contains("[InjectionPoint.CONSTANT]")
+            .`as`("Then: 注入器 slice 参数 KDoc 应说明表达式改写支持通用切片边界")
+            .contains(
+                "[InjectionPoint.CONSTANT]",
+                "[InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT]",
+            )
     }
 
     @Test
@@ -3098,6 +3189,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("WrapWithCondition CONSTANT 应支持 CONSTANT Slice 边界")
+    fun wrapWithConditionAtConstantBoundaryUsesDefaultOnlyInsideBoundary() {
+        // Given
+        AsmRegistry.register(WrapConditionConstantBoundarySliceDenyMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("SliceConstantTarget", sliceConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: 通用 CONSTANT 边界应限制条件包裹范围，避免同值常量被跨片段改写")
+            .isEqualTo("target::target")
+    }
+
+    @Test
     fun wrapWithConditionAtConstantInfersBooleanWhenTargetOmitted() {
         AsmRegistry.register(WrapConditionConstantBooleanDenyMixin::class.java)
 
@@ -3950,6 +4058,23 @@ class FrameworkReliabilityTest {
             .isInstanceOf(AsmTransformException::class.java)
             .hasRootCauseMessage(
                 "Invalid @ModifyExpressionValue slice boundary INVOKE target: target must not be empty",
+            )
+    }
+
+    @Test
+    @DisplayName("ModifyExpressionValue FIELD Slice 边界缺字段名时应快速失败")
+    fun modifyExpressionValueFieldSliceBoundaryWithoutFieldNameFailsFast() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueFieldBoundaryWithoutNameMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: FIELD 边界必须提供字段名，不能只靠 descriptor 把切片锚到错误字段")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "Invalid @ModifyExpressionValue slice boundary FIELD target: field name must not be empty",
             )
     }
 
@@ -4860,6 +4985,40 @@ class FrameworkReliabilityTest {
         assertThat(clazz.getMethod("value").invoke(instance))
             .`as`("Then: slice 只应改写边界内的常量表达式，边界外相同常量保持原值")
             .isEqualTo("target:expression-target:target")
+    }
+
+    @Test
+    @DisplayName("ModifyExpressionValue CONSTANT 应支持 CONSTANT Slice 边界")
+    fun modifyExpressionValueAtConstantBoundaryLimitsConstantsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueConstantBoundarySliceMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("SliceConstantTarget", sliceConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: CONSTANT 边界应只放行哨兵常量之间的目标常量，避免旧 redirection 迁移时误改全方法同值常量")
+            .isEqualTo("target:expression-target:target")
+    }
+
+    @Test
+    @DisplayName("Redirect CONSTANT 应支持 CONSTANT Slice 边界")
+    fun redirectAtConstantBoundaryLimitsConstantsBetweenFromAndTo() {
+        // Given
+        AsmRegistry.register(RedirectConstantBoundarySliceMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("SliceConstantTarget", sliceConstantTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceConstantTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getMethod("value").invoke(instance))
+            .`as`("Then: CONSTANT 边界应让 @Redirect 只替换哨兵常量之间的目标常量")
+            .isEqualTo("target:redirect-target:target")
     }
 
     @Test
@@ -6743,6 +6902,24 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("readSelected").invoke(instance)
 
         assertEquals("raw-wrapped", result)
+    }
+
+    @Test
+    @DisplayName("WrapOperation FIELD 应支持 FIELD Slice 边界")
+    fun wrapOperationFieldBoundarySliceLimitsFieldReadsAfterFrom() {
+        // Given
+        AsmRegistry.register(WrapOperationFieldBoundarySliceMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("SliceFieldReadTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+
+        // Then
+        assertThat(clazz.getMethod("readSelected").invoke(instance))
+            .`as`("Then: 第一次字段读取作为边界不参与包裹，边界之后的业务字段读取才被 @WrapOperation 改写")
+            .isEqualTo("raw-field-boundary-wrapped")
     }
 
     @Test
@@ -8964,10 +9141,42 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@Shadow 不应把跨包 package-private 父类字段当作可访问继承字段")
+    fun shadowRejectsCrossPackagePackagePrivateParentField() {
+        // Given
+        AsmRegistry.register(CrossPackagePackagePrivateFieldShadowMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 跨包 package-private 父类字段不应通过 @Shadow 校验")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("Shadow field elementData not found in InheritedAccessorTarget")
+    }
+
+    @Test
     fun shadowCanReferenceInheritedMethod() {
         AsmRegistry.register(InheritedShadowMethodMixin::class.java)
 
         AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+    }
+
+    @Test
+    @DisplayName("@Shadow 不应把跨包 package-private 父类方法当作可访问继承方法")
+    fun shadowRejectsCrossPackagePackagePrivateParentMethod() {
+        // Given
+        AsmRegistry.register(CrossPackagePackagePrivateMethodShadowMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 跨包 package-private 父类方法不应通过 @Shadow 校验")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "Shadow method elementData(I)Ljava/lang/Object; not found in InheritedAccessorTarget",
+            )
     }
 
     @Test
@@ -9657,19 +9866,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun invokeAssignSliceBoundaryErrorMentionsInvokeAssign() {
+    @DisplayName("AsmInject INVOKE_ASSIGN 不支持非通用 Slice 边界时应保留上下文")
+    fun invokeAssignUnsupportedSliceBoundaryErrorMentionsInvokeAssign() {
+        // Given
         AsmRegistry.register(InvokeAssignInvalidSliceBoundaryMixin::class.java)
 
-        val exception =
-            assertThrows(AsmTransformException::class.java) {
-                AsmProcessor().transform("SliceInvokeTarget", sliceInvokeTargetBytes(), javaClass.classLoader)
-            }
-
-        assertEquals(
-            true,
-            exception.cause?.message?.contains("@AsmInject(INVOKE/INVOKE_ASSIGN)") == true,
-        )
-        assertEquals(true, exception.cause?.message?.contains("FIELD") == true)
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("SliceInvokeTarget", sliceInvokeTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 非通用 HEAD 边界仍应快速失败，并指出 INVOKE_ASSIGN 上下文")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "Only INVOKE, FIELD, FIELD_ASSIGN, CONSTANT slice boundaries are supported " +
+                    "for @AsmInject(INVOKE/INVOKE_ASSIGN): HEAD",
+            )
     }
 
     @Test
@@ -10541,6 +10752,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@Accessor 不应把跨包 package-private 父类字段当作可访问继承字段")
+    fun accessorRejectsCrossPackagePackagePrivateParentField() {
+        // Given
+        AsmRegistry.register(CrossPackagePackagePrivateFieldAccessorMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 跨包 package-private 父类字段不应生成运行期非法访问的 getter")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("Accessor target field elementData not found in InheritedAccessorTarget")
+    }
+
+    @Test
     fun accessorCanReadInheritedStaticField() {
         AsmRegistry.register(InheritedStaticFieldAccessorMixin::class.java)
 
@@ -10593,6 +10819,21 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("callSize").invoke(instance)
 
         assertEquals(1, result)
+    }
+
+    @Test
+    @DisplayName("@Invoker 不应把跨包 package-private 父类方法当作可访问继承方法")
+    fun invokerRejectsCrossPackagePackagePrivateParentMethod() {
+        // Given
+        AsmRegistry.register(CrossPackagePackagePrivateMethodInvokerMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("InheritedAccessorTarget", inheritedAccessorTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 跨包 package-private 父类方法不应生成运行期非法访问的 bridge")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("Invoker target method elementData not found in InheritedAccessorTarget")
     }
 
     @Test
@@ -14460,6 +14701,25 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceConstantTarget")
+    object WrapConditionConstantBoundarySliceDenyMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "target"),
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT, target = " start "),
+                to = At(value = InjectionPoint.CONSTANT, target = " end "),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
     @AsmMixin("TrueBooleanConstantTarget")
     object WrapConditionConstantBooleanDenyMixin {
         @WrapWithCondition(
@@ -16834,11 +17094,57 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "expression-$original"
     }
 
+    @AsmMixin("SliceConstantTarget")
+    object ModifyExpressionValueConstantBoundarySliceMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "target"),
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT, target = " start "),
+                to = At(value = InjectionPoint.CONSTANT, target = " end "),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expression-$original"
+    }
+
+    @AsmMixin("SliceFieldReadTarget")
+    object ModifyExpressionValueFieldBoundaryWithoutNameMixin {
+        @ModifyExpressionValue(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "expression-$original"
+    }
+
     @AsmMixin("MixedConstantTarget")
     object RedirectConstantMixin {
         @Redirect(
             method = "value()Ljava/lang/String;",
             at = At(value = InjectionPoint.CONSTANT, target = "original"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: String): String = "redirect-$original"
+    }
+
+    @AsmMixin("SliceConstantTarget")
+    object RedirectConstantBoundarySliceMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CONSTANT, target = "target"),
+            slice = Slice(
+                from = At(value = InjectionPoint.CONSTANT, target = " start "),
+                to = At(value = InjectionPoint.CONSTANT, target = " end "),
+            ),
             require = 1,
             allow = 1,
         )
@@ -18568,6 +18874,27 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceFieldReadTarget")
+    object WrapOperationFieldBoundarySliceMixin {
+        @WrapOperation(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String {
+            target.hashCode()
+            return "${operation.call(target)}-field-boundary-wrapped"
+        }
+    }
+
     @AsmMixin("SliceFieldAssignTarget")
     object WrapOperationFieldAssignSliceMixin {
         @WrapOperation(
@@ -19760,11 +20087,23 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("InheritedAccessorTarget")
+    class CrossPackagePackagePrivateFieldShadowMixin {
+        @Shadow("elementData")
+        private val inaccessibleElementData: Array<Any?> = emptyArray()
+    }
+
+    @AsmMixin("InheritedAccessorTarget")
     class InheritedShadowMethodMixin {
         @Shadow("clear")
         private fun inheritedClear() {
             throw UnsupportedOperationException()
         }
+    }
+
+    @AsmMixin("InheritedAccessorTarget")
+    class CrossPackagePackagePrivateMethodShadowMixin {
+        @Shadow("elementData")
+        private fun inaccessibleElementData(index: Int): Any? = throw UnsupportedOperationException()
     }
 
     @AsmMixin("InterfaceDefaultInvokerTarget")
@@ -20276,7 +20615,7 @@ class FrameworkReliabilityTest {
                 target = "java/lang/String.trim()Ljava/lang/String;",
             ),
             slice = Slice(
-                from = At(value = InjectionPoint.FIELD, target = "java/lang/String.value:Ljava/lang/String;"),
+                from = At(value = InjectionPoint.HEAD, target = "unsupported"),
             ),
         )
         @JvmStatic
@@ -21026,6 +21365,12 @@ class FrameworkReliabilityTest {
         fun getModCount(): Int = throw UnsupportedOperationException()
     }
 
+    @AsmMixin("InheritedAccessorTarget")
+    class CrossPackagePackagePrivateFieldAccessorMixin {
+        @Accessor("elementData")
+        fun getElementData(): Array<Any?> = throw UnsupportedOperationException()
+    }
+
     @AsmMixin("InheritedStaticAccessorTarget")
     object InheritedStaticFieldAccessorMixin {
         @Accessor("ERA")
@@ -21053,6 +21398,12 @@ class FrameworkReliabilityTest {
     class InheritedMethodInvokerMixin {
         @Invoker("size")
         fun callSize(): Int = throw UnsupportedOperationException()
+    }
+
+    @AsmMixin("InheritedAccessorTarget")
+    class CrossPackagePackagePrivateMethodInvokerMixin {
+        @Invoker("elementData")
+        fun callElementData(index: Int): Any? = throw UnsupportedOperationException()
     }
 
     @AsmMixin("InterfaceDefaultInvokerTarget")

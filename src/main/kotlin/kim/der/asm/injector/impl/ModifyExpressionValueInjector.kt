@@ -74,8 +74,8 @@ import java.lang.reflect.Modifier
  * @param ordinal 表达式匹配点序号；负数表示处理全部匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组元素读取、数组元素写入值、数组长度、裸 `ARRAYLENGTH`、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式使用 INVOKE 边界缩小匹配范围，
- * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式可使用
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -1882,7 +1882,7 @@ class ModifyExpressionValueInjector(
             insns,
             slice,
             "@ModifyExpressionValue",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

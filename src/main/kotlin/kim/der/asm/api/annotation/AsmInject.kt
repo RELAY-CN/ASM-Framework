@@ -50,7 +50,7 @@ package kim.der.asm.api.annotation
  * @param cancellable 是否声明该注入点允许取消；当前 HEAD、TAIL 与普通 INVOKE/INVOKE_ASSIGN 的 BEFORE/AFTER
  * 注入会据此允许 [CallbackInfo.cancel] 或 [CallbackInfo.setReturnValue] 触发提前返回分支
  * @param require 最小命中数；大于 0 时实际命中数必须不少于该值
- * @param at 当 [target] 为 INVOKE/INVOKE_ASSIGN/INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW 时用于描述具体指令点；
+ * @param at 当 [target] 为 INVOKE/INVOKE_ASSIGN/INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/ARRAY_LENGTH/THROW 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
  * 或 `var=N` 按 JVM 局部变量槽位过滤，也可用 `name=localName` 按 LocalVariableTable 中的变量名过滤；
  * 普通 INVOKE_STRING 需要在 [At.target] 写 `owner.name(desc)`，并通过 [At.args] 中的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串常量实参
@@ -59,8 +59,8 @@ package kim.der.asm.api.annotation
  * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.INVOKE_STRING] 字符串实参调用点注入、普通 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写指令点注入，以及普通 [InjectionPoint.NEW] /
  * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.SWITCH] /
- * [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转、switch、常量与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] 对象创建、类型转换、类型判断、跳转、switch、常量、裸数组长度与抛异常指令点注入支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用；
@@ -301,14 +301,13 @@ enum class InjectionPoint {
  *   `index=N` 或 `var=N` 只匹配指定 JVM 局部变量槽位的读写指令，也可用 `name=localName`
  *   只匹配 LocalVariableTable 作用域内同名变量；缺少调试变量表时名称过滤不会命中。
  *
- * @param value 注入点类型；用于描述当前 [target] 的匹配语义，普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入的 [Slice] 边界
- * 当前仅支持 [InjectionPoint.INVOKE]
+ * @param value 注入点类型；用于描述当前 [target] 的匹配语义；在 [Slice] 边界中支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 与 [InjectionPoint.CONSTANT]
  * @param target 目标方法调用、构造器调用、字符串实参调用点、字段、NEW 类型、CHECKCAST 类型、INSTANCEOF 类型、跳转操作码、常量文本或 THROW 直接构造异常类型签名；[InjectionPoint.ARRAY_LENGTH] 不使用该字段
  * @param shift 注入偏移策略
  * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.SWITCH] /
- * [InjectionPoint.CONSTANT] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
+ * [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set`、`array=length`，以及
  * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
  * [WrapOperation] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
@@ -329,7 +328,8 @@ annotation class At(
     /**
      * 当前定位对象对应的注入点类型。
      *
-     * 在多数 [Slice] 边界中当前仅支持 [InjectionPoint.INVOKE]；[ModifyConstant] 还支持字段读写与常量边界。
+     * 在 [Slice] 边界中支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 与
+     * [InjectionPoint.CONSTANT]，显式边界必须提供非空目标，字段边界还必须包含字段名。
      */
     val value: InjectionPoint = InjectionPoint.HEAD,
 
@@ -401,17 +401,18 @@ enum class Shift {
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组读取、数组写入值、数组字段长度、[InjectionPoint.ARRAY_LENGTH] 裸数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
  * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式值修改、[ModifyVariable] 的 [InjectionPoint.LOAD] /
  * [InjectionPoint.STORE] 局部变量读写改写、[ModifyReturnValue] 返回值修改，以及 [ModifyConstant] 常量修改
- * 支持 [from] / [to] 为 [InjectionPoint.INVOKE] 的边界；其中 [ModifyConstant] 还支持 [InjectionPoint.FIELD]、
- * [InjectionPoint.FIELD_ASSIGN] 与 [InjectionPoint.CONSTANT] 边界；
+ * 支持 [from] / [to] 为 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或
+ * [InjectionPoint.CONSTANT] 的边界；
  * 起始边界之后、结束边界之前的候选点才会参与匹配，边界指令本身不会作为候选注入点。
  * [AsmInject.ordinal] / [Redirect.ordinal] / [ModifyArg.ordinal] / [ModifyArgs.ordinal] /
  * [ModifyReceiver.ordinal] / [WrapOperation.ordinal] / [WrapWithCondition.ordinal] /
  * [ModifyExpressionValue.ordinal] / [ModifyVariable.ordinal] / [ModifyReturnValue.ordinal] /
  * [ModifyConstant.ordinal] 会在切片内重新计数。
  * [InjectionPoint.INVOKE] 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；`invokedynamic` 边界会按
- * bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。[ModifyConstant] 的字段边界按字段
- * owner、name 与 descriptor 匹配，其中字段名必填，owner 与 descriptor 可省略；常量边界按常量文本匹配。
- * 默认 [At] 表示未声明边界；一旦显式声明 [InjectionPoint.INVOKE] 或 [ModifyConstant] 额外支持的字段/常量边界，
+ * bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。字段边界按字段 owner、name
+ * 与 descriptor 匹配，其中字段名必填，owner 与 descriptor 可省略；常量边界按常量文本匹配。
+ * 默认 [At] 表示未声明边界；一旦显式声明 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、
+ * [InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界，
  * [At.target] 必须非空，否则转换阶段会按配置错误失败。
  * 指定的边界未命中时，切片按空范围处理。
  *

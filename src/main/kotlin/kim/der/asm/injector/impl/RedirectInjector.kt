@@ -74,7 +74,8 @@ import java.lang.reflect.Modifier
  * [InjectionPoint.ARRAY_LENGTH] 不使用目标签名
  * @param ordinal 匹配点序号；负数表示重定向全部匹配点，当前用于方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、局部变量读写、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
- * 使用 [InjectionPoint.INVOKE] 边界缩小匹配范围
+ * 使用 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或
+ * [InjectionPoint.CONSTANT] 边界缩小匹配范围
  * @param args 调用点附加参数；`array=get` 匹配数组元素读取，`array=set` 匹配数组元素写入，`array=length` 匹配字段来源数组长度；
  * [InjectionPoint.ARRAY_LENGTH] 直接匹配裸数组长度指令，不使用附加参数；[InjectionPoint.LOAD] / [InjectionPoint.STORE]
  * 支持 `index=N`、`var=N` 槽位过滤或 `name=localName` 变量名过滤
@@ -346,7 +347,7 @@ class RedirectInjector(
             insns,
             slice,
             "@Redirect",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

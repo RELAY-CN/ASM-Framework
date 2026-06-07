@@ -383,7 +383,7 @@ annotation class Unique
  * 以及动态调用点描述符匹配；可用 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串实参调用点
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，当前仅在 INVOKE 模式下生效
  * @param slice 切片范围；当前 INVOKE 调用点参数修改支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际参数修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际参数修改数不能超过该值
@@ -487,7 +487,7 @@ annotation class ModifyArg(
  * [At.target] 为空时按兼容调用点推断；可用 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串实参调用点
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
  * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际参数组修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际参数组修改数不能超过该值
@@ -522,7 +522,7 @@ annotation class ModifyArgs(
     /**
      * 调用点查找切片。
      *
-     * 候选调用会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选调用会限制在 [Slice.from] 之后、[Slice.to] 之前，边界本身不参与匹配。
      */
     val slice: Slice = Slice(),
 
@@ -578,7 +578,7 @@ annotation class ModifyArgs(
  * - [At.value] 为 [InjectionPoint.FIELD_ASSIGN] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段写入 receiver；
  *   静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数；携带 [At.args] 会在转换阶段失败
  * - [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice]
- *   把候选 receiver 改写限制在一段 INVOKE 边界之间，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配
+ *   把候选 receiver 改写限制在一段 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间，边界本身不参与匹配
  * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
  * - [require] / [allow] 可约束实际 receiver 修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望 receiver 修改数量，不一致时只输出警告，不阻断转换
@@ -587,8 +587,8 @@ annotation class ModifyArgs(
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配点序号；`-1` 表示修改全部匹配点，`0` 及以上表示只修改第 N 个匹配点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
- * receiver 改写支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围，
- * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * receiver 改写支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT]
+ * 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际 receiver 修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际 receiver 修改数不能超过该值
@@ -623,7 +623,7 @@ annotation class ModifyReceiver(
     /**
      * receiver 操作点查找切片。
      *
-     * 候选操作会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选操作会限制在 [Slice.from] 之后、[Slice.to] 之前，边界本身不参与匹配。
      */
     val slice: Slice = Slice(),
 
@@ -743,7 +743,8 @@ annotation class ModifyReceiver(
  * @param ordinal 匹配操作点序号；`-1` 表示包裹全部匹配操作点，`0` 及以上表示只包裹第 N 个匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST] /
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.THROW] 操作包裹支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.THROW] 操作包裹支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际操作包裹数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际操作包裹数不能超过该值
@@ -778,7 +779,7 @@ annotation class WrapOperation(
     /**
      * 操作点查找切片。
      *
-     * 候选操作会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选操作会限制在 [Slice.from] 之后、[Slice.to] 之前，边界本身不参与匹配。
      */
     val slice: Slice = Slice(),
 
@@ -949,7 +950,7 @@ annotation class WrapMethod(
  * [InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH] 与 [InjectionPoint.THROW]
  * 模式可使用 [slice] 把候选调用、调用返回值、字段读取、字段写入、数组元素读取、数组元素写入、数组长度读取、
  * 局部变量读取、局部变量写入、对象构造、类型转换、类型判断、条件跳转、switch selector、常量加载或抛异常点
- * 限制在一段 INVOKE 边界之间，边界指令本身不参与匹配。
+ * 限制在一段 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间，边界本身不参与匹配。
  *
  * ASM 方法要求：
  *
@@ -988,7 +989,7 @@ annotation class WrapMethod(
  * @param ordinal 匹配点序号；`-1` 表示包裹全部匹配点，`0` 及以上表示只包裹第 N 个匹配点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH] 与 [InjectionPoint.THROW]
- * 模式支持 INVOKE 边界切片
+ * 模式支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界切片
  * @param require 最小命中数；大于 0 时实际条件包裹数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际条件包裹数不能超过该值
@@ -1023,7 +1024,7 @@ annotation class WrapWithCondition(
     /**
      * 条件包裹点查找切片。
      *
-     * 候选点会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选点会限制在 [Slice.from] 之后、[Slice.to] 之前，边界本身不参与匹配。
      */
     val slice: Slice = Slice(),
 
@@ -1069,7 +1070,7 @@ annotation class WrapWithCondition(
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、[InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、
  * 数组元素读取、数组元素写入值、数组长度、裸数组长度、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式可使用 [slice] 把候选点限制在
- * 一段 INVOKE 边界内，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配。
+ * 一段 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界内，边界本身不参与匹配。
  *
  * ASM 方法要求：
  *
@@ -1108,8 +1109,8 @@ annotation class WrapWithCondition(
  * @param ordinal 匹配表达式序号；`-1` 表示修改全部匹配表达式，`0` 及以上表示只修改第 N 个匹配表达式
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 调用返回、
  * [InjectionPoint.FIELD] 字段读取、[InjectionPoint.FIELD_ASSIGN] 字段写入值、数组元素读取、数组元素写入值、数组长度、[InjectionPoint.ARRAY_LENGTH] 裸数组长度、[InjectionPoint.NEW]、[InjectionPoint.CAST]、
- * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]
- * 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * [InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT] 与 [InjectionPoint.THROW] 表达式支持用 [Slice.from] / [Slice.to] 的
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际表达式值修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际表达式值修改数不能超过该值
@@ -1144,7 +1145,7 @@ annotation class ModifyExpressionValue(
     /**
      * 表达式查找切片。
      *
-     * 候选表达式会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选表达式会限制在 [Slice.from] 之后、[Slice.to] 之前，边界本身不参与匹配。
      */
     val slice: Slice = Slice(),
 
@@ -1200,8 +1201,8 @@ annotation class ModifyExpressionValue(
  * - [InjectionPoint.HEAD] 会在目标方法体执行前写回选中的参数槽位
  * - [InjectionPoint.LOAD] 会在匹配的 xLOAD 指令前加载当前槽位值、调用 handler，并写回同一槽位
  * - [InjectionPoint.STORE] 会在匹配的 xSTORE 指令后加载新存入的值、调用 handler，并写回同一槽位
- * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 INVOKE 边界之间，
- *   边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配
+ * - [InjectionPoint.LOAD] / [InjectionPoint.STORE] 可使用 [slice] 把候选读取点或写入点限制在一段 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间，
+ *   边界本身不参与匹配
  * - [index] 为负数时，按 handler 第一个参数类型筛选入口参数、读取点或写入点，并用 [ordinal] 选择第 N 个同类型匹配项；HEAD 模式同类型入口参数唯一时可省略 [ordinal]
  * - [method] 为空时会按 handler 名称、变量类型、返回类型、[index] / [name] / [argsOnly] / [ordinal]、
  *   [slice] 限定后的实际读取或写入候选和追加目标参数兼容规则匹配唯一同名目标方法；多个兼容重载需要显式指定 [method]
@@ -1216,7 +1217,7 @@ annotation class ModifyExpressionValue(
  * 名称会先去除首尾空白，空白名称会在转换阶段失败，不会退化为无变量名过滤
  * @param ordinal 未指定 [index] 时，同类型入口参数、读取点或写入点的序号；HEAD 模式同类型入口参数唯一时可保持默认值
  * @param slice 切片范围；当前 [InjectionPoint.LOAD] 局部变量读取改写与 [InjectionPoint.STORE] 局部变量写入改写
- * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际变量修改数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际变量修改数不能超过该值
@@ -1318,8 +1319,8 @@ annotation class ModifyVariable(
  * - primitive 返回类型必须与目标方法返回类型一致；对象/数组返回类型可为目标类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型
  * - 参数可选：可不声明参数直接返回新值，也可以接收原始返回值并追加目标方法的部分参数
  * - 原返回值或目标方法参数为对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`
- * - [slice] 可把候选返回点限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界之间，
- *   边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配，且 [ordinal] 会在切片内重新计数
+ * - [slice] 可把候选返回点限制在 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间，
+ *   边界本身不参与匹配，且 [ordinal] 会在切片内重新计数
  * - [method] 为空时会按 handler 名称、返回类型、[ordinal] 对应的真实返回点和参数兼容规则匹配唯一同名目标方法，多个兼容重载需要显式指定 [method]
  * - [require] / [allow] 可约束实际返回值修改数量，目标字节码漂移时会在转换阶段失败
  * - [expect] 用于调试期望返回值修改数量，不一致时只输出警告，不阻断转换
@@ -1332,7 +1333,7 @@ annotation class ModifyVariable(
  * @param allow 最大命中数；大于等于 0 时实际返回值修改数不能超过该值
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @param slice 切片范围；当前返回值修改支持用 [Slice.from] / [Slice.to] 的
- * [InjectionPoint.INVOKE] 边界缩小查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围；
  * 位于参数列表末尾以减少对既有位置参数调用的影响
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -1570,7 +1571,8 @@ annotation class ModifyConstant(
  * @param at 调用点信息；[At.value] 决定重定向方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、裸数组长度读取、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载还是抛异常点，[At.target] 用于指定匹配签名；[InjectionPoint.INVOKE] 省略时按 handler 签名筛选兼容调用点，[InjectionPoint.CONSTANT] 省略时按 handler 首参与返回类型筛选兼容常量，[InjectionPoint.THROW] 省略时按 handler 签名筛选兼容抛异常候选，[InjectionPoint.LOAD] / [InjectionPoint.STORE] 不使用 [At.target]，可通过 [At.args] 中的 `index=N`、`var=N` 或 `name=localName` 过滤 JVM 局部变量槽位或 LocalVariableTable 变量名；[InjectionPoint.SWITCH] 不使用 [At.target]，[InjectionPoint.ARRAY_LENGTH] 不使用 [At.target] 或 [At.args]
  * @param ordinal 匹配点序号；`-1` 表示重定向全部匹配点，当前在方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度读取、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点中生效
  * @param slice 切片范围；当前方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、裸数组长度、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向
- * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE] 边界缩小查找范围
+ * 支持用 [Slice.from] / [Slice.to] 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、
+ * [InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
  * @param require 最小命中数；大于 0 时实际重定向数必须不少于该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param allow 最大命中数；大于等于 0 时实际重定向数不能超过该值
@@ -1612,7 +1614,7 @@ annotation class Redirect(
     /**
      * 重定向点查找切片。
      *
-     * 候选点会限制在 [Slice.from] 之后、[Slice.to] 之前，边界调用本身不参与匹配。
+     * 候选点会限制在 [Slice.from] 之后、[Slice.to] 之前，边界本身不参与匹配。
      */
     val slice: Slice = Slice(),
 

@@ -162,7 +162,7 @@ class InvokeInjector(
             insns,
             slice,
             "@AsmInject(INVOKE/INVOKE_ASSIGN)",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

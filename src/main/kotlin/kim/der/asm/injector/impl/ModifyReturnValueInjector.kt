@@ -27,12 +27,12 @@ import java.lang.reflect.Modifier
  * 原返回值或目标方法参数为对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`；
  * handler 返回类型对基础类型必须精确匹配，对象/数组可返回目标类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回目标返回类型。
- * [slice] 可把候选返回点限制在 INVOKE 边界之间，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，
+ * [slice] 可把候选返回点限制在 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间，
  * 边界指令本身不参与匹配；[ordinal] 会在切片内重新计数。
  *
  * @param ordinal 返回点序号；负数表示修改全部非 void 返回点
- * @param slice 切片范围；当前使用 INVOKE 边界缩小返回点匹配范围，边界可匹配普通方法调用、构造器调用或
- * `invokedynamic` 调用
+ * @param slice 切片范围；当前使用 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或
+ * [InjectionPoint.CONSTANT] 边界缩小返回点匹配范围
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -218,7 +218,7 @@ class ModifyReturnValueInjector(
             insns,
             slice,
             "@ModifyReturnValue",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     private fun parseTargetMethod(signature: String): Triple<String?, String?, String?> {

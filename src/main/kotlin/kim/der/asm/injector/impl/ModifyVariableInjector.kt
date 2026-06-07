@@ -44,8 +44,8 @@ import java.lang.reflect.Modifier
  * @param variableIndex 要修改的 JVM 局部变量槽位索引
  * @param variableNames 要匹配的局部变量名；为空时不按名称过滤
  * @param ordinal 未指定 [variableIndex] 时，同类型入口参数、读取点或写入点的序号
- * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 INVOKE 边界缩小匹配范围，
- * 边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * @param slice 切片范围；[InjectionPoint.LOAD] 与 [InjectionPoint.STORE] 使用 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、
+ * [InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小匹配范围
  * @param argsOnly 是否只匹配目标方法参数槽位
  *
  * @author Dr (dr@der.kim)
@@ -915,7 +915,7 @@ class ModifyVariableInjector(
             insns,
             slice,
             "@ModifyVariable(LOAD/STORE)",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

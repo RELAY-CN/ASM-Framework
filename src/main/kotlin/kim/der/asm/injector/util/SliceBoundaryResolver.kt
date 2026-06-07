@@ -28,20 +28,23 @@ import org.objectweb.asm.tree.MethodInsnNode
  */
 internal object SliceBoundaryResolver {
     /**
-     * 绝大多数注解只允许用 INVOKE 作为切片边界。
+     * 通用注解支持的切片边界类型。
+     *
+     * 字段与常量哨兵常用于把旧重定向逻辑迁移到注解式 API 时收窄业务片段，所有使用该集合的注解
+     * 都共享同一套边界解析和失败语义。
      */
-    val INVOKE_BOUNDARIES: Set<InjectionPoint> = setOf(InjectionPoint.INVOKE)
-
-    /**
-     * `@ModifyConstant` 支持的切片边界类型。
-     */
-    val MODIFY_CONSTANT_BOUNDARIES: Set<InjectionPoint> =
+    val GENERAL_BOUNDARIES: Set<InjectionPoint> =
         setOf(
             InjectionPoint.INVOKE,
             InjectionPoint.FIELD,
             InjectionPoint.FIELD_ASSIGN,
             InjectionPoint.CONSTANT,
         )
+
+    /**
+     * `@ModifyConstant` 与通用注解保持一致的切片边界类型。
+     */
+    val MODIFY_CONSTANT_BOUNDARIES: Set<InjectionPoint> = GENERAL_BOUNDARIES
 
     /**
      * 解析切片在指令数组中的半开范围。

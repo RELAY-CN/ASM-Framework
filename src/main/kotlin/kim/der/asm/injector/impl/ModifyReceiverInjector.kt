@@ -43,7 +43,8 @@ import java.lang.reflect.Modifier
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
- * receiver 改写使用 INVOKE 边界缩小匹配范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用
+ * receiver 改写使用 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或
+ * [InjectionPoint.CONSTANT] 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -754,7 +755,7 @@ class ModifyReceiverInjector(
             insns,
             slice,
             "@ModifyReceiver",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

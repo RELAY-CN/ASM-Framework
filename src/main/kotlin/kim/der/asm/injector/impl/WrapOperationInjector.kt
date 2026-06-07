@@ -74,7 +74,8 @@ import java.lang.reflect.Modifier
  * @param ordinal 匹配操作点序号；负数表示处理全部匹配操作点
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与
  * [InjectionPoint.FIELD_ASSIGN]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.JUMP]、
- * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用 INVOKE 边界缩小匹配范围
+ * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.THROW] 操作包裹使用
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -3996,7 +3997,7 @@ class WrapOperationInjector(
             insns,
             slice,
             "@WrapOperation",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

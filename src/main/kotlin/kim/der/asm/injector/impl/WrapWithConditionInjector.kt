@@ -79,7 +79,7 @@ import java.lang.reflect.Modifier
  * @param slice 切片范围；当前 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.ARRAY_LENGTH]、[InjectionPoint.CONSTANT]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH] 与 [InjectionPoint.THROW]
  * 条件包裹使用
- * INVOKE 边界缩小匹配范围
+ * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小匹配范围
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -3855,7 +3855,7 @@ class WrapWithConditionInjector(
             insns,
             slice,
             "@WrapWithCondition",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**

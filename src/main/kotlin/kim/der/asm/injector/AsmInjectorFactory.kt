@@ -66,7 +66,7 @@ object AsmInjectorFactory {
      * @param index 要修改的参数索引
      * @param at 调用点定位；默认 HEAD 时保持入口参数改写语义
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前 INVOKE 调用点参数修改支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE 调用点参数修改支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return ModifyArg 注入器
      *
      * @author Dr (dr@der.kim)
@@ -88,7 +88,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param at 调用点定位；当前仅支持 INVOKE
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return ModifyArgs 注入器
      *
      * @author Dr (dr@der.kim)
@@ -109,7 +109,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param at 调用点定位；当前支持 INVOKE、FIELD 与 FIELD_ASSIGN
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
-     * @param slice 切片范围；当前 INVOKE、FIELD 与 FIELD_ASSIGN receiver 改写支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE、FIELD 与 FIELD_ASSIGN receiver 改写支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return ModifyReceiver 注入器
      *
      * @author Dr (dr@der.kim)
@@ -131,7 +131,7 @@ object AsmInjectorFactory {
      * @param at 操作点定位；当前支持 INVOKE、FIELD、FIELD_ASSIGN、NEW、CAST、INSTANCEOF、ARRAY_LENGTH、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
      * @param slice 切片范围；当前调用、字段、数组、裸 ARRAYLENGTH、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
-     * 操作包裹支持 INVOKE 边界切片
+     * 操作包裹支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return WrapOperation 注入器
      *
      * @author Dr (dr@der.kim)
@@ -152,7 +152,7 @@ object AsmInjectorFactory {
      * @param asmInfo ASM 注册信息
      * @param at 调用点定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、ARRAY_LENGTH、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW
      * @param ordinal 匹配点序号；负数表示处理全部匹配点
-     * @param slice 切片范围；当前 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、ARRAY_LENGTH、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW 条件包裹支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、ARRAY_LENGTH、LOAD、STORE、NEW、CAST、INSTANCEOF、CONSTANT、JUMP、SWITCH 与 THROW 条件包裹支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return WrapWithCondition 注入器
      *
      * @author Dr (dr@der.kim)
@@ -174,7 +174,7 @@ object AsmInjectorFactory {
      * @param at 表达式定位；当前支持 INVOKE、INVOKE_ASSIGN、FIELD、FIELD_ASSIGN、NEW、CAST、INSTANCEOF、ARRAY_LENGTH、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
      * @param slice 切片范围；当前调用返回、字段读取、字段写入值、数组读取、数组写入值、数组长度、裸 ARRAYLENGTH、NEW、CAST、INSTANCEOF、LOAD、STORE、JUMP、SWITCH、CONSTANT 与 THROW
-     * 表达式改写支持 INVOKE 边界切片
+     * 表达式改写支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return ModifyExpressionValue 注入器
      *
      * @author Dr (dr@der.kim)
@@ -197,7 +197,7 @@ object AsmInjectorFactory {
      * @param index 要修改的局部变量槽位索引
      * @param names 要匹配的局部变量名集合
      * @param ordinal 未指定槽位索引时，同类型入口参数、读取点或写入点的序号
-     * @param slice 切片范围；当前 LOAD 与 STORE 局部变量改写支持 INVOKE 边界切片
+     * @param slice 切片范围；当前 LOAD 与 STORE 局部变量改写支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @param argsOnly 是否只匹配目标方法参数槽位
      * @return ModifyVariable 注入器
      *
@@ -234,7 +234,7 @@ object AsmInjectorFactory {
      * @param injectionPoint Redirect 的定位点类型
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
      * @param slice 切片范围；当前方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、裸 ARRAYLENGTH、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向支持
-     * INVOKE 边界切片
+     * INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @param args 调用点附加参数；数组模式支持 `array=get`、`array=set` 与 `array=length`，LOAD / STORE 支持 `index=N` 与 `var=N` 槽位过滤，ARRAY_LENGTH 不使用该参数
      * @return Redirect 注入器
      *
@@ -291,7 +291,7 @@ object AsmInjectorFactory {
      * @param method ASM 方法
      * @param asmInfo ASM 注册信息
      * @param ordinal 返回点序号；负数表示处理全部非 void 返回点
-     * @param slice 切片范围；当前返回值修改支持 INVOKE 边界切片
+     * @param slice 切片范围；当前返回值修改支持 INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
      * @return ModifyReturnValue 注入器
      *
      * @author Dr (dr@der.kim)

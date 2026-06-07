@@ -40,8 +40,9 @@ import java.lang.reflect.Method
  * 当前实现只负责在匹配指令前后插入 ASM 方法调用，不替换原始指令，也不向 handler 传递栈顶操作数。
  * 普通 [InjectionPoint.INVOKE_STRING] / [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.NEW] / [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] /
- * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] 可使用 `Slice` 的 [InjectionPoint.INVOKE]
- * 边界缩小候选指令查找范围，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；
+ * [InjectionPoint.SWITCH] / [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] 可使用 `Slice`
+ * 的 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT]
+ * 边界缩小候选指令查找范围，方法边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，字段边界按字段签名匹配，常量边界按常量文本匹配；
  * 也可通过 `At.by` 按真实字节码指令数移动插入锚点；LOAD/STORE 还可通过 `At.args` 中的
  * `index=N` 或 `var=N` 限制 JVM 局部变量槽位，也可用 `name=localName` 按 LocalVariableTable 名称过滤；
  * INVOKE_STRING 使用 `At.target` 匹配普通方法调用，并用 `At.args` 中的 `ldc=<string>` 或 `string=<string>`
@@ -285,7 +286,7 @@ class InstructionPointInjector(
             insns,
             slice,
             "@AsmInject instruction points",
-            SliceBoundaryResolver.INVOKE_BOUNDARIES,
+            SliceBoundaryResolver.GENERAL_BOUNDARIES,
         )
 
     /**
