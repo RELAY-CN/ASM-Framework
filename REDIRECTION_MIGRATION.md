@@ -34,8 +34,8 @@
 | 在 handler 内按需调用、跳过或多次执行原操作 | `@WrapOperation` | 需要 `Operation` 句柄、要组合原参数或多次调用时优先使用 |
 | 只按条件决定是否保留原调用、调用返回值、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整 |
-| 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` | 保留原调用，只替换指定实参；字符串参数替换也走此路径 |
-| 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数 |
+| 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` | 保留原调用，只替换指定实参；可用 `at.args = ["ldc=value"]` / `["string=value"]` 锁定直接字符串实参调用点 |
+| 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数；同样支持直接字符串实参过滤 |
 | 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值 |
 | 包裹整个目标方法并按需调用原方法 | `@WrapMethod` | handler 接收 `Operation` 原方法句柄，可跳过、调用一次或多次执行原方法 |
 | 把整类方法替换为默认返回值 | `@ReplaceAllMethods` | 只用于默认实现/禁用整类方法，不再经过旧 manager 分派 |
@@ -135,7 +135,9 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
 字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`。它只匹配调用实参中的直接 `LDC String`，
 且 `At.target` 必须写包含 owner 的 `owner.name(desc)`，
 不会把该字符串传给 handler，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic` 生成的字符串。
-需要替换字符串实参时，应使用 `@ModifyArg` 或 `@ModifyArgs`，而不是把 `INVOKE_STRING` 当作替换能力。
+需要替换字符串实参时，应使用 `@ModifyArg` 或 `@ModifyArgs`，并可通过
+`at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用参数直接来自该常量的调用点；
+过滤后再计算 `ordinal`、`require` 与 `allow`。不要把 `INVOKE_STRING` 当作替换能力。
 
 ### 3. 参数与 receiver 迁移
 
@@ -143,6 +145,9 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
 
 - 只改单个调用参数时使用 `@ModifyArg`。它会保留原调用，只在原调用前替换 `index` 指定或推断出的实参。
 - 批量改写参数组时使用 `@ModifyArgs`。handler 接收 `Args` 容器，可一次读取、校验和写回整组调用参数。
+- 如果旧逻辑靠固定字符串参数区分调用点，可在 `@ModifyArg(INVOKE)` 或 `@ModifyArgs(INVOKE)` 的 `At.args`
+  中声明唯一的 `ldc=<string>` 或 `string=<string>`。该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver、
+  局部变量、拼接字符串或方法返回值。
 - `INVOKE_STRING` 只用于观察直接字符串常量实参调用点；它不会把字符串传给 handler，也不会替换字符串参数。
   替换字符串实参时使用 `@ModifyArg` 或 `@ModifyArgs`。
 - 只替换实例调用或实例字段访问 receiver 时使用 `@ModifyReceiver`。它保留原调用参数、字段读取值或字段待写入值，

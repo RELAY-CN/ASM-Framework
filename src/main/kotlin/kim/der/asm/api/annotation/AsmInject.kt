@@ -240,6 +240,8 @@ enum class InjectionPoint {
  *   `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * - INVOKE_STRING 目标要求包含 owner 的普通方法调用描述符 `owner.name(desc)`，并通过 [args] 中的 `ldc=<string>` 或 `string=<string>`
  *   指定直接字符串常量实参。它只观察调用点，不接收或替换该字符串，不匹配局部变量、拼接字符串、`invokedynamic` 或方法返回值。
+ * - [ModifyArg] / [ModifyArgs] 的 INVOKE 模式也可通过 [args] 中唯一的 `ldc=<string>` 或 `string=<string>`
+ *   只匹配调用参数直接来自该 `LDC String` 的调用点；该过滤会先于 `ordinal` 与命中数契约生效。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 支持 Slice 缩小候选范围，不支持 AFTER 与 by；REPLACE 仍按匹配前观察插入处理。AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
@@ -313,7 +315,8 @@ enum class InjectionPoint {
  * 其中 `array=get` / `array=length` 需配合 [InjectionPoint.FIELD]，`array=set` 需配合
  * [InjectionPoint.FIELD_ASSIGN]；[InjectionPoint.ARRAY_LENGTH] 不需要附加参数；普通 [AsmInject] 的 ARRAY_LENGTH 不使用附加参数，
  * 普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`，
- * 普通 [AsmInject] 的 [InjectionPoint.INVOKE_STRING] 支持 `ldc=<string>` 或 `string=<string>`
+ * 普通 [AsmInject] 的 [InjectionPoint.INVOKE_STRING] 以及 [ModifyArg] / [ModifyArgs] 的
+ * [InjectionPoint.INVOKE] 模式支持 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */
@@ -347,7 +350,8 @@ annotation class At(
     /**
      * 附加定位参数。
      *
-     * 典型值包括 `array=get`、`array=set`、`array=length`、`index=N`、`var=N` 或 `name=localName`。
+     * 典型值包括 `array=get`、`array=set`、`array=length`、`index=N`、`var=N`、`name=localName`、
+     * `ldc=<string>` 或 `string=<string>`。
      */
     val args: Array<String> = [],
 )

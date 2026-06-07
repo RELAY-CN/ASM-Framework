@@ -13,6 +13,7 @@ import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.injector.util.AsmMethodCallGenerator
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import org.objectweb.asm.Opcodes
@@ -30,11 +31,6 @@ import org.objectweb.asm.tree.MethodNode
 import org.objectweb.asm.tree.TableSwitchInsnNode
 import org.objectweb.asm.tree.TypeInsnNode
 import org.objectweb.asm.tree.VarInsnNode
-import org.objectweb.asm.tree.analysis.Analyzer
-import org.objectweb.asm.tree.analysis.AnalyzerException
-import org.objectweb.asm.tree.analysis.Frame
-import org.objectweb.asm.tree.analysis.SourceInterpreter
-import org.objectweb.asm.tree.analysis.SourceValue
 import java.lang.reflect.Method
 
 /**
@@ -421,21 +417,21 @@ class InstructionPointInjector(
     ): (AbstractInsnNode) -> Boolean {
         return when (point) {
             InjectionPoint.INVOKE_STRING -> {
-                val stringLiteral = parseInvokeStringLiteral(args)
+                val stringLiteral = DirectStringArgumentMatcher.parseRequiredFilter(args, "@AsmInject(INVOKE_STRING)")
                 val (targetOwner, targetName, targetDesc) = parseTargetMethod(target)
                 if (targetOwner == null || targetName == null || targetDesc == null) {
                     throw IllegalArgumentException(
                         "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc): $target",
                     )
                 }
-                val frames = analyzeSourceFrames(method)
+                val frames = DirectStringArgumentMatcher.analyzeFrames(asmInfo, method, "@AsmInject(INVOKE_STRING)")
                 val insns = method.instructions.toArray()
                 fun(insn: AbstractInsnNode): Boolean {
                     if (insn !is MethodInsnNode || !matchesTargetMethod(insn, targetOwner, targetName, targetDesc)) {
                         return false
                     }
                     val index = insns.indexOf(insn)
-                    return index >= 0 && methodCallHasDirectStringArgument(frames[index], insn, stringLiteral)
+                    return index >= 0 && DirectStringArgumentMatcher.hasDirectStringArgument(frames[index], insn, stringLiteral)
                 }
             }
             InjectionPoint.FIELD -> {
@@ -912,98 +908,6 @@ class InstructionPointInjector(
             }
         val classLoader = asmInfo.asmClass.classLoader ?: ClassLoader.getSystemClassLoader()
         return Class.forName(className, false, classLoader)
-    }
-
-    /**
-     * 解析 `INVOKE_STRING` 的直接字符串常量过滤条件。
-     *
-     * `ldc=` 与 `string=` 是等价写法；必须显式声明一个过滤值，避免该注入点退化成宽泛方法调用匹配。
-     *
-     * @param args `At.args` 中的附加定位参数
-     * @return 需要匹配的直接字符串常量
-     * @throws IllegalArgumentException 未声明或重复声明字符串过滤条件时抛出
-     */
-    private fun parseInvokeStringLiteral(args: Array<String>): String {
-        require(args.isNotEmpty()) {
-            "@AsmInject(INVOKE_STRING) requires at.args entry ldc=<string> or string=<string>"
-        }
-        require(args.size == 1) {
-            "@AsmInject(INVOKE_STRING) supports only one at.args entry ldc=<string> or string=<string>"
-        }
-        val arg = args.single().trim()
-        return when {
-            arg.startsWith("ldc=") -> arg.substringAfter("ldc=")
-            arg.startsWith("string=") -> arg.substringAfter("string=")
-            else -> throw IllegalArgumentException(
-                "@AsmInject(INVOKE_STRING) requires at.args entry ldc=<string> or string=<string>",
-            )
-        }
-    }
-
-    /**
-     * 使用 ASM 数据流分析获取每条指令执行前的来源集合。
-     *
-     * 当前只用它判断目标调用消费的参数是否直接来自 `LDC String`，不尝试追踪局部变量写入来源或字符串拼接来源。
-     *
-     * @param method 目标方法
-     * @return 与指令数组下标对应的分析帧
-     * @throws IllegalStateException ASM 分析失败时抛出，消息保留目标方法签名方便定位
-     */
-    private fun analyzeSourceFrames(method: MethodNode): Array<Frame<SourceValue>?> =
-        try {
-            Analyzer(SourceInterpreter()).analyze(analysisOwner(), method)
-        } catch (e: AnalyzerException) {
-            throw IllegalStateException(
-                "@AsmInject(INVOKE_STRING) cannot analyze target method ${method.name}${method.desc}",
-                e,
-            )
-        }
-
-    /**
-     * 解析数据流分析使用的 owner。
-     *
-     * 精确目标注册优先使用目标类；路径匹配注册没有固定目标类，此处退回 ASM 类名即可，因为 SourceInterpreter
-     * 对本次 `LDC String` 来源判断不依赖 owner 的继承关系或类加载。
-     *
-     * @return JVM internal name
-     */
-    private fun analysisOwner(): String =
-        asmInfo.targets.firstOrNull()
-            ?: Type.getType(asmInfo.asmClass).internalName
-
-    /**
-     * 判断方法调用的实参来源中是否包含指定的直接 `LDC String`。
-     *
-     * 只检查调用指令消费的参数区间，不检查 receiver；`ALOAD local` 这类局部变量来源不会被当作直接字符串常量。
-     *
-     * @param frame 调用指令执行前的分析帧
-     * @param insn 候选普通方法调用
-     * @param stringLiteral 需要匹配的字符串常量
-     * @return 调用实参直接来自指定 `LDC String` 时返回 `true`
-     */
-    private fun methodCallHasDirectStringArgument(
-        frame: Frame<SourceValue>?,
-        insn: MethodInsnNode,
-        stringLiteral: String,
-    ): Boolean {
-        if (frame == null) {
-            return false
-        }
-
-        // ASM Frame 的 operand stack 按 value entry 计数，long/double 仍只占一个 SourceValue。
-        val argumentValueCount = Type.getArgumentTypes(insn.desc).size
-        val firstArgumentIndex = frame.stackSize - argumentValueCount
-        if (firstArgumentIndex < 0) {
-            return false
-        }
-
-        for (stackIndex in firstArgumentIndex until frame.stackSize) {
-            val source = frame.getStack(stackIndex)
-            if (source.insns.any { it is LdcInsnNode && it.cst == stringLiteral }) {
-                return true
-            }
-        }
-        return false
     }
 
     /**

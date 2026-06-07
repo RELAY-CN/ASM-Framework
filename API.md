@@ -458,7 +458,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 - `method: String = ""` - 目标方法签名；可省略并按 handler 名称、参数类型和实际兼容调用点推断唯一兼容目标
 - `index: Int = -1` - 参数索引（从 0 开始）；入口模式下为目标方法参数索引，负数表示按 handler 首参和返回类型推断唯一兼容参数；`INVOKE` 模式下为目标调用参数索引，负数同样表示按调用参数兼容性推断唯一参数
-- `at: At = At()` - 注入位置；默认 `HEAD` 改写入口参数，`at.value = InjectionPoint.INVOKE` 时用 `at.target` 匹配目标方法调用、构造器调用或 `invokedynamic` 调用；`at.target` 为空则按 handler 签名推断兼容调用点
+- `at: At = At()` - 注入位置；默认 `HEAD` 改写入口参数，`at.value = InjectionPoint.INVOKE` 时用 `at.target` 匹配目标方法调用、构造器调用或 `invokedynamic` 调用；`at.target` 为空则按 handler 签名推断兼容调用点；可用唯一的 `at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用参数直接来自该字符串常量的调用点
 - `ordinal: Int = -1` - 调用点匹配序号；`-1` 表示修改全部匹配调用点，当前仅在 `INVOKE` 模式下生效
 - `slice: Slice = Slice()` - 切片范围；当前 `INVOKE` 模式支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 最小命中数；大于 0 时实际参数修改数必须不少于该值
@@ -466,7 +466,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
-`@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；当被修改参数或追加的目标方法参数是对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`，返回值则可为原参数类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原参数类型，基础类型仍需精确匹配。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法：入口参数模式用 `index` 指向的目标参数类型、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；`index` 为负数时会在入口参数中推断唯一兼容参数，若多个参数都兼容则需要显式写出 `index`。调用点模式用实际兼容调用点筛出唯一兼容目标。多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中或推断出的调用参数后按原顺序恢复并继续执行原调用；省略 `at.target` 时，会用 `index` 指向或推断出的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀筛选普通方法调用、构造器调用或 `invokedynamic` 调用，不兼容候选不计入 `ordinal` 或命中数。构造器调用使用 `<init>` 目标，只能修改构造器描述符内的参数，不暴露未初始化 receiver。`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。handler 不会自动接收目标调用的其他参数；调用点 `index` 为负数时会在调用参数中推断唯一兼容参数，若多个调用参数都兼容则需要显式写出 `index`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyArg` handler 的第一个参数必须接收被修改的原始参数值，并返回同类型的新值；当被修改参数或追加的目标方法参数是对象/数组类型时，对应 handler 参数可声明为原值类型的父类、接口、`Any` 或 `Object`，返回值则可为原参数类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回原参数类型，基础类型仍需精确匹配。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法：入口参数模式用 `index` 指向的目标参数类型、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；`index` 为负数时会在入口参数中推断唯一兼容参数，若多个参数都兼容则需要显式写出 `index`。调用点模式用实际兼容调用点筛出唯一兼容目标。多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。调用点模式会在原调用执行前保存 receiver 与调用参数，改写 `index` 选中或推断出的调用参数后按原顺序恢复并继续执行原调用；省略 `at.target` 时，会用 `index` 指向或推断出的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀筛选普通方法调用、构造器调用或 `invokedynamic` 调用，不兼容候选不计入 `ordinal` 或命中数。`at.args` 可声明唯一的 `ldc=value` 或 `string=value`，只匹配调用参数直接来自该 `LDC String` 的候选；局部变量、字符串拼接、方法返回值和 receiver 来源不会命中，过滤后再计算 `ordinal` 与命中数。构造器调用使用 `<init>` 目标，只能修改构造器描述符内的参数，不暴露未初始化 receiver。`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。handler 不会自动接收目标调用的其他参数；调用点 `index` 为负数时会在调用参数中推断唯一兼容参数，若多个调用参数都兼容则需要显式写出 `index`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `@ModifyArg` 会统计实际写入参数修改逻辑的数量。入口参数模式最多命中 1 次；`INVOKE` 模式按匹配调用点数量计数。
 显式设置 `require` / `allow` / 非默认 `expect` 时按实际参数修改数量校验契约，违反 `require` 或 `allow`
@@ -481,7 +481,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 **参数：**
 
 - `method: String = ""` - 目标方法签名；可省略并按 handler 名称、调用点、handler 签名和实际兼容调用点推断唯一兼容目标
-- `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前仅支持 `INVOKE`，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；`at.target` 为空时按兼容调用点推断
+- `at: At = At(value = InjectionPoint.INVOKE)` - 调用点定位；当前仅支持 `INVOKE`，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；`at.target` 为空时按兼容调用点推断；可用唯一的 `at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用参数直接来自该字符串常量的调用点
 - `ordinal: Int = -1` - 调用点匹配序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
 - `slice: Slice = Slice()` - 切片范围；当前支持用 `INVOKE` 边界缩小查找范围
 - `require: Int = 0` - 要求的最小命中数；`0` 表示使用默认至少 1 次的显式契约语义
@@ -489,7 +489,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
-`@ModifyArgs` handler 的第一个参数必须是 `Args`，并返回 `Unit` / `void`。`Args` 按目标调用描述符的参数顺序保存参数，不包含实例方法 receiver；构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。可用 `args.get<T>(index)` 或 `args[index]` 读取参数，用 `args.set(index, value)` 或 `args[index] = value` 写回兼容类型的新值；Kotlin handler 也可用 `args.size` 读取参数数量，通过 `for (value in args)` 遍历当前参数，或使用 `joinToString` / `map` 等 `Iterable` 扩展。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 调用点、handler `Args` 首参、`Unit` 返回类型、后续目标方法参数前缀和实际兼容调用点筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。省略 `at.target` 时，框架会扫描普通方法调用、构造器调用或 `invokedynamic` 调用；若同一目标方法内存在多个兼容候选，应使用 `ordinal`、`slice`、`require` / `allow` 或显式 `at.target` 收窄。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+`@ModifyArgs` handler 的第一个参数必须是 `Args`，并返回 `Unit` / `void`。`Args` 按目标调用描述符的参数顺序保存参数，不包含实例方法 receiver；构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver；`invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;I)Ljava/lang/String;`。可用 `args.get<T>(index)` 或 `args[index]` 读取参数，用 `args.set(index, value)` 或 `args[index] = value` 写回兼容类型的新值；Kotlin handler 也可用 `args.size` 读取参数数量，通过 `for (value in args)` 遍历当前参数，或使用 `joinToString` / `map` 等 `Iterable` 扩展。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 `at.target` 调用点、handler `Args` 首参、`Unit` 返回类型、后续目标方法参数前缀和实际兼容调用点筛出唯一兼容目标；多个兼容重载会在转换阶段失败，需显式写出 `method`。省略 `at.target` 时，框架会扫描普通方法调用、构造器调用或 `invokedynamic` 调用；若同一目标方法内存在多个兼容候选，应使用 `ordinal`、`slice`、`require` / `allow`、直接字符串实参过滤或显式 `at.target` 收窄。`at.args` 可声明唯一的 `ldc=value` 或 `string=value`，只匹配调用参数直接来自该 `LDC String` 的候选；局部变量、字符串拼接、方法返回值和 receiver 来源不会命中，过滤后再计算 `ordinal` 与命中数。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object`。可用 `ordinal` 只选择第 N 个匹配调用点，也可用 `slice.from` / `slice.to` 把候选调用点限制在一段 `INVOKE` 边界之间。边界调用本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `@ModifyArgs` 会统计实际写入参数组修改逻辑的调用点数量。显式设置 `require` / `allow` / 非默认 `expect`
 时按实际参数组修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
@@ -1475,7 +1475,7 @@ fun wrapLoad(operation: Operation<String>): String {
 
 普通 `@AsmInject(INVOKE_ASSIGN)` 复用调用点注入器，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，但默认在匹配调用完成后插入 handler；如果需要调用前注入，应使用普通 `@AsmInject(INVOKE)`。
 `invokedynamic` 调用没有 receiver，目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
-普通 `@AsmInject(INVOKE_STRING)` 使用指令点注入器，只观察普通方法调用实参中的直接 `LDC String`，必须通过 `At.target` 指定普通方法调用，并通过 `args = ["ldc=value"]` 或 `["string=value"]` 指定字符串常量；它不会接收或替换该字符串，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic`。
+普通 `@AsmInject(INVOKE_STRING)` 使用指令点注入器，只观察普通方法调用实参中的直接 `LDC String`，必须通过 `At.target` 指定普通方法调用，并通过 `args = ["ldc=value"]` 或 `["string=value"]` 指定字符串常量；它不会接收或替换该字符串，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic`。`@ModifyArg(INVOKE)` 与 `@ModifyArgs(INVOKE)` 可用同样的 `args` 过滤调用参数直接来自指定字符串常量的候选，过滤后再计算 `ordinal` 与命中数。
 `@ModifyExpressionValue` 会把 `INVOKE` / `INVOKE_ASSIGN` 解释为“匹配调用完成后的返回值”；省略调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；把
 `FIELD` 解释为“匹配字段读取完成后的字段值”，当 `args = ["array=get"]` 时解释为“匹配数组元素读取
 完成后的元素值”，当 `args = ["array=length"]` 时解释为“匹配字段数组长度值”，把 `FIELD_ASSIGN` 解释为“匹配字段写入前的待写入值”，当 `FIELD_ASSIGN + args = ["array=set"]` 时解释为“匹配数组元素写入前的待写入元素值”，把 `ARRAY_LENGTH` 解释为“匹配任意裸 `ARRAYLENGTH` 指令产生的 `Int` 长度结果”，把 `NEW` 解释为“匹配对象构造完成后的实例”，把 `CAST` 解释为“匹配
@@ -1493,7 +1493,8 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 `Shift.BEFORE`；`Shift.REPLACE` 仍按匹配前观察插入处理，且不支持 `At.by`。普通 `@AsmInject(INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW/ARRAY_LENGTH)` 可用 `Slice`
 把候选指令限制在一段 `INVOKE` 边界内；普通 `@AsmInject(INVOKE_STRING)` 只作为直接字符串常量实参调用点附近的观察 hook，
 不会把字符串实参传给 handler，也可以用
-`at.args = ["ldc=value"]` 或 `["string=value"]` 按调用实参中的直接 `LDC String` 过滤。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
+`at.args = ["ldc=value"]` 或 `["string=value"]` 按调用实参中的直接 `LDC String` 过滤。`@ModifyArg(INVOKE)` 与
+`@ModifyArgs(INVOKE)` 使用同样格式过滤直接字符串实参调用点，但会继续替换选中参数或参数组。普通 `@AsmInject(LOAD/STORE)` 只作为局部变量读写指令附近的观察 hook，
 不会自动把局部变量值传给 handler；只读观察同作用域局部变量时可显式使用 `@Local`，也可以用
 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。需要只替换本次读取表达式值时使用 `@ModifyExpressionValue(LOAD)`，需要改写本次写入前栈值并让原 `xSTORE` 继续写入时使用 `@ModifyExpressionValue(STORE)`，需要保留可调用原读取值的操作句柄时使用 `@WrapOperation(LOAD)`，需要保留可调用待写入值的操作句柄并让原 `xSTORE` 继续写入 handler 返回值时使用 `@WrapOperation(STORE)`，需要读取并写回变量值时使用 `@ModifyVariable`。
 普通 `@AsmInject(NEW)` 只观察对象创建指令，不接收构造完成后的对象；只需要按额外条件决定是否保留构造结果时使用 `@WrapWithCondition(at = At(value = InjectionPoint.NEW, target = "..."))`，handler 首参接收构造完成后的引用，返回 `false` 会把本次构造表达式替换为 `null`。
@@ -1512,7 +1513,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 - `by: Int = 0` - 额外偏移量；当前普通 `@AsmInject(INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/THROW/ARRAY_LENGTH)` 支持按真实字节码指令数正负移动锚点
 - `args: Array<String> = []` - 附加定位参数；`@Redirect` 当前支持 `array=get`、`array=set`、
   `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=get` / `array=length` 需配合 `FIELD`，`array=set` 需配合 `FIELD_ASSIGN`；`@WrapOperation` 当前支持 `array=get`、`array=set`、`array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤；`@WrapWithCondition` 当前支持 `array=get`、`array=length`、`array=set` 与 `LOAD` / `STORE` 的 `index=N`、`var=N`、`name=localName` 局部变量过滤，其中 `array=get` / `array=length` 需配合 `FIELD`，`array=set` 需配合 `FIELD_ASSIGN`；`@ModifyExpressionValue` 当前支持 `array=get`、`array=set`
-  与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=get` / `array=length` 需配合 `FIELD`，`array=set` 需配合 `FIELD_ASSIGN`，`ARRAY_LENGTH` 不需要附加参数；普通 `@AsmInject(ARRAY_LENGTH)` 不使用附加参数；普通 `@AsmInject(INVOKE_STRING)` 当前必须且只能声明一个 `ldc=<string>` 或 `string=<string>` 直接字符串常量实参过滤；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
+  与 `array=length`，以及 `LOAD` / `STORE` 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，其中 `array=get` / `array=length` 需配合 `FIELD`，`array=set` 需配合 `FIELD_ASSIGN`，`ARRAY_LENGTH` 不需要附加参数；普通 `@AsmInject(ARRAY_LENGTH)` 不使用附加参数；普通 `@AsmInject(INVOKE_STRING)` 当前必须且只能声明一个 `ldc=<string>` 或 `string=<string>` 直接字符串常量实参过滤；`@ModifyArg(INVOKE)` 与 `@ModifyArgs(INVOKE)` 可选声明同样格式的直接字符串实参过滤；普通 `@AsmInject(LOAD/STORE)` 当前支持 `index=N`、`var=N` 与 `name=localName`
 
 **`target` 格式：**
 
@@ -1539,6 +1540,7 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 普通 `@AsmInject(LOAD/STORE)` 可使用 `args = ["index=N"]` 或 `args = ["var=N"]`，只在 JVM 局部变量槽位 `N`
 的 `xLOAD` / `xSTORE` 指令附近插入 handler；也可使用 `args = ["name=localName"]` 按 LocalVariableTable 名称匹配变量生命周期内的读写点。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。这些普通观察 hook 不会自动把槽位值传入 handler，也不会写回槽位；只读读取同作用域局部变量时可在 handler 参数上显式使用 `@Local`。
 普通 `@AsmInject(INVOKE_STRING)` 必须且只能使用一个 `args = ["ldc=value"]` 或 `args = ["string=value"]`，只在目标调用的实参栈来源包含直接 `LDC String` 时插入 handler；它不会追踪先保存到局部变量再传入的同值字符串，也不会追踪拼接字符串、方法返回值或 `invokedynamic` 生成的字符串。
+`@ModifyArg(INVOKE)` 与 `@ModifyArgs(INVOKE)` 的直接字符串实参过滤同样只检查调用参数来源，不匹配 receiver；配置多个 `args` 或未知前缀会在转换阶段失败。
 
 **示例：**
 

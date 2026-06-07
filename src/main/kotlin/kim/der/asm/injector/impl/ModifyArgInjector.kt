@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
@@ -26,6 +27,8 @@ import java.lang.reflect.Modifier
  * [argIndex] 为负数时，会按 handler 首参、返回类型和后续目标方法参数前缀推断唯一兼容参数。
  * [At.target] 为空时，会按 [argIndex] 指向或推断出的调用参数类型筛选兼容调用点；
  * 不兼容候选不会计入 [ordinal] 或命中数。
+ * [At.args] 可声明唯一的 `ldc=<string>` 或 `string=<string>`，只匹配调用参数直接来自该 `LDC String` 的调用点；
+ * 局部变量、字符串拼接、方法返回值和 receiver 来源不会被该过滤条件命中。
  * handler 的第一个参数是被修改的原参数；对象或数组参数可声明为原值类型的父类、接口、`Any` 或 `Object` 接收，
  * 返回类型对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原参数类型的子类型，也可用 `Any` 或 `Object`
  * 作为泛型引用返回类型，框架会在调用后转换回原参数类型。后续可按顺序接收目标方法参数前缀。
@@ -103,6 +106,10 @@ class ModifyArgInjector(
         if (!inferTarget && targetName == null) {
             throw IllegalArgumentException("@ModifyArg INVOKE requires at.target method signature")
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@ModifyArg(INVOKE)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@ModifyArg(INVOKE)")
+        }
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -119,6 +126,13 @@ class ModifyArgInjector(
                 } else {
                     describeMatchedCallSite(insn, targetOwner, targetName!!, targetDesc)
                 } ?: continue
+
+            if (stringLiteral != null) {
+                val analyzedFrames = frames ?: error("@ModifyArg(INVOKE) source frames must be analyzed before filtering")
+                if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                    continue
+                }
+            }
 
             if (!inferTarget) {
                 val currentOrdinal = matchedOrdinal++

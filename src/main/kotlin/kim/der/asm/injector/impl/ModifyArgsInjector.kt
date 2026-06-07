@@ -10,6 +10,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
@@ -36,6 +37,8 @@ import java.lang.reflect.Modifier
  * 不暴露未初始化 receiver；`invokedynamic` 调用按调用点描述符读取和写回参数，不存在 receiver。
  * [At.target] 为空时会扫描普通方法调用、构造器调用和 `invokedynamic` 调用；可配合 [ordinal]、[slice]
  * 或命中数约束收窄候选。
+ * [At.args] 可声明唯一的 `ldc=<string>` 或 `string=<string>`，只匹配调用参数直接来自该 `LDC String` 的调用点；
+ * 局部变量、字符串拼接、方法返回值和 receiver 来源不会被该过滤条件命中。
  *
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，目标为空时按兼容调用点推断
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
@@ -81,6 +84,10 @@ class ModifyArgsInjector(
         if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyArgs INVOKE requires at.target method signature")
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@ModifyArgs(INVOKE)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@ModifyArgs(INVOKE)")
+        }
 
         val targetParamCount = validateHandlerSignature(target)
         var injectionCount = 0
@@ -98,6 +105,13 @@ class ModifyArgsInjector(
                 } else {
                     describeMatchedCallSite(insn, targetOwner, targetName!!, targetDesc)
                 } ?: continue
+
+            if (stringLiteral != null) {
+                val analyzedFrames = frames ?: error("@ModifyArgs(INVOKE) source frames must be analyzed before filtering")
+                if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                    continue
+                }
+            }
 
             val currentOrdinal = matchedOrdinal++
             if (!matchesOrdinal(currentOrdinal)) {

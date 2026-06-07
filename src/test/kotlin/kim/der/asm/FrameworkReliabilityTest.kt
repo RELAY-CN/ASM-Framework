@@ -2355,6 +2355,37 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@ModifyArg(INVOKE) 可按直接字符串实参过滤调用点")
+    fun modifyArgAtInvokeArgsLdcFiltersDirectStringCallArgument() {
+        AsmRegistry.register(ModifyArgStringLiteralFilterMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StringFilteredModifyArgTarget", stringFilteredModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StringFilteredModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertThat(result)
+            .`as`("Then: 只有直接传入 rewrite 字符串实参的 concat 调用应被改写")
+            .isEqualTo("first-keep:second-changed")
+    }
+
+    @Test
+    @DisplayName("@ModifyArg(INVOKE) 拒绝无法识别的字符串过滤参数")
+    fun modifyArgAtInvokeArgsRejectsUnsupportedStringFilter() {
+        AsmRegistry.register(InvalidModifyArgStringFilterMixin::class.java)
+
+        assertThatThrownBy {
+            AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 错误的 At.args 不能被静默忽略，否则关键参数补丁会误命中调用点")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@ModifyArg(INVOKE) supports at.args only as a single ldc=<string> or string=<string> direct string filter",
+            )
+    }
+
+    @Test
     fun modifyArgRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeModifyArgMixin::class.java)
 
@@ -2661,6 +2692,37 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("first raw:second changed", result)
+    }
+
+    @Test
+    @DisplayName("@ModifyArgs(INVOKE) 可按直接字符串实参过滤调用点")
+    fun modifyArgsAtInvokeArgsStringFiltersDirectStringCall() {
+        AsmRegistry.register(ModifyArgsStringLiteralFilterMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StringFilteredModifyArgsTarget", stringFilteredModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StringFilteredModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertThat(result)
+            .`as`("Then: 只有直接传入 second raw 字符串实参的静态调用参数组应被改写")
+            .isEqualTo("first raw:second changed")
+    }
+
+    @Test
+    @DisplayName("@ModifyArgs(INVOKE) 拒绝无法识别的字符串过滤参数")
+    fun modifyArgsAtInvokeArgsRejectsUnsupportedStringFilter() {
+        AsmRegistry.register(InvalidModifyArgsStringFilterMixin::class.java)
+
+        assertThatThrownBy {
+            AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 错误的 At.args 不能被静默忽略，否则参数组补丁会误命中调用点")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@ModifyArgs(INVOKE) supports at.args only as a single ldc=<string> or string=<string> direct string filter",
+            )
     }
 
     @Test
@@ -12944,6 +13006,43 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "modified"
     }
 
+    @AsmMixin("StringFilteredModifyArgTarget")
+    object ModifyArgStringLiteralFilterMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=rewrite"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            check(original == "rewrite")
+            return "changed"
+        }
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object InvalidModifyArgStringFilterMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["unsupported=original"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
     @AsmMixin("ModifyArgContractTarget")
     object RequireThreeModifyArgMixin {
         @ModifyArg(
@@ -13348,6 +13447,44 @@ class FrameworkReliabilityTest {
         fun modify(args: Args) {
             args.set(0, "raw")
             args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("StringFilteredModifyArgsTarget")
+    object ModifyArgsStringLiteralFilterMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "StringFilteredModifyArgsTarget.replace(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                args = ["string=second raw"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            check(args.get<String>(0) == "second raw")
+            args.set(1, "raw")
+            args.set(2, "changed")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object InvalidModifyArgsStringFilterMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                args = ["unsupported=hello"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.get<CharSequence>(0)
         }
     }
 
@@ -23150,6 +23287,33 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun stringFilteredModifyArgTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StringFilteredModifyArgTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first-")
+            visitLdcInsn("keep")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second-")
+            visitLdcInsn("rewrite")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun modifyArgContractTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ModifyArgContractTarget", null, "java/lang/Object", null)
@@ -23501,6 +23665,69 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
             visitVarInsn(Opcodes.ALOAD, 2)
             visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun stringFilteredModifyArgsTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "StringFilteredModifyArgsTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "value", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("first raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "StringFilteredModifyArgsTarget",
+                "replace",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 1)
+            visitLdcInsn("second raw")
+            visitLdcInsn("missing")
+            visitLdcInsn("bad")
+            visitMethodInsn(
+                Opcodes.INVOKESTATIC,
+                "StringFilteredModifyArgsTarget",
+                "replace",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitVarInsn(Opcodes.ASTORE, 2)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn(":")
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/String", "concat", "(Ljava/lang/String;)Ljava/lang/String;", false)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 3)
+            visitEnd()
+        }
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC,
+            "replace",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitVarInsn(Opcodes.ALOAD, 2)
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "replace",
+                "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+                false,
+            )
             visitInsn(Opcodes.ARETURN)
             visitMaxs(3, 3)
             visitEnd()
