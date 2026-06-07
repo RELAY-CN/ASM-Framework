@@ -2962,6 +2962,14 @@ class TargetClassContext(
         method: Method,
         annotation: WrapMethod,
     ): Boolean {
+        if (annotation.method.isNotEmpty()) {
+            val methodSignature = annotation.method
+            val targetMethod = findTargetMethod(methodSignature)
+                ?: return requireMissingGroupedWrapMethodCount(method, annotation, methodSignature)
+            wrapMethod(method, targetMethod)
+            return requireWrapMethodCount(1, annotation, method, methodSignature)
+        }
+
         val (targetMethod, methodSignature) = resolveWrapMethodTargetMethod(method, annotation)
         wrapMethod(method, targetMethod)
         return requireWrapMethodCount(1, annotation, method, methodSignature)
@@ -2971,11 +2979,6 @@ class TargetClassContext(
         method: Method,
         annotation: WrapMethod,
     ): Pair<MethodNode, String> {
-        if (annotation.method.isNotEmpty()) {
-            val methodSignature = annotation.method
-            return requireTargetMethod(methodSignature) to methodSignature
-        }
-
         val inferredSignature = buildWrapMethodSignature(method)
         findTargetMethod(inferredSignature)?.let { targetMethod ->
             return targetMethod to inferredSignature
@@ -3002,6 +3005,20 @@ class TargetClassContext(
 
         val targetMethod = compatibleTargets.single()
         return targetMethod to "${targetMethod.name}${targetMethod.desc}"
+    }
+
+    private fun requireMissingGroupedWrapMethodCount(
+        method: Method,
+        annotation: WrapMethod,
+        methodSignature: String,
+    ): Boolean {
+        if (method.getAnnotation(Group::class.java) == null) {
+            throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
+        }
+
+        // @Group 用于多版本候选：显式目标在当前版本缺失时按 0 命中累计，
+        // 但仍交给单处理器计数校验保留 require/allow/expect 的显式契约。
+        return requireWrapMethodCount(0, annotation, method, methodSignature)
     }
 
     private fun wrapMethod(

@@ -6125,6 +6125,62 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@WrapMethod handler 不调用原方法时应跳过原方法副作用")
+    fun wrapMethodCanSkipOriginalWithoutRunningSideEffects() {
+        // Given
+        AsmRegistry.register(SkipOriginalWrapMethodMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform(
+                "WrapMethodSideEffectTarget",
+                wrapMethodSideEffectTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("WrapMethodSideEffectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "raw")
+
+        // Then
+        assertThat(result)
+            .`as`("Then: handler 直接返回时应完全接管整方法结果")
+            .isEqualTo("skipped:raw")
+        assertThat(clazz.getField("counter").getInt(instance))
+            .`as`("Then: 未调用 Operation.call 时原方法内的业务副作用不应执行")
+            .isZero()
+    }
+
+    @Test
+    @DisplayName("@WrapMethod Operation 应绑定实例 receiver 并允许多次调用原方法")
+    fun wrapMethodOperationCallReusesBoundReceiverAndDoesNotReenterWrapper() {
+        // Given
+        MultipleCallWrapMethodMixin.handlerCalls = 0
+        AsmRegistry.register(MultipleCallWrapMethodMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform(
+                "WrapMethodSideEffectTarget",
+                wrapMethodSideEffectTargetBytes(),
+                javaClass.classLoader,
+            )
+        val clazz = loadClass("WrapMethodSideEffectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value", String::class.java).invoke(instance, "raw")
+
+        // Then
+        assertThat(result)
+            .`as`("Then: handler 可用同一个 Operation 多次执行迁移后的原方法")
+            .isEqualTo("raw-a|raw-b")
+        assertThat(clazz.getField("counter").getInt(instance))
+            .`as`("Then: 两次 Operation.call 应落到同一个目标实例的原方法副作用")
+            .isEqualTo(2)
+        assertThat(MultipleCallWrapMethodMixin.handlerCalls)
+            .`as`("Then: Operation.call 必须调用迁移后的原方法，不能递归进入公开 wrapper")
+            .isEqualTo(1)
+    }
+
+    @Test
     @DisplayName("@WrapMethod 应保留同步与可变参数目标方法的 JVM 契约")
     fun wrapMethodPreservesSynchronizedAndVarargsAccess() {
         // Given
@@ -8437,6 +8493,74 @@ class FrameworkReliabilityTest {
                 .isInstanceOf(AsmTransformException::class.java)
                 .hasRootCauseMessage(
                     "@Group redirectAllTrim allows at most 1 injection(s), actual 2 in class RedirectAllMultiTarget",
+                )
+        }
+
+        @Test
+        @DisplayName("@WrapMethod 多版本候选缺失时应允许同组回退命中")
+        fun groupedWrapMethodAllowsExplicitMissingVersionCandidateWhenFallbackMatches() {
+            // Given
+            AsmRegistry.register(GroupedWrapMethodFallbackMixin::class.java)
+
+            // When
+            val transformed =
+                AsmProcessor().transform(
+                    "GroupedWrapMethodTarget",
+                    groupedWrapMethodTargetBytes(),
+                    javaClass.classLoader,
+                )
+            val clazz = loadClass("GroupedWrapMethodTarget", transformed)
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val result = clazz.getMethod("value", String::class.java).invoke(instance, "raw")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 当前版本方法命中后，旧版本整方法候选缺失不应阻断同组多版本适配")
+                .isEqualTo("current:raw-original")
+        }
+
+        @Test
+        @DisplayName("@WrapMethod 同组显式候选全部缺失时应按组级最小命中数失败")
+        fun groupedWrapMethodAllExplicitCandidatesMissFailsWithGroupCount() {
+            // Given
+            AsmRegistry.register(GroupedMissingWrapMethodCandidatesMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "GroupedWrapMethodTarget",
+                    groupedWrapMethodTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: 所有版本候选都缺失时，应暴露组级命中数失败而不是首个缺失方法")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@Group wrapMethodVersion requires at least 1 injection(s), " +
+                        "actual 0 in class GroupedWrapMethodTarget",
+                )
+        }
+
+        @Test
+        @DisplayName("@WrapMethod 同组候选显式声明 require 时应先执行单处理器命中数校验")
+        fun groupedWrapMethodWithExplicitRequireStillFailsPerHandlerCount() {
+            // Given
+            AsmRegistry.register(GroupedRequiredLegacyWrapMethodMixin::class.java)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(
+                    "GroupedWrapMethodTarget",
+                    groupedWrapMethodTargetBytes(),
+                    javaClass.classLoader,
+                )
+            }
+                .`as`("Then: @Group 只能放宽默认候选命中，不能覆盖 WrapMethod 自己声明的 require 契约")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(
+                    "@WrapMethod handler legacy requires at least 1 injection(s), " +
+                        "actual 0 in target method legacy(Ljava/lang/String;)Ljava/lang/String; " +
+                        "of class GroupedWrapMethodTarget",
                 )
         }
     }
@@ -17835,6 +17959,33 @@ class FrameworkReliabilityTest {
         ): String = "${operation.call(prefix.uppercase(), count + 1)}-wrapped"
     }
 
+    @AsmMixin("WrapMethodSideEffectTarget")
+    object SkipOriginalWrapMethodMixin {
+        @WrapMethod(method = "value(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            operation: Operation<String>,
+        ): String = "skipped:$prefix"
+    }
+
+    @AsmMixin("WrapMethodSideEffectTarget")
+    object MultipleCallWrapMethodMixin {
+        var handlerCalls = 0
+
+        @WrapMethod(method = "value(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun wrap(
+            prefix: String,
+            operation: Operation<String>,
+        ): String {
+            handlerCalls += 1
+            val first = operation.call("$prefix-a")
+            val second = operation.call("$prefix-b")
+            return "$first|$second"
+        }
+    }
+
     @AsmMixin("SynchronizedVarargsWrapMethodTarget")
     object SynchronizedVarargsWrapMethodMixin {
         @WrapMethod(method = "combine([Ljava/lang/String;)Ljava/lang/String;")
@@ -19262,6 +19413,55 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): String = value
+    }
+
+    @AsmMixin("GroupedWrapMethodTarget")
+    object GroupedWrapMethodFallbackMixin {
+        @Group(name = "wrapMethodVersion", min = 1, max = 1)
+        @WrapMethod(method = "legacy(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun legacy(
+            prefix: String,
+            operation: Operation<String>,
+        ): String = "legacy:${operation.call(prefix)}"
+
+        @Group(name = "wrapMethodVersion", min = 1, max = 1)
+        @WrapMethod(method = "value(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun current(
+            prefix: String,
+            operation: Operation<String>,
+        ): String = "current:${operation.call(prefix)}"
+    }
+
+    @AsmMixin("GroupedWrapMethodTarget")
+    object GroupedMissingWrapMethodCandidatesMixin {
+        @Group(name = "wrapMethodVersion", min = 1)
+        @WrapMethod(method = "legacy(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun legacy(
+            prefix: String,
+            operation: Operation<String>,
+        ): String = "legacy:${operation.call(prefix)}"
+
+        @Group(name = "wrapMethodVersion", min = 1)
+        @WrapMethod(method = "experimental(Ljava/lang/String;)Ljava/lang/String;")
+        @JvmStatic
+        fun experimental(
+            prefix: String,
+            operation: Operation<String>,
+        ): String = "experimental:${operation.call(prefix)}"
+    }
+
+    @AsmMixin("GroupedWrapMethodTarget")
+    object GroupedRequiredLegacyWrapMethodMixin {
+        @Group(name = "wrapMethodVersion", min = 0, max = 1)
+        @WrapMethod(method = "legacy(Ljava/lang/String;)Ljava/lang/String;", require = 1)
+        @JvmStatic
+        fun legacy(
+            prefix: String,
+            operation: Operation<String>,
+        ): String = "legacy:${operation.call(prefix)}"
     }
 
     @AsmMixin("StrictTarget")
@@ -23339,6 +23539,34 @@ class FrameworkReliabilityTest {
         return cw.toByteArray()
     }
 
+    private fun wrapMethodSideEffectTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "WrapMethodSideEffectTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PUBLIC, "counter", "I", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitInsn(Opcodes.DUP)
+            visitFieldInsn(Opcodes.GETFIELD, "WrapMethodSideEffectTarget", "counter", "I")
+            visitInsn(Opcodes.ICONST_1)
+            visitInsn(Opcodes.IADD)
+            visitFieldInsn(Opcodes.PUTFIELD, "WrapMethodSideEffectTarget", "counter", "I")
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(3, 2)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
     private fun synchronizedVarargsWrapMethodTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SynchronizedVarargsWrapMethodTarget", null, "java/lang/Object", null)
@@ -23391,6 +23619,35 @@ class FrameworkReliabilityTest {
             )
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun groupedWrapMethodTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "GroupedWrapMethodTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC,
+            "value",
+            "(Ljava/lang/String;)Ljava/lang/String;",
+            null,
+            null,
+        ).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 1)
+            visitLdcInsn("-original")
+            visitMethodInsn(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/String",
+                "concat",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                false,
+            )
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(2, 2)
             visitEnd()
         }
         cw.visitEnd()

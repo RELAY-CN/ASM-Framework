@@ -278,7 +278,8 @@ object MultiTargetMixin
 - `max: Int = Int.MAX_VALUE` - 分组最大命中数；实际总命中数超过时转换失败
 - `expect: Int = -1` - 分组期望命中数；非负且不一致时只输出警告，不阻断转换
 
-同组处理器默认允许单个成员 0 命中；如果处理器自身显式设置 `require`、`allow` 或非默认 `expect`，
+同组处理器默认允许单个成员 0 命中；例如多版本候选中某个显式目标方法只存在于旧版本时，
+当前版本缺失会按 0 命中参与组级累计。如果处理器自身显式设置 `require`、`allow` 或非默认 `expect`，
 该处理器仍会先执行自身命中数校验。未使用 `@Group` 的处理器保持原有默认契约：普通处理器默认至少命中一次。
 同一组内的 `min`、`max` 与 `expect` 必须保持一致，否则转换阶段会失败。
 
@@ -614,7 +615,8 @@ wrapper 会保留原目标方法的 `static`、`final`、`synchronized`、`stric
 
 `@WrapMethod` 会按被包裹的目标方法数量计数；单个精确方法签名通常命中 1 次。显式设置 `require` /
 `allow` / 非默认 `expect` 时按实际整方法包裹数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，
-`expect` 不一致只输出警告。
+`expect` 不一致只输出警告。带 `@Group` 的显式 `method` 多版本候选在当前版本缺失时按 0 命中参与组级累计；
+未分组的显式目标缺失仍会直接失败。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
