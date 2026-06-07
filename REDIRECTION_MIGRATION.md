@@ -160,7 +160,7 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
   替换字符串实参时使用 `@ModifyArg` 或 `@ModifyArgs`。
 - 只替换实例调用或实例字段访问 receiver 时使用 `@ModifyReceiver`。它保留原调用参数、字段读取值或字段待写入值，
   只把执行原操作时使用的 receiver 换成 handler 返回值；`INVOKE` 模式可使用同样的直接字符串实参过滤，
-  过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver。
+  过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver；字段 receiver 模式不使用 `At.args`，携带会快速失败。
 - 需要保留可调用原操作句柄时使用 `@WrapOperation`。这适合“先改 receiver 或参数，再决定是否调用原方法/字段操作”的复杂场景。
 
 字段读取或写入的 `@WrapWithCondition` handler 接收的是字段值或待写入值，不接收 `GETFIELD` / `PUTFIELD` receiver；

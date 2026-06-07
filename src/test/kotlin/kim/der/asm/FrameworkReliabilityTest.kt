@@ -801,6 +801,8 @@ class FrameworkReliabilityTest {
                 "不兼容候选不计入",
                 "`INVOKE` 可在 `at.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`",
                 "该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver",
+                "字段读取模式携带 `at.args` 会在转换阶段失败",
+                "字段写入模式携带 `at.args` 会在转换阶段失败",
                 "字段写入会保留原待写入值并写入新的 receiver",
             )
         assertThat(guideModifyReceiverSection)
@@ -811,6 +813,7 @@ class FrameworkReliabilityTest {
                 "静态调用、构造器调用和不兼容实例调用不计入",
                 "`INVOKE` 可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`",
                 "只检查调用参数来源，不匹配 receiver",
+                "字段 receiver 模式不消费 `At.args`，携带会在转换阶段失败",
                 "静态字段和不兼容字段读取不计入",
                 "`FIELD_ASSIGN` 会把原待写入值写到新 receiver",
             )
@@ -823,6 +826,7 @@ class FrameworkReliabilityTest {
                 "可在 [At.args] 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤",
                 "该过滤只检查调用参数来源，不匹配 receiver",
                 "静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数",
+                "携带 [At.args] 会在转换阶段失败",
                 "静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数",
             )
         assertThat(atKDocSection)

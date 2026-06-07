@@ -574,9 +574,9 @@ annotation class ModifyArgs(
  *   可在 [At.args] 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤；
  *   该过滤只检查调用参数来源，不匹配 receiver，过滤后再计算 [ordinal] 与命中数
  * - [At.value] 为 [InjectionPoint.FIELD] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段读取 receiver；
- *   静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数
+ *   静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数；携带 [At.args] 会在转换阶段失败
  * - [At.value] 为 [InjectionPoint.FIELD_ASSIGN] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段写入 receiver；
- *   静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数
+ *   静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数；携带 [At.args] 会在转换阶段失败
  * - [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice]
  *   把候选 receiver 改写限制在一段 INVOKE 边界之间，边界可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，边界指令本身不参与匹配
  * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
