@@ -199,6 +199,8 @@ class FrameworkReliabilityTest {
                     "| 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` |",
                     "| 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` |",
                     "| 只改目标方法返回值 | `@ModifyReturnValue` |",
+                    "| 只改目标方法入口参数或局部变量槽位值 | `@ModifyVariable` |",
+                    "| 只改常量值 | `@ModifyConstant` |",
                     "| 包裹整个目标方法并按需调用原方法 | `@WrapMethod` |",
                     "| 把整类方法替换为默认返回值 | `@ReplaceAllMethods` |",
                 )
@@ -210,6 +212,15 @@ class FrameworkReliabilityTest {
                     "目标方法返回值迁移优先使用 `@ModifyReturnValue`",
                     "不应迁移成 `@WrapMethod` 或 `@ReplaceAllMethods`",
                     "把返回值修改改成 `@ModifyReturnValue`",
+                )
+            assertThat(migration)
+                .`as`("Then: 局部变量与常量迁移应指向专用注解，避免被误写成整段 Redirect")
+                .contains(
+                    "只改局部变量或常量：优先 `@ModifyVariable` / `@ModifyConstant`",
+                    "局部变量写回迁移示例",
+                    "@ModifyVariable(",
+                    "常量值迁移示例",
+                    "@ModifyConstant(",
                 )
             assertThat(parameterAndReceiverSection)
                 .`as`("Then: 参数与 receiver 迁移段应说明 INVOKE_STRING 只是观察点，参数值和 receiver 应走专用注解")
@@ -240,6 +251,8 @@ class FrameworkReliabilityTest {
                     "@ModifyReceiver(",
                     "@ModifyExpressionValue(",
                     "@ModifyReturnValue(",
+                    "@ModifyVariable(",
+                    "@ModifyConstant(",
                     "@WrapMethod(",
                     "@ReplaceAllMethods",
                 )

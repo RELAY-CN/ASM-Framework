@@ -36,6 +36,8 @@
 | 只按条件决定是否保留原调用、调用返回值、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
 | 只改目标方法返回值 | `@ModifyReturnValue` | 原方法主体照常执行，只在每个返回点前改写返回值；支持 `ordinal`、`Slice` 与命中数契约 |
+| 只改目标方法入口参数或局部变量槽位值 | `@ModifyVariable` | 适合改写入口参数、局部变量读取前的槽位值，或局部变量写入后的槽位值 |
+| 只改常量值 | `@ModifyConstant` | 保留周围控制流，只替换匹配的常量加载结果；多个同值常量优先配合 `Slice` 和命中数契约 |
 | 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` | 保留原调用，只替换指定实参；可用 `at.args = ["ldc=value"]` / `["string=value"]` 锁定直接字符串实参调用点 |
 | 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数；同样支持直接字符串实参过滤 |
 | 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值；`INVOKE` 可按直接字符串实参过滤 |
@@ -48,10 +50,11 @@
 
 1. 只改调用参数或 receiver：优先 `@ModifyArg` / `@ModifyArgs` / `@ModifyReceiver`。
 2. 只改目标方法最终返回值：使用 `@ModifyReturnValue`。
-3. 需要完整替换一次操作结果或副作用：使用 `@Redirect`。
-4. 需要在 handler 里按需调用、跳过或多次执行原操作：使用 `@WrapOperation`。
-5. 原操作应继续执行，但结果、副作用或控制流只在条件满足时保留：使用 `@WrapWithCondition`。
-6. 只是观察位置或追加日志、统计等副作用，不改表达式值和控制流：才使用 `@AsmInject`。
+3. 只改局部变量或常量：优先 `@ModifyVariable` / `@ModifyConstant`。
+4. 需要完整替换一次操作结果或副作用：使用 `@Redirect`。
+5. 需要在 handler 里按需调用、跳过或多次执行原操作：使用 `@WrapOperation`。
+6. 原操作应继续执行，但结果、副作用或控制流只在条件满足时保留：使用 `@WrapWithCondition`。
+7. 只是观察位置或追加日志、统计等副作用，不改表达式值和控制流：才使用 `@AsmInject`。
 
 ### 1. 旧的调用替换逻辑
 
@@ -431,6 +434,48 @@ object TargetMixin {
 
 上例包裹的是 slot 2 的本次待写入值。`operation.call(...)` 返回传入值并交给原 `ASTORE` 继续写入；如果目标方法缺少
 LocalVariableTable，使用槽位过滤比 `name=...` 更稳定。
+
+局部变量写回迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyVariable(
+        method = "render(Ljava/lang/String;)Ljava/lang/String;",
+        at = At(value = InjectionPoint.STORE),
+        index = 2,
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun normalizeStoredLocal(value: String, id: String): String {
+        return "$id:${value.trim()}"
+    }
+}
+```
+
+上例在目标方法把局部变量写入 slot 2 后读取并写回同一槽位，适合旧逻辑真正要改变后续代码看到的局部状态；
+如果只想改写某一次读取表达式，不应使用该写法，应迁移到 `@ModifyExpressionValue(LOAD)` 或 `@WrapOperation(LOAD)`。
+
+常量值迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyConstant(
+        method = "limit()I",
+        constant = "100",
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun raiseLimit(value: Int): Int {
+        return value * 2
+    }
+}
+```
+
+上例只替换匹配的 `100` 常量加载结果。目标方法里存在多个相同常量时，应使用 `Slice`、`ordinal` 或命中数契约避免误改。
 
 字符串调用监听迁移示例：
 
