@@ -175,6 +175,14 @@ class FrameworkReliabilityTest {
                 migration
                     .substringAfter("### 4. 整方法迁移")
                     .substringBefore("### 5. 旧的目标方法描述")
+            val migrationExamples =
+                migration
+                    .substringAfter("## 代码迁移示例")
+                    .substringBefore("## 兼容性说明")
+            val compatibilitySection =
+                migration
+                    .substringAfter("## 兼容性说明")
+                    .substringBefore("## 迁移建议")
 
             // Then
             assertThat(migration)
@@ -211,6 +219,53 @@ class FrameworkReliabilityTest {
                     "只想让整类方法返回默认值时使用 `@ReplaceAllMethods`",
                     "不再经由旧 Redirection manager 分派",
                 )
+            assertThat(migrationExamples)
+                .`as`("Then: 迁移示例应覆盖真实 annotation 写法，避免旧 API 用户只看到抽象概念无法落地")
+                .contains(
+                    "@Redirect(",
+                    "value = InjectionPoint.INVOKE",
+                    "args = [\"ldc=legacy\"]",
+                    "@ModifyArg(",
+                    "@ModifyArgs(",
+                    "@ModifyReceiver(",
+                    "@ModifyExpressionValue(",
+                    "@WrapMethod(",
+                    "@ReplaceAllMethods",
+                )
+            assertThat(migration)
+                .`as`("Then: @ReplaceAllMethods 应被描述为整类普通方法默认返回，不能误导成单方法替换工具")
+                .doesNotContain(
+                    "`@ReplaceAllMethods` 仍可用于“整方法替换”为默认返回值",
+                    "如果只是想让方法返回默认值，使用 `@ReplaceAllMethods`",
+                    "现有 `@ReplaceAllMethods` 仅保留为内部默认返回值生成路径",
+                )
+            assertThat(compatibilitySection)
+                .`as`("Then: 兼容性说明应明确 @ReplaceAllMethods 是公开注解，但不回流旧 manager 分派")
+                .contains(
+                    "公开注解 `@ReplaceAllMethods` 仍可使用",
+                    "只走内部默认返回值生成器",
+                    "不再经由旧 manager 分派",
+                )
+        }
+
+        @Test
+        @DisplayName("Redirect 文档应区分早期注解参数兼容与旧 Redirection API")
+        fun redirectDocumentationNamesEarlyAnnotationCompatibilityWithoutLegacyManagerWording() {
+            // Given
+            val asmMixin =
+                Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+            val redirectInjector =
+                Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "impl", "RedirectInjector.kt"))
+
+            // Then
+            assertThat(asmMixin)
+                .`as`("Then: Redirect.target KDoc 应说明兼容的是早期注解参数写法，而不是旧 manager/listener 路线")
+                .contains("兼容早期 `@Redirect(target = \"...\")` 注解参数写法")
+                .doesNotContain("兼容旧式写法的重定向目标组件")
+            assertThat(redirectInjector)
+                .`as`("Then: RedirectInjector 内部注释应把 field:desc 兼容限定为早期注解参数格式")
+                .contains("兼容早期 `@Redirect(target = \"field:desc\")` 注解参数格式")
+                .doesNotContain("兼容旧式 `field:desc` 目标格式")
         }
     }
 
@@ -384,7 +439,7 @@ class FrameworkReliabilityTest {
         val redirectTargetPropertySection =
             requiredSection(
                 asmMixinKDoc,
-                "* 兼容旧式写法的重定向目标组件。",
+                "* 兼容早期 `@Redirect(target = \"...\")` 注解参数写法的重定向目标组件。",
                 "val target: String = \"\"",
             )
         val wrapWithConditionKDocSection =
@@ -607,6 +662,88 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@AsmInject INVOKE_STRING 应在真实综合方法中只观察直接字符串实参调用")
+        fun asmInjectInvokeStringInComprehensiveTestOnlyObservesLiteralInterfaceCall() {
+            // Given
+            TestComprehensiveInvokeStringObserverMixin.reset()
+            AsmRegistry.register(TestComprehensiveInvokeStringObserverMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 旧 listener 迁移为 INVOKE_STRING 后只观察 interfaceMethod(\"Test\")，不替换原接口调用结果")
+                .contains("InterfaceImpl-Test|")
+            assertThat(TestComprehensiveInvokeStringObserverMixin.observedCalls)
+                .`as`("Then: handler 应只命中真实 Test.class 中直接 LDC 字符串实参的接口调用一次")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@ModifyArg(INVOKE) 应在真实综合方法中只替换接口调用实参")
+        fun modifyArgInvokeInComprehensiveTestReplacesLiteralInterfaceArgument() {
+            // Given
+            AsmRegistry.register(TestComprehensiveModifyArgInvokeMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 参数迁移应只把 interfaceMethod(\"Test\") 的调用实参改成 Migrated")
+                .contains("StaticFinalString|", "DefaultConstructor|", "InterfaceImpl-Migrated|")
+                .doesNotContain("InterfaceImpl-Test|")
+        }
+
+        @Test
+        @DisplayName("@ModifyReceiver(INVOKE) 应在真实综合方法中只替换 testA0 接收者")
+        fun modifyReceiverInvokeInComprehensiveTestUsesReplacementReceiverForTestA0Only() {
+            // Given
+            TestComprehensiveModifyReceiverInvokeMixin.reset()
+            AsmRegistry.register(TestComprehensiveModifyReceiverInvokeMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val original = clazz.getDeclaredConstructor(String::class.java).newInstance("OriginalReceiver")
+            TestComprehensiveModifyReceiverInvokeMixin.replacement =
+                clazz.getDeclaredConstructor(String::class.java).newInstance("ReplacementReceiver")
+
+            // When
+            val result = invokeComprehensiveTest(original)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: receiver 迁移只应让 testA0() 使用替换实例，静态调用和其他实例读取仍保持原对象语义")
+                .contains(
+                    "StaticFinalString|ReplacementReceiver|",
+                    "InterfaceImpl-Test|",
+                    "PrivateMethod-OriginalReceiver|",
+                )
+                .doesNotContain("StaticFinalString|OriginalReceiver|")
+        }
+
+        @Test
+        @DisplayName("@WrapMethod 应在真实异常方法中保留原 catch 契约")
+        fun wrapMethodExceptionTestPreservesCaughtExceptionContractWhenCallingOriginal() {
+            // Given
+            AsmRegistry.register(TestExceptionWrapMethodMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val normalResult = invokeExceptionTest(instance, false)
+            val caughtResult = invokeExceptionTest(instance, true)
+
+            // Then
+            assertThat(normalResult)
+                .`as`("Then: handler 调用 Operation(false) 时应保留原方法无异常返回结果")
+                .isEqualTo("wrapped-NoException")
+            assertThat(caughtResult)
+                .`as`("Then: handler 调用 Operation(true) 时原方法应自行捕获 CustomException，而不是向外泄出")
+                .isEqualTo("wrapped-CaughtException-TestException")
+        }
+
+        @Test
         @DisplayName("@AsmInject RETURN 应在真实局部变量表中只读捕获 second")
         fun asmInjectReturnCanCaptureLocalByNameInTestClassWithoutModifyingReturn() {
             // Given
@@ -763,6 +900,19 @@ class FrameworkReliabilityTest {
             instance.javaClass
                 .getMethod("localNameDiscriminatorTest", String::class.java)
                 .invoke(instance, value) as String
+
+        private fun invokeComprehensiveTest(instance: Any): String =
+            instance.javaClass
+                .getMethod("comprehensiveTest")
+                .invoke(instance) as String
+
+        private fun invokeExceptionTest(
+            instance: Any,
+            throwException: Boolean,
+        ): String =
+            instance.javaClass
+                .getMethod("exceptionTest", Boolean::class.javaPrimitiveType)
+                .invoke(instance, throwException) as String
     }
 
     @Test
@@ -14436,6 +14586,86 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun shouldRun(): Boolean = false
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveInvokeStringObserverMixin {
+        var observedCalls = 0
+
+        fun reset() {
+            observedCalls = 0
+        }
+
+        @AsmInject(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "Test.interfaceMethod(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=Test"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun observe() {
+            observedCalls += 1
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveModifyArgInvokeMixin {
+        @ModifyArg(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.interfaceMethod(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=Test"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "Migrated"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveModifyReceiverInvokeMixin {
+        var replacement: Any? = null
+
+        fun reset() {
+            replacement = null
+        }
+
+        @ModifyReceiver(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.testA0()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("Test")
+    object TestExceptionWrapMethodMixin {
+        @WrapMethod(
+            method = "exceptionTest(Z)Ljava/lang/String;",
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            throwException: Boolean,
+            operation: Operation<String>,
+        ): String = "wrapped-${operation.call(throwException)}"
     }
 
     @AsmMixin("MultiWrapConditionTarget")

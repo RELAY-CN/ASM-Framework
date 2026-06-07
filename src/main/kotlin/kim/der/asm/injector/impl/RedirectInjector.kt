@@ -353,7 +353,7 @@ class RedirectInjector(
     /**
      * 判断当前配置是否按字段读取语义重定向。
      *
-     * 除显式 [InjectionPoint.FIELD] 外，兼容旧式 `field:desc` 目标格式自动进入字段读取模式。
+     * 除显式 [InjectionPoint.FIELD] 外，兼容早期 `@Redirect(target = "field:desc")` 注解参数格式自动进入字段读取模式。
      *
      * @return 当前配置表示字段读取重定向时返回 `true`
      */

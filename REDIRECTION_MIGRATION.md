@@ -24,7 +24,7 @@
 - `@WrapMethod`
 - `@ReplaceAllMethods`
 
-`@ReplaceAllMethods` 仍可用于“整方法替换”为默认返回值，但内部不再走旧式 Redirection manager 分派。
+`@ReplaceAllMethods` 仍可用于把目标类所有普通方法替换为默认返回值，但内部不再走旧式 Redirection manager 分派。
 
 ## 迁移对照
 
@@ -60,7 +60,8 @@
 现在：
 
 - 直接使用 `@Redirect` 或 `@WrapOperation`
-- 如果只是想让方法返回默认值，使用 `@ReplaceAllMethods`
+- 如果只是想让单个方法返回固定值，优先使用 `@Overwrite` 或 `@WrapMethod`
+- 如果要禁用整类普通方法并统一返回类型默认值，使用 `@ReplaceAllMethods`
 
 ### 2. 旧的监听逻辑
 
@@ -205,13 +206,94 @@ val target = MethodTypeInfoValue("com/example/Target", "run", "()V", Redirection
 ```kotlin
 @AsmMixin("com/example/Target")
 object TargetMixin {
-    @Redirect(method = "run()V")
+    @Redirect(
+        method = "run()V",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/Service.call(Ljava/lang/String;)Ljava/lang/String;",
+            args = ["ldc=legacy"],
+        ),
+        require = 1,
+        allow = 1,
+    )
     @JvmStatic
-    fun redirect() {
-        // ...
+    fun redirectLegacyCall(originalArg: String): String {
+        return "patched-$originalArg"
     }
 }
 ```
+
+上例完全替换 `Service.call("legacy")` 这一处调用；原调用不会执行。只改实参时不要用该写法，应使用
+`@ModifyArg` 或 `@ModifyArgs`。
+
+单参数迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyArg(
+        method = "run()V",
+        index = 0,
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/Service.call(Ljava/lang/String;)Ljava/lang/String;",
+            args = ["ldc=legacy"],
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun renameLegacyArgument(original: String): String {
+        return "modern-$original"
+    }
+}
+```
+
+批量参数迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyArgs(
+        method = "send()V",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/Bus.publish(Ljava/lang/String;I)V",
+            args = ["ldc=legacy-topic"],
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun rewritePublishArgs(args: Args) {
+        args[0] = "modern-topic"
+        args[1] = (args[1] as Int) + 1
+    }
+}
+```
+
+receiver 迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyReceiver(
+        method = "render()Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE,
+            target = "com/example/View.renderName()Ljava/lang/String;",
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun useFallbackView(original: View): View {
+        return original.takeIf { it.isVisible } ?: View.fallback()
+    }
+}
+```
+
+上例只替换实例调用的 receiver，原方法和原参数仍然按新 receiver 执行。
 
 字段读取条件迁移示例：
 
@@ -231,6 +313,29 @@ object TargetMixin {
 
 上例在 `displayName` 字段读取后插入条件判断。返回 `true` 时继续使用原字段值；返回 `false` 时本次读取表达式变为
 `String` 的默认值。
+
+表达式结果迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @ModifyExpressionValue(
+        method = "render()Ljava/lang/String;",
+        at = At(
+            value = InjectionPoint.INVOKE_ASSIGN,
+            target = "com/example/Service.name()Ljava/lang/String;",
+        ),
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun normalizeName(original: String): String {
+        return original.trim()
+    }
+}
+```
+
+上例保留原 `Service.name()` 调用及其副作用，只改写调用返回表达式的值。
 
 构造结果条件迁移示例：
 
@@ -327,11 +432,40 @@ object TargetMixin {
 由字符串拼接得到，或来自方法返回值，都不会被该规则命中。过滤值按 `ldc=` / `string=` 后的完整文本匹配，
 前后空格不会被修剪。
 
+整方法包裹迁移示例：
+
+```kotlin
+@AsmMixin("com/example/Target")
+object TargetMixin {
+    @WrapMethod(
+        method = "load(Ljava/lang/String;)Ljava/lang/String;",
+        require = 1,
+        allow = 1,
+    )
+    @JvmStatic
+    fun wrapLoad(id: String, operation: Operation<String>): String {
+        return cache[id] ?: operation.call(id).also { cache[id] = it }
+    }
+}
+```
+
+上例把目标方法原方法体迁移为 `Operation` 句柄，由 handler 决定是否调用原逻辑；这不是运行期 manager 分派。
+
+整类默认返回迁移示例：
+
+```kotlin
+@AsmMixin("com/example/LegacySubsystem")
+@ReplaceAllMethods
+object DisableLegacySubsystemMixin
+```
+
+上例会让目标类所有普通方法返回各自类型的 JVM 默认值。它适合整类禁用或默认实现，不适合替换某一个确定方法。
+
 ## 兼容性说明
 
 - 旧的运行期 manager / listener ABI 已删除
 - 旧的测试适配器 `AsmReplace` / `AsmListener` 已删除
-- 现有 `@ReplaceAllMethods` 仅保留为内部默认返回值生成路径
+- 公开注解 `@ReplaceAllMethods` 仍可使用，但只走内部默认返回值生成器，不再经由旧 manager 分派
 
 ## 迁移建议
 

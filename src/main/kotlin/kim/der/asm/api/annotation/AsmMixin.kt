@@ -1591,7 +1591,7 @@ annotation class Redirect(
     val method: String = "",
 
     /**
-     * 兼容旧式写法的重定向目标组件。
+     * 兼容早期 `@Redirect(target = "...")` 注解参数写法的重定向目标组件。
      *
      * 会与 [at] 中的定位信息组合；LOAD、STORE、SWITCH 和 ARRAY_LENGTH 模式不应设置该字段，非空会在转换阶段失败。
      */
