@@ -119,14 +119,14 @@ val transformedBytes = processor.transform(
 - **@ModifyArg** - 修改方法参数
 - **@ModifyArgs** - 修改方法调用、构造器调用或 `invokedynamic` 调用参数组
 - **@ModifyReceiver** - 修改实例方法调用或实例字段访问 receiver
-- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、字段来源或裸 `ARRAYLENGTH` 数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、switch selector、常量读取或即将抛出的异常
+- **@WrapOperation** - 用可调用原操作的 handler 包裹方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、字段来源或裸 `ARRAYLENGTH` 数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、switch selector、常量读取或即将抛出的异常；`INVOKE` 可按直接字符串实参过滤
 - **@WrapMethod** - 用可调用原方法的 handler 包裹整个目标方法体
-- **@WrapWithCondition** - 按条件跳过普通调用、`invokedynamic` 调用，或在调用完成后条件保留返回值，也可条件保留字段读取、字段写入、数组元素读取、数组元素写入、字段来源或裸 `ARRAYLENGTH` 数组长度读取、对象构造结果、局部变量读取或写入、类型转换、类型判断、常量加载、条件跳转、switch selector 或即将抛出的异常
-- **@ModifyExpressionValue** - 修改表达式值
+- **@WrapWithCondition** - 按条件跳过普通调用、`invokedynamic` 调用，或在调用完成后条件保留返回值，也可条件保留字段读取、字段写入、数组元素读取、数组元素写入、字段来源或裸 `ARRAYLENGTH` 数组长度读取、对象构造结果、局部变量读取或写入、类型转换、类型判断、常量加载、条件跳转、switch selector 或即将抛出的异常；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤
+- **@ModifyExpressionValue** - 修改表达式值；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤
 - **@ModifyVariable** - 修改方法参数或局部变量
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
-- **@Redirect** - 重定向方法调用、`invokedynamic` 调用、构造器调用、字段访问、简单数组元素访问、字段来源或裸 `ARRAYLENGTH` 数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载或即将抛出的异常
+- **@Redirect** - 重定向方法调用、`invokedynamic` 调用、构造器调用、字段访问、简单数组元素访问、字段来源或裸 `ARRAYLENGTH` 数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载或即将抛出的异常；`INVOKE` 可按直接字符串实参过滤
 - **@RedirectAllMethods** - 将 `@Redirect` 应用于目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
@@ -194,6 +194,8 @@ object LoggingMixin {
 `At.args` 中声明唯一一个 `ldc=value` 或 `string=value`。它不会把字符串传给 handler，也不会替换字符串；
 handler 只能像上面的 `beforeMarkerAudit` 一样继续接收目标方法参数前缀。局部变量中的同值字符串、字符串拼接、
 方法返回值或 `invokedynamic` 生成的字符串不会被 `INVOKE_STRING` 匹配。
+需要替换、包裹、条件控制或改写调用返回时，可在 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、
+`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 上使用同样格式过滤直接字符串实参调用点。
 除 `Shift.REPLACE` 这类替换原操作的注入外，普通 `HEAD`、`TAIL`、`RETURN`、`INVOKE BEFORE/AFTER`、`INVOKE_ASSIGN`
 和非替换指令点注入的 handler 返回值会被丢弃，不会改写目标方法返回结果。普通 `@AsmInject(CONSTANT)` 的 `Shift.REPLACE`
 会用 handler 返回值替换原常量加载，但不会把原常量值传给 handler。
@@ -982,6 +984,7 @@ object ValidationMixin {
 `@WrapOperation` 用于把匹配方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、局部变量读取或待写入值、条件跳转、switch selector、常量读取或即将抛出的异常替换为 handler，并通过 `Operation`
 保留执行原操作的能力。实例调用 handler 先接收 receiver 和调用参数，静态调用 handler 只接收调用参数；省略 `INVOKE` 调用目标时，
 框架会按 handler 栈参数、`Operation` 位置与返回类型筛选兼容的普通调用、`invokedynamic` 调用或构造器调用，不兼容候选不计入 `ordinal` 或命中数；
+调用模式可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤，过滤后再计算 `ordinal` 与命中数；
 `invokedynamic` 调用没有 receiver，handler 先接收动态调用点描述符中的参数，再接收 `Operation<R>`，目标按 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，`operation.call(...)` 只传动态调用点参数；构造器模式可通过 `INVOKE + <init>` 目标指定，也可通过 `NEW` 与类型目标指定；`NEW` 目标可写
 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`，handler 先接收构造器参数，不接收未初始化 receiver；
 `GETFIELD` handler 先接收字段 owner，`GETSTATIC` handler 不接收字段 owner；省略 `FIELD` 字段目标时，
@@ -1068,6 +1071,7 @@ switch 模式通过 `SWITCH` 指定，handler 先接收原始 `Int` selector，�
 返回同类型新值，后续参数可接收目标方法参数前缀；primitive 表达式的返回类型必须与表达式类型一致，引用类型表达式可返回表达式类型的子类型，也可用 `Any` 或 `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类；对象或数组表达式的首参可声明为原值类型的父类、接口、`Any` 或 `Object`，
 它不会接收原调用参数、`GETFIELD` receiver、数组引用或
 数组索引；`INVOKE` / `INVOKE_ASSIGN` 省略调用目标时，会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；
+`INVOKE` / `INVOKE_ASSIGN` 可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤，过滤后再计算 `ordinal` 与命中数；
 字段读取省略目标时，会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC` 字段读取值；字段写入模式通过 `FIELD_ASSIGN` 指定，handler 接收 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，返回的新值交给原字段写入继续执行；省略字段目标时，会按 handler 首参与返回类型筛选兼容的字段写入候选；
 `NEW` 模式会在对应 `<init>` 完成后改写对象表达式，省略类型目标时按 handler 首参与返回类型筛选兼容 `NEW`；
 `CAST` 模式会在 `CHECKCAST` 后改写类型转换结果，省略类型目标时按 handler 首参与返回类型筛选兼容 `CHECKCAST`；`CONSTANT` 模式会在常量加载后改写常量表达式值，省略常量目标时按 handler 首参与返回类型筛选兼容常量；`LOAD` 模式不使用 `At.target`，可用 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤，handler 接收 `xLOAD` 读取出的栈顶表达式值，返回值只替换这一次读取结果，不写回原槽位；`STORE` 模式同样不使用 `At.target`，可用槽位或名称过滤，handler 接收 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位；名称过滤依赖目标 class 保留调试变量表，缺失时不会命中，应改用槽位或 `ordinal`；不兼容的调用返回、字段读取、字段写入、数组写入、`NEW`、`CHECKCAST`、`LOAD`、`STORE` 或常量候选不计入 `ordinal` 或命中数。数组读取模式通过 `args = ["array=get"]`
@@ -1447,7 +1451,7 @@ object RedirectMixin {
 }
 ```
 
-方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、字段来源或裸 `ARRAYLENGTH` 数组长度、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、动态调用、构造器、字段访问、数组元素访问、数组长度、局部变量读取值、局部变量待写入值、类型转换、类型判断、原条件跳转分支结果、原 switch selector、原常量值或即将抛出的异常对象需要的栈参数，后续可按顺序接收目标方法参数前缀。`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配；handler 不接收 receiver。省略 `INVOKE` 调用目标时，会按 handler 栈参数、返回类型和可选目标方法参数前缀筛选兼容的普通方法调用、构造器调用或 `invokedynamic` 调用，不兼容候选不参与 `ordinal` 计数。基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，也可使用 `NEW` 与类型目标直接匹配构造表达式；handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象，对象或数组返回值可为原 owner 类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。handler 参数接收引用或数组栈值时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型仍需精确匹配。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；字段来源数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`；裸 `ARRAYLENGTH` 使用 `at.value = InjectionPoint.ARRAY_LENGTH`，不使用 `At.target` 或 `At.args`，handler 按 `Any` / `Object` 接收数组引用并返回 `Int`；局部变量读取使用 `at.value = InjectionPoint.LOAD`，不使用 `At.target`，可用 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤，handler 接收 `xLOAD` 读取出的栈顶表达式值并返回替换值，只影响这一次读取结果，不写回槽位；局部变量写入使用 `at.value = InjectionPoint.STORE`，不使用 `At.target`，可用同样的槽位或名称过滤，handler 接收 `xSTORE` 消费前的待写入栈顶值并返回替换值，返回值交给原 `xSTORE` 继续写入槽位；名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。类型转换使用 `at.value = InjectionPoint.CAST`，handler 接收原待转换对象并返回目标类型兼容对象，省略 `at.target` 时按 handler 返回类型筛选兼容的 `CHECKCAST`；类型判断使用 `at.value = InjectionPoint.INSTANCEOF`，handler 接收原被判断对象并返回 `Boolean`，省略 `at.target` 时匹配切片内全部 `INSTANCEOF` 判断；条件跳转使用 `at.value = InjectionPoint.JUMP`，handler 接收原始分支结果 `Boolean` 并返回新的分支结果，省略 `at.target` 时匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持重定向；switch selector 使用 `at.value = InjectionPoint.SWITCH`，handler 接收原始 `Int` selector 并返回新的 `Int` selector，不支持 `At.target`；常量加载使用 `at.value = InjectionPoint.CONSTANT`，`At.target` 为常量文本，handler 接收原常量值并返回替换值，省略 `at.target` 时按 handler 首参与返回类型筛选兼容常量，不兼容候选不参与 `ordinal` 计数；抛异常点使用 `at.value = InjectionPoint.THROW`，handler 接收即将抛出的 `Throwable` 并返回替换后的 `Throwable`，原 `ATHROW` 仍会继续抛出返回值，如需跳过抛出应使用 `@WrapWithCondition(THROW)`。
+方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、字段来源或裸 `ARRAYLENGTH` 数组长度、局部变量读取、局部变量待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向都可用 `ordinal` 只替换第 N 个匹配点，默认 `-1` 会替换全部匹配点。handler 都可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 中的实例方法。handler 先接收原调用、动态调用、构造器、字段访问、数组元素访问、数组长度、局部变量读取值、局部变量待写入值、类型转换、类型判断、原条件跳转分支结果、原 switch selector、原常量值或即将抛出的异常对象需要的栈参数，后续可按顺序接收目标方法参数前缀。`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配；handler 不接收 receiver。省略 `INVOKE` 调用目标时，会按 handler 栈参数、返回类型和可选目标方法参数前缀筛选兼容的普通方法调用、构造器调用或 `invokedynamic` 调用，不兼容候选不参与 `ordinal` 计数。`INVOKE` 路径可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤，过滤后再计算 `ordinal` 与命中数。基础类型返回值需精确匹配，引用或数组返回值可为原返回类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。构造器重定向可使用 `INVOKE + <init>` 精确匹配构造器，也可使用 `NEW` 与类型目标直接匹配构造表达式；handler 接收构造器参数，不接收未初始化 receiver，并返回构造器 owner 类型兼容对象，对象或数组返回值可为原 owner 类型的可赋值子类型，也可用 `Any` / `Object` 作为泛型引用返回类型。handler 参数接收引用或数组栈值时，可声明为原值类型的父类、接口、`Any` 或 `Object`；基础类型仍需精确匹配。字段写入的原写入值已经作为字段访问参数传入；如果还追加目标方法参数前缀，目标方法的第一个参数会再次出现，例如上面的 `endpoint`。数组元素读取使用 `args = ["array=get"]`，handler 先接收数组引用与 `Int` 索引并返回元素值；数组元素写入使用 `args = ["array=set"]`，handler 先接收数组引用、`Int` 索引与原元素值，并返回 `Unit`；字段来源数组长度读取使用 `args = ["array=length"]`，handler 接收数组引用并返回 `Int`；裸 `ARRAYLENGTH` 使用 `at.value = InjectionPoint.ARRAY_LENGTH`，不使用 `At.target` 或 `At.args`，handler 按 `Any` / `Object` 接收数组引用并返回 `Int`；局部变量读取使用 `at.value = InjectionPoint.LOAD`，不使用 `At.target`，可用 `args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤，handler 接收 `xLOAD` 读取出的栈顶表达式值并返回替换值，只影响这一次读取结果，不写回槽位；局部变量写入使用 `at.value = InjectionPoint.STORE`，不使用 `At.target`，可用同样的槽位或名称过滤，handler 接收 `xSTORE` 消费前的待写入栈顶值并返回替换值，返回值交给原 `xSTORE` 继续写入槽位；名称过滤依赖目标 class 保留调试变量表，缺失时不会命中。类型转换使用 `at.value = InjectionPoint.CAST`，handler 接收原待转换对象并返回目标类型兼容对象，省略 `at.target` 时按 handler 返回类型筛选兼容的 `CHECKCAST`；类型判断使用 `at.value = InjectionPoint.INSTANCEOF`，handler 接收原被判断对象并返回 `Boolean`，省略 `at.target` 时匹配切片内全部 `INSTANCEOF` 判断；条件跳转使用 `at.value = InjectionPoint.JUMP`，handler 接收原始分支结果 `Boolean` 并返回新的分支结果，省略 `at.target` 时匹配切片内全部条件跳转，`GOTO` 与 `JSR` 不支持重定向；switch selector 使用 `at.value = InjectionPoint.SWITCH`，handler 接收原始 `Int` selector 并返回新的 `Int` selector，不支持 `At.target`；常量加载使用 `at.value = InjectionPoint.CONSTANT`，`At.target` 为常量文本，handler 接收原常量值并返回替换值，省略 `at.target` 时按 handler 首参与返回类型筛选兼容常量，不兼容候选不参与 `ordinal` 计数；抛异常点使用 `at.value = InjectionPoint.THROW`，handler 接收即将抛出的 `Throwable` 并返回替换后的 `Throwable`，原 `ATHROW` 仍会继续抛出返回值，如需跳过抛出应使用 `@WrapWithCondition(THROW)`。
 方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、裸 `ARRAYLENGTH`、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向都可用 `Slice` 限制匹配范围；`from` 边界之后、`to` 边界之前的目标调用、动态调用、NEW 构造表达式、字段访问、数组访问、数组长度、裸 `ARRAYLENGTH`、局部变量读写、类型转换、类型判断、条件跳转、switch 指令、常量加载或抛异常点才会参与匹配，边界调用本身不会被重定向，`ordinal` 会在切片内重新计数。关键重定向可同时设置 `require` / `allow` 约束实际替换数量，目标字节码漂移时会在转换阶段失败；`expect` 适合调试期记录期望命中数，不一致时只输出警告。
 
 ### 场景 9: 条件取消执行
@@ -1492,7 +1496,7 @@ object ConditionalMixin {
 switch 模式使用 `At(value = InjectionPoint.SWITCH)` 匹配 `tableswitch` / `lookupswitch`；handler 先接收原始 `Int` selector，返回 `true` 时保留原 selector，返回 `false` 时使用 `0` 继续分派，且不支持 `At.target`。
 抛异常模式使用 `At(value = InjectionPoint.THROW, target = "...")` 精确匹配直接构造后抛出的异常类型，也可省略异常类型按 handler 签名筛选兼容抛异常点；handler 先接收即将抛出的 `Throwable`，返回 `true` 时保留原 `ATHROW`，返回 `false` 时跳过原抛出。
 常量加载模式使用 `At(value = InjectionPoint.CONSTANT, target = "...")` 按常量文本过滤，也可省略 `target` 按 handler 首参筛选兼容常量；handler 首参接收原常量值，返回 `true` 时保留原值，返回 `false` 时用同类型默认值替换本次常量表达式。
-动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。省略调用目标时按 handler 参数筛选兼容的普通调用或 `invokedynamic` 调用，返回 `false` 跳过非 `void` 调用时会留下返回类型对应的默认值，不兼容调用不会参与 `ordinal` 计数；省略 `INVOKE_ASSIGN` 目标时按 handler 首参筛选兼容的非 `void` 调用返回值，`void` 或不兼容候选不会参与 `ordinal` 计数。构造器 `<init>` 不支持 `INVOKE` 条件包裹；命中构造器目标会在转换阶段失败。如需按构造完成后的对象决定是否保留表达式，应使用 `NEW`；如需替换或多次调用构造过程，应使用 `@Redirect` 或 `@WrapOperation`。引用类型参数可使用精确类型、父类型或 `Any` / `Object`；原始类型参数仍按 JVM 栈类型匹配。`INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`CONSTANT`、`JUMP`、`SWITCH`、`ARRAY_LENGTH` 与 `THROW` 都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内；数组 `array=get`、`array=length` 跟随 `FIELD`，`array=set` 跟随 `FIELD_ASSIGN`，裸数组长度使用 `ARRAY_LENGTH`。
+动态调用没有 receiver，handler 先接收动态调用点描述符中的参数，再按需接收目标方法参数前缀。省略调用目标时按 handler 参数筛选兼容的普通调用或 `invokedynamic` 调用，返回 `false` 跳过非 `void` 调用时会留下返回类型对应的默认值，不兼容调用不会参与 `ordinal` 计数；省略 `INVOKE_ASSIGN` 目标时按 handler 首参筛选兼容的非 `void` 调用返回值，`void` 或不兼容候选不会参与 `ordinal` 计数。`INVOKE` 与 `INVOKE_ASSIGN` 可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤，过滤后再计算 `ordinal` 与命中数。构造器 `<init>` 不支持 `INVOKE` 条件包裹；命中构造器目标会在转换阶段失败。如需按构造完成后的对象决定是否保留表达式，应使用 `NEW`；如需替换或多次调用构造过程，应使用 `@Redirect` 或 `@WrapOperation`。引用类型参数可使用精确类型、父类型或 `Any` / `Object`；原始类型参数仍按 JVM 栈类型匹配。`INVOKE`、`INVOKE_ASSIGN`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`CONSTANT`、`JUMP`、`SWITCH`、`ARRAY_LENGTH` 与 `THROW` 都可用 `Slice` 把候选点限制在一段 `INVOKE` 边界内；数组 `array=get`、`array=length` 跟随 `FIELD`，`array=set` 跟随 `FIELD_ASSIGN`，裸数组长度使用 `ARRAY_LENGTH`。
 
 ### 场景 10: 修改返回值
 
@@ -1586,7 +1590,7 @@ object FieldPointMixin {
 
 只需要按额外条件决定是否保留原 `INSTANCEOF` 判断结果时，使用 `@WrapWithCondition(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；handler 首参接收原始 `Boolean` 判断结果，返回 `false` 会把本次判断替换为 `false`。
 
-普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。
+普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。需要在同一类调用点上替换调用、包裹操作、条件保留或改写返回值时，使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 并声明同样的直接字符串实参过滤。
 
 ## 最佳实践
 
@@ -1724,6 +1728,8 @@ fun connect(socket: Socket, address: SocketAddress, timeout: Int) {
 `@Redirect(INVOKE)` 可匹配普通方法调用、构造器 `<init>` 调用和 `invokedynamic` 调用。动态调用没有 receiver，
 handler 先接收调用点描述符中的参数，再按需接收目标方法参数前缀；目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及调用点描述符匹配。
 省略调用目标时，框架会按 handler 签名筛选兼容的普通调用、构造器调用或动态调用，非兼容调用不会参与 `ordinal` 和命中数统计。
+若只想替换带固定直接字符串实参的调用点，可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`，
+该过滤只检查调用参数来源，不匹配 receiver、局部变量、拼接字符串、方法返回值或 bootstrap 常量。
 省略 `method` 时，handler 名称必须与目标方法名一致，框架会按重定向点和 handler 签名匹配唯一同名目标方法；多个兼容重载需要显式指定完整方法签名。
 
 `require` 限制最少命中数，`allow` 限制最多命中数；违反时转换失败。`expect` 可用于调试期望值，设置为非默认值时不一致只输出警告。

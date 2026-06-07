@@ -2920,6 +2920,20 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@WrapWithCondition(INVOKE) 可先按直接字符串实参过滤再计算 ordinal")
+    fun wrapWithConditionAtInvokeArgsLdcFiltersDirectStringCallBeforeOrdinal() {
+        AsmRegistry.register(WrapConditionStringLiteralFilterMixin::class.java)
+
+        val transformed = AsmProcessor().transform("MultiWrapConditionTarget", multiWrapConditionTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiWrapConditionTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        assertThat(result)
+            .`as`("Then: 过滤后 ordinal=0 应落到 second 调用并跳过它，first 调用仍应记录成功")
+            .isEqualTo("first")
+    }
+
+    @Test
     fun wrapWithConditionExposesCountContractParameters() {
         val methods = WrapWithCondition::class.java.declaredMethods.associateBy { it.name }
 
@@ -3561,6 +3575,38 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("raw-changed", result)
+    }
+
+    @Test
+    @DisplayName("@ModifyExpressionValue(INVOKE) 可先按直接字符串实参过滤再计算 ordinal")
+    fun modifyExpressionValueAtInvokeArgsStringFiltersDirectStringCallBeforeOrdinal() {
+        AsmRegistry.register(ModifyExpressionValueStringLiteralFilterMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StringFilteredModifyArgsTarget", stringFilteredModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StringFilteredModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertThat(result)
+            .`as`("Then: 过滤后 ordinal=0 应只改写 second raw 调用返回值，first raw 调用保持原结果")
+            .isEqualTo("first raw:second changed")
+    }
+
+    @Test
+    @DisplayName("@ModifyExpressionValue(INVOKE_ASSIGN) 可复用直接字符串实参过滤")
+    fun modifyExpressionValueAtInvokeAssignArgsStringFiltersDirectStringCallBeforeOrdinal() {
+        AsmRegistry.register(ModifyExpressionValueInvokeAssignStringLiteralFilterMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StringFilteredModifyArgsTarget", stringFilteredModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StringFilteredModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertThat(result)
+            .`as`("Then: INVOKE_ASSIGN 路径也应按 second raw 直接实参过滤后再修改调用返回值")
+            .isEqualTo("first raw:second assign")
     }
 
     @Test
@@ -6013,6 +6059,22 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("first-a:wrapped-b", result)
+    }
+
+    @Test
+    @DisplayName("@WrapOperation(INVOKE) 可先按直接字符串实参过滤再计算 ordinal")
+    fun wrapOperationAtInvokeArgsStringFiltersDirectStringCallBeforeOrdinal() {
+        AsmRegistry.register(WrapOperationStringLiteralFilterMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StringFilteredModifyArgsTarget", stringFilteredModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StringFilteredModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertThat(result)
+            .`as`("Then: WrapOperation 只包裹 second raw 调用，first raw 调用不应被 operation handler 触碰")
+            .isEqualTo("first raw:second wrapped")
     }
 
     @Test
@@ -11213,6 +11275,37 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@Redirect(INVOKE) 可先按直接字符串实参过滤再计算 ordinal")
+    fun redirectAtInvokeArgsLdcFiltersDirectStringCallBeforeOrdinal() {
+        AsmRegistry.register(RedirectStringLiteralFilterMixin::class.java)
+
+        val transformed =
+            AsmProcessor().transform("StringFilteredModifyArgsTarget", stringFilteredModifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("StringFilteredModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        assertThat(result)
+            .`as`("Then: Redirect 只替换直接传入 second raw 的静态调用，first raw 调用保持原返回值")
+            .isEqualTo("first raw:redirected")
+    }
+
+    @Test
+    @DisplayName("@Redirect(INVOKE) 拒绝无法识别的字符串过滤参数")
+    fun redirectAtInvokeArgsRejectsUnsupportedStringFilter() {
+        AsmRegistry.register(InvalidRedirectStringFilterMixin::class.java)
+
+        assertThatThrownBy {
+            AsmProcessor().transform("StringFilteredModifyArgsTarget", stringFilteredModifyArgsTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 错误的 At.args 不能被静默忽略，否则调用替换会误命中业务调用点")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@Redirect(INVOKE) supports at.args only as a single ldc=<string> or string=<string> direct string filter",
+            )
+    }
+
+    @Test
     fun redirectRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeRedirectMixin::class.java)
 
@@ -13831,6 +13924,26 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("MultiWrapConditionTarget")
+    object WrapConditionStringLiteralFilterMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "MultiWrapConditionTarget.record(Ljava/lang/String;)V",
+                args = ["ldc=second"],
+            ),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            check(value == "second")
+            return false
+        }
+    }
+
+    @AsmMixin("MultiWrapConditionTarget")
     object RequireThreeWrapConditionMixin {
         @WrapWithCondition(
             method = "run()Ljava/lang/String;",
@@ -14733,6 +14846,46 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("StringFilteredModifyArgsTarget")
+    object ModifyExpressionValueStringLiteralFilterMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "StringFilteredModifyArgsTarget.replace(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                args = ["string=second raw"],
+            ),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            check(original == "second raw")
+            return "second changed"
+        }
+    }
+
+    @AsmMixin("StringFilteredModifyArgsTarget")
+    object ModifyExpressionValueInvokeAssignStringLiteralFilterMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "StringFilteredModifyArgsTarget.replace(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                args = ["string=second raw"],
+            ),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            check(original == "second raw")
+            return "second assign"
+        }
     }
 
     @AsmMixin("InferredInvokeExpressionValueTarget")
@@ -17800,6 +17953,33 @@ class FrameworkReliabilityTest {
         ): String {
             target.length
             return operation.call("wrapped", value)
+        }
+    }
+
+    @AsmMixin("StringFilteredModifyArgsTarget")
+    object WrapOperationStringLiteralFilterMixin {
+        @WrapOperation(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "StringFilteredModifyArgsTarget.replace(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                args = ["string=second raw"],
+            ),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            search: String,
+            replacement: String,
+            operation: Operation<String>,
+        ): String {
+            check(value == "second raw")
+            search.length
+            replacement.length
+            return operation.call(value, "raw", "wrapped")
         }
     }
 
@@ -20952,6 +21132,52 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): String = "redirected"
+    }
+
+    @AsmMixin("StringFilteredModifyArgsTarget")
+    object RedirectStringLiteralFilterMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "StringFilteredModifyArgsTarget.replace(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=second raw"],
+            ),
+            ordinal = 0,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            value: String,
+            search: String,
+            replacement: String,
+        ): String {
+            check(value == "second raw")
+            search.length
+            replacement.length
+            return "redirected"
+        }
+    }
+
+    @AsmMixin("StringFilteredModifyArgsTarget")
+    object InvalidRedirectStringFilterMixin {
+        @Redirect(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "StringFilteredModifyArgsTarget.replace(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                args = ["unsupported=second raw"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            value: String,
+            search: String,
+            replacement: String,
+        ): String = value.replace(search, replacement)
     }
 
     @AsmMixin("RedirectOrdinalTarget")

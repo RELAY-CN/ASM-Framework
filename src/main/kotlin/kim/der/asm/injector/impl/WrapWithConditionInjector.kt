@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -184,6 +185,10 @@ class WrapWithConditionInjector(
         if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@WrapWithCondition INVOKE requires at.target method signature")
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@WrapWithCondition(INVOKE)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@WrapWithCondition(INVOKE)")
+        }
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -198,6 +203,13 @@ class WrapWithConditionInjector(
                     (inferTarget || (targetName != null && matchesTargetMethod(insn, targetOwner, targetName, targetDesc))) -> {
                     if (inferTarget && !isMethodCallConditionCompatible(target, insn)) {
                         continue
+                    }
+
+                    if (stringLiteral != null) {
+                        val analyzedFrames = frames ?: error("@WrapWithCondition(INVOKE) source frames must be analyzed before filtering")
+                        if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                            continue
+                        }
                     }
 
                     if (insn.name == "<init>") {
@@ -222,6 +234,13 @@ class WrapWithConditionInjector(
                     (inferTarget || (targetName != null && matchesTargetInvokeDynamic(insn, targetOwner, targetName, targetDesc))) -> {
                     if (inferTarget && !isInvokeDynamicConditionCompatible(target, insn)) {
                         continue
+                    }
+
+                    if (stringLiteral != null) {
+                        val analyzedFrames = frames ?: error("@WrapWithCondition(INVOKE) source frames must be analyzed before filtering")
+                        if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                            continue
+                        }
                     }
 
                     val currentOrdinal = matchedOrdinal++
@@ -297,6 +316,10 @@ class WrapWithConditionInjector(
         if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@WrapWithCondition INVOKE_ASSIGN requires at.target method signature")
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@WrapWithCondition(INVOKE_ASSIGN)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@WrapWithCondition(INVOKE_ASSIGN)")
+        }
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -335,6 +358,12 @@ class WrapWithConditionInjector(
             }
             if (inferTarget && !isCallReturnHandlerCompatible(target, callReturnType)) {
                 continue
+            }
+            if (stringLiteral != null) {
+                val analyzedFrames = frames ?: error("@WrapWithCondition(INVOKE_ASSIGN) source frames must be analyzed before filtering")
+                if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                    continue
+                }
             }
 
             val currentOrdinal = matchedOrdinal++

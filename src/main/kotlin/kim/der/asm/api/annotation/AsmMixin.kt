@@ -670,6 +670,8 @@ annotation class ModifyReceiver(
  * `args = ["array=set"]` 包裹数组元素写入；[InjectionPoint.ARRAY_LENGTH] 可直接包裹任意 `ARRAYLENGTH`，不要求数组来自字段读取。
  * [InjectionPoint.INVOKE] 省略 [At.target] 时会按 handler 栈参数、[Operation] 位置与返回类型筛选兼容的
  * 普通调用、`invokedynamic` 调用或构造器调用，不兼容候选不计入 [ordinal] 或命中数。
+ * [InjectionPoint.INVOKE] 可通过 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>`
+ * 过滤调用参数直接来自该 `LDC String` 的候选，过滤后再计算 [ordinal] 与命中数。
  * [InjectionPoint.FIELD] 省略 [At.target] 时会按 handler 字段 owner 参数、[Operation] 位置与返回类型筛选兼容的
  * 字段读取，不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.FIELD_ASSIGN] 省略 [At.target] 时会按 handler 字段 owner 参数、待写入值、[Operation] 位置与
@@ -888,12 +890,15 @@ annotation class WrapMethod(
  * [InjectionPoint.INVOKE] 模式支持普通方法调用和 `invokedynamic` 调用。
  * 省略 [At.target] 时会按 handler 参数和 boolean 返回类型筛选兼容的普通调用或 `invokedynamic` 调用；
  * 构造器和 handler 不兼容的调用不会计入 [ordinal] 或命中数。
+ * [InjectionPoint.INVOKE] 可通过 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>`
+ * 过滤调用参数直接来自该 `LDC String` 的候选，过滤后再计算 [ordinal] 与命中数。
  * 构造器 `<init>` 不能作为 [InjectionPoint.INVOKE] 条件包裹目标；跳过构造器会留下未初始化对象并生成不可验证字节码，转换阶段会失败。
  * 如需按构造完成后的对象决定是否保留表达式，可使用 [InjectionPoint.NEW]；如需替换或多次调用构造过程，应使用 [Redirect] 或 [WrapOperation]。
  * `invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * [InjectionPoint.INVOKE_ASSIGN] 模式匹配普通方法调用或 `invokedynamic` 调用完成后的非 `void` 返回值。
  * handler 先接收调用返回值；返回 `true` 时保留该返回值，返回 `false` 时把本次返回表达式替换为返回类型默认值。
  * 省略 [At.target] 时会按 handler 首参和 `Boolean` 返回类型筛选兼容调用返回值，`void` 或不兼容候选不计入 [ordinal] 或命中数。
+ * [InjectionPoint.INVOKE_ASSIGN] 可复用同样的 [At.args] 直接字符串实参过滤，过滤后再计算 [ordinal] 与命中数。
  * [InjectionPoint.FIELD] 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取，字段目标格式支持
  * `owner.field:desc`、`field:desc` 与 `field`。handler 首参接收读取出的字段值，不接收 receiver；
  * 返回 `true` 时保留原字段值，返回 `false` 时用字段类型默认值替换本次读取结果。省略 [At.target] 时会按 handler
@@ -1069,6 +1074,8 @@ annotation class WrapWithCondition(
  * - 后续参数可按顺序接收目标方法参数前缀
  * - 方法调用目标的 [At.target] 可指定调用签名；省略时按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
  *   以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`
+ * - [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 可通过 [At.args] 中唯一的 `ldc=<string>` 或
+ *   `string=<string>` 过滤调用参数直接来自该 `LDC String` 的候选，过滤后再计算 [ordinal] 与命中数
  * - 字段读取目标可指定字段签名；省略时按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`
  * - 字段写入目标通过 [InjectionPoint.FIELD_ASSIGN] 指定；handler 接收 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，返回的新值交给原字段写入继续执行
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
@@ -1500,6 +1507,8 @@ annotation class ModifyConstant(
  * `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * [At.target] 为空时会按 handler 栈参数、返回类型与可选目标方法参数前缀筛选兼容的普通方法调用、构造器调用或 `invokedynamic` 调用，
  * 不兼容候选不计入 [ordinal] 或命中数。
+ * [InjectionPoint.INVOKE] 可通过 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>`
+ * 过滤调用参数直接来自该 `LDC String` 的候选，过滤后再计算 [ordinal] 与命中数。
  * 字段读取重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，并通过 [At.target] 指定
  * `owner.field:desc`、`field:desc` 或 `field`；字段写入重定向通过 [At.value] 指定
  * [InjectionPoint.FIELD_ASSIGN]，目标格式相同。数组元素读取与数组长度重定向通过 [InjectionPoint.FIELD] 与

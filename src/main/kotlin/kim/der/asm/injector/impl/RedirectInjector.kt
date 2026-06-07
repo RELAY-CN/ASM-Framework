@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -163,6 +164,10 @@ class RedirectInjector(
                     "(parsed: owner=$targetOwner, name=$targetName, desc=$targetDesc)",
             )
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(args, "@Redirect(INVOKE)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@Redirect(INVOKE)")
+        }
 
         val instructions = target.instructions
         var injectionCount = 0
@@ -178,6 +183,13 @@ class RedirectInjector(
             when {
                 insn is MethodInsnNode &&
                     matchesRedirectMethodCandidate(target, insn, inferTarget, targetOwner, targetName, targetDesc) -> {
+                    if (stringLiteral != null) {
+                        val analyzedFrames = frames ?: error("@Redirect(INVOKE) source frames must be analyzed before filtering")
+                        if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                            continue
+                        }
+                    }
+
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -198,6 +210,13 @@ class RedirectInjector(
                         targetName,
                         targetDesc,
                     ) -> {
+                    if (stringLiteral != null) {
+                        val analyzedFrames = frames ?: error("@Redirect(INVOKE) source frames must be analyzed before filtering")
+                        if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                            continue
+                        }
+                    }
+
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue

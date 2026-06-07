@@ -30,10 +30,10 @@
 
 | 旧意图 | 新注解 | 选型说明 |
 | --- | --- | --- |
-| 完全替换一次调用、字段访问、局部变量表达式或分支结果 | `@Redirect` | handler 直接提供替代结果或替代副作用，不保留原操作句柄 |
-| 在 handler 内按需调用、跳过或多次执行原操作 | `@WrapOperation` | 需要 `Operation` 句柄、要组合原参数或多次调用时优先使用 |
-| 只按条件决定是否保留原调用、调用返回值、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值 |
-| 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整 |
+| 完全替换一次调用、字段访问、局部变量表达式或分支结果 | `@Redirect` | handler 直接提供替代结果或替代副作用，不保留原操作句柄；`INVOKE` 可按直接字符串实参过滤 |
+| 在 handler 内按需调用、跳过或多次执行原操作 | `@WrapOperation` | 需要 `Operation` 句柄、要组合原参数或多次调用时优先使用；`INVOKE` 可按直接字符串实参过滤 |
+| 只按条件决定是否保留原调用、调用返回值、字段读写、数组元素读取/写入、数组长度、构造结果、变量读写、类型转换、类型判断、常量、分支、switch 分派或抛异常 | `@WrapWithCondition` | handler 返回 `Boolean`，框架负责保留原值或写入默认值；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
+| 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
 | 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` | 保留原调用，只替换指定实参；可用 `at.args = ["ldc=value"]` / `["string=value"]` 锁定直接字符串实参调用点 |
 | 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数；同样支持直接字符串实参过滤 |
 | 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值 |
@@ -76,6 +76,9 @@
   `@WrapWithCondition`、`@ModifyExpressionValue`、`@Redirect` 或 `@WrapOperation`
 - 若旧监听只关心“调用某方法且某个参数是固定字符串字面量”，迁移为普通
   `@AsmInject(target = InjectionPoint.INVOKE_STRING)`；这是注解式观察点，不回流旧 listener 或 manager 兼容层
+- 若固定字符串字面量只是用来缩小调用替换、操作包裹、条件包裹或调用返回值改写范围，不要迁移成观察点；
+  在 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或
+  `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 的 `At.args` 中声明同样的 `ldc=<string>` / `string=<string>` 过滤。
 
 字段读取这类“原逻辑仍然执行，但某些情况下不要使用原字段值”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.FIELD, target = "..."))`。handler 首参接收已经读取出的字段值，
@@ -138,6 +141,9 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
 需要替换字符串实参时，应使用 `@ModifyArg` 或 `@ModifyArgs`，并可通过
 `at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用参数直接来自该常量的调用点；
 过滤后再计算 `ordinal`、`require` 与 `allow`。不要把 `INVOKE_STRING` 当作替换能力。
+需要替换整个调用、保留可调用原操作的句柄、按条件保留调用副作用/返回值或只改写调用返回表达式时，
+应分别使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或
+`@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)`，并使用同样的直接字符串实参过滤。
 
 ### 3. 参数与 receiver 迁移
 
@@ -145,9 +151,10 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
 
 - 只改单个调用参数时使用 `@ModifyArg`。它会保留原调用，只在原调用前替换 `index` 指定或推断出的实参。
 - 批量改写参数组时使用 `@ModifyArgs`。handler 接收 `Args` 容器，可一次读取、校验和写回整组调用参数。
-- 如果旧逻辑靠固定字符串参数区分调用点，可在 `@ModifyArg(INVOKE)` 或 `@ModifyArgs(INVOKE)` 的 `At.args`
-  中声明唯一的 `ldc=<string>` 或 `string=<string>`。该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver、
-  局部变量、拼接字符串或方法返回值。
+- 如果旧逻辑靠固定字符串参数区分调用点，可在 `@ModifyArg(INVOKE)`、`@ModifyArgs(INVOKE)`、
+  `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或
+  `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 的 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`。
+  该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver、局部变量、拼接字符串、方法返回值或 bootstrap 常量。
 - `INVOKE_STRING` 只用于观察直接字符串常量实参调用点；它不会把字符串传给 handler，也不会替换字符串参数。
   替换字符串实参时使用 `@ModifyArg` 或 `@ModifyArgs`。
 - 只替换实例调用或实例字段访问 receiver 时使用 `@ModifyReceiver`。它保留原调用参数、字段读取值或字段待写入值，

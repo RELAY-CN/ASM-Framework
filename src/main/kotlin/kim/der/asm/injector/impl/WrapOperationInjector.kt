@@ -10,6 +10,7 @@ import kim.der.asm.api.annotation.Operation
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -179,6 +180,10 @@ class WrapOperationInjector(
         if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@WrapOperation INVOKE requires at.target method signature")
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@WrapOperation(INVOKE)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@WrapOperation(INVOKE)")
+        }
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -195,6 +200,13 @@ class WrapOperationInjector(
                     if (inferTarget && !isMethodCallHandlerCompatible(target, insn)) {
                         continue
                     }
+                    if (stringLiteral != null) {
+                        val analyzedFrames = frames ?: error("@WrapOperation(INVOKE) source frames must be analyzed before filtering")
+                        if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                            continue
+                        }
+                    }
+
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue
@@ -222,6 +234,13 @@ class WrapOperationInjector(
                     if (inferTarget && !isInvokeDynamicHandlerCompatible(target, insn)) {
                         continue
                     }
+                    if (stringLiteral != null) {
+                        val analyzedFrames = frames ?: error("@WrapOperation(INVOKE) source frames must be analyzed before filtering")
+                        if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                            continue
+                        }
+                    }
+
                     val currentOrdinal = matchedOrdinal++
                     if (!matchesOrdinal(currentOrdinal)) {
                         continue

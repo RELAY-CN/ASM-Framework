@@ -156,6 +156,8 @@ annotation class AsmInject(
  * 也可通过 [ARRAY_LENGTH] 直接替换、包裹或条件保留裸 `ARRAYLENGTH`，
  * 也可通过 [THROW] 改写即将抛出的异常。
  * [INVOKE_STRING] 只匹配目标方法调用实参中的直接 `LDC String`，不会追踪局部变量、字符串拼接或方法返回值。
+ * [ModifyArg]、[ModifyArgs]、[Redirect]、[WrapOperation]、[WrapWithCondition] 与 [ModifyExpressionValue] 的调用路径也可复用
+ * `ldc=<string>` 或 `string=<string>` 过滤直接字符串实参候选。
  * 其中大部分指令点注入会在匹配指令前后插入 handler，不会自动传递栈顶操作数或局部变量值；
  * [InjectionPoint.TAIL]、[InjectionPoint.RETURN] 与普通指令点注入的 handler
  * 可通过显式 [Local] 参数只读捕获当前作用域内的局部变量。
@@ -240,7 +242,8 @@ enum class InjectionPoint {
  *   `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * - INVOKE_STRING 目标要求包含 owner 的普通方法调用描述符 `owner.name(desc)`，并通过 [args] 中的 `ldc=<string>` 或 `string=<string>`
  *   指定直接字符串常量实参。它只观察调用点，不接收或替换该字符串，不匹配局部变量、拼接字符串、`invokedynamic` 或方法返回值。
- * - [ModifyArg] / [ModifyArgs] 的 INVOKE 模式也可通过 [args] 中唯一的 `ldc=<string>` 或 `string=<string>`
+ * - [ModifyArg] / [ModifyArgs] 的 INVOKE 模式，以及 [Redirect]、[WrapOperation]、[WrapWithCondition] 与
+ *   [ModifyExpressionValue] 的调用路径，也可通过 [args] 中唯一的 `ldc=<string>` 或 `string=<string>`
  *   只匹配调用参数直接来自该 `LDC String` 的调用点；该过滤会先于 `ordinal` 与命中数契约生效。
  * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
@@ -315,8 +318,9 @@ enum class InjectionPoint {
  * 其中 `array=get` / `array=length` 需配合 [InjectionPoint.FIELD]，`array=set` 需配合
  * [InjectionPoint.FIELD_ASSIGN]；[InjectionPoint.ARRAY_LENGTH] 不需要附加参数；普通 [AsmInject] 的 ARRAY_LENGTH 不使用附加参数，
  * 普通 [AsmInject] 的 LOAD/STORE 支持 `index=N`、`var=N` 与 `name=localName`，
- * 普通 [AsmInject] 的 [InjectionPoint.INVOKE_STRING] 以及 [ModifyArg] / [ModifyArgs] 的
- * [InjectionPoint.INVOKE] 模式支持 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤
+ * 普通 [AsmInject] 的 [InjectionPoint.INVOKE_STRING] 以及 [ModifyArg] / [ModifyArgs] / [Redirect] /
+ * [WrapOperation] / [WrapWithCondition] / [ModifyExpressionValue] 的调用路径支持 `ldc=<string>` 或
+ * `string=<string>` 直接字符串实参过滤
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
  */

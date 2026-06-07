@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -178,6 +179,16 @@ class ModifyExpressionValueInjector(
         if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyExpressionValue requires at.target method signature")
         }
+        val annotationName =
+            if (at.value == InjectionPoint.INVOKE_ASSIGN) {
+                "@ModifyExpressionValue(INVOKE_ASSIGN)"
+            } else {
+                "@ModifyExpressionValue(INVOKE)"
+            }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, annotationName)
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, annotationName)
+        }
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -218,6 +229,12 @@ class ModifyExpressionValueInjector(
             }
             if (inferTarget && !isHandlerCompatible(callReturnType, allowThrowableSubtypeReturn = false)) {
                 continue
+            }
+            if (stringLiteral != null) {
+                val analyzedFrames = frames ?: error("$annotationName source frames must be analyzed before filtering")
+                if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                    continue
+                }
             }
 
             val currentOrdinal = matchedOrdinal++
