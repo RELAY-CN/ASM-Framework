@@ -7,8 +7,10 @@ package kim.der.asm.api.annotation
 /**
  * 调用参数容器。
  *
- * [ModifyArgs] handler 会接收该容器，用于读取和改写匹配方法调用的整组参数。索引按目标调用
- * 的方法描述符声明顺序计算，不包含实例方法调用的 receiver。
+ * [ModifyArgs] handler 会接收该容器，用于读取和改写普通方法调用、构造器调用或 `invokedynamic` 调用的整组参数。
+ * 索引按目标调用的调用点描述符声明顺序计算，不包含实例方法调用的 receiver。
+ * 构造器调用不包含未初始化 receiver，只包含构造器参数；`invokedynamic` 调用没有 receiver，
+ * 只包含动态调用点描述符声明的参数。
  * Kotlin handler 可用 [get] / [set]，也可用等价的下标语法 `args[index]` 与 `args[index] = value`。
  * 当需要一次替换整组调用参数时，可使用 [setAll] 保证参数数量匹配后再批量写回。
  * 也可以通过 [size] 属性、`for (value in args)` 或 `joinToString` / `map` 等 [Iterable] 扩展读取参数。

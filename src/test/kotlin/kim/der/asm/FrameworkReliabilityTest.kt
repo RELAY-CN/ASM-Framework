@@ -287,6 +287,50 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开 KDoc 应保持 ModifyArgs Args 容器契约一致")
+    fun publicKDocKeepsModifyArgsArgsContainerContractAligned() {
+        // Given
+        val argsKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "Args.kt"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+
+        // Then
+        assertThat(argsKDoc)
+            .`as`("Then: Args KDoc 应说明 ModifyArgs 覆盖普通调用、构造器调用和 invokedynamic 调用")
+            .contains(
+                "普通方法调用、构造器调用或 `invokedynamic` 调用",
+                "调用点描述符",
+                "不包含实例方法调用的 receiver",
+                "构造器调用不包含未初始化 receiver",
+                "`invokedynamic` 调用没有 receiver",
+            )
+        assertThat(asmMixinKDoc)
+            .`as`("Then: @ModifyArgs KDoc 应保持调用点范围与 Args 容器契约一致")
+            .contains(
+                "普通方法调用、构造器调用或 `invokedynamic` 调用",
+                "构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数",
+                "`invokedynamic` 调用没有 receiver",
+            )
+        assertThat(api)
+            .`as`("Then: API 文档应说明 Args 不包含 receiver 且 At.target 可省略推断")
+            .contains(
+                "`Args` 按目标调用描述符的参数顺序保存参数，不包含实例方法 receiver",
+                "构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数",
+                "省略 `at.target` 时，框架会扫描普通方法调用、构造器调用或 `invokedynamic` 调用",
+            )
+        assertThat(guide)
+            .`as`("Then: GUIDE 应把 ModifyArgs 的构造器和 invokedynamic 语义暴露给迁移用户")
+            .contains(
+                "`@ModifyArgs` 用于同一个方法调用、构造器调用或 `invokedynamic` 调用需要同时改写多个参数的场景",
+                "构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver",
+                "`invokedynamic` 调用没有 receiver",
+            )
+    }
+
+    @Test
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
         // Given
@@ -1413,15 +1457,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun removeSynchronizedRemovesBlockMonitorInstructions() {
+    @DisplayName("RemoveSynchronized 应同时移除方法标志和代码块监视器指令")
+    fun removeSynchronizedRemovesMethodAccessFlagAndBlockMonitorInstructions() {
+        // Given
         AsmRegistry.register(RemoveBlockSynchronizedMixin::class.java)
 
+        // When
         val transformed = AsmProcessor().transform("SyncTarget", syncTargetBytes(), javaClass.classLoader)
         val classNode = readClass(transformed)
         val method = classNode.methods.single { it.name == "blockSync" }
         val monitorOpcodes = method.instructions.toArray().filter { it.opcode == Opcodes.MONITORENTER || it.opcode == Opcodes.MONITOREXIT }
 
-        assertEquals(0, monitorOpcodes.size, "移除同步后不应留下 monitorenter/monitorexit 指令")
+        // Then
+        assertThat(method.access and Opcodes.ACC_SYNCHRONIZED)
+            .`as`("Then: 移除同步后不应保留 ACC_SYNCHRONIZED 方法标志")
+            .isEqualTo(0)
+        assertThat(monitorOpcodes)
+            .`as`("Then: 移除同步后不应留下 monitorenter/monitorexit 指令")
+            .isEmpty()
     }
 
     @Test
@@ -9556,6 +9609,44 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("RemoveMethod 应移除显式指定的目标方法")
+    fun removeMethodRemovesTargetMethod() {
+        // Given
+        AsmRegistry.register(RemoveKeepMethodMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        val methodSignatures = classNode.methods.map { "${it.name}${it.desc}" }
+
+        // Then
+        assertThat(methodSignatures)
+            .`as`("Then: @RemoveMethod 应移除明确指定的 keep()V 方法，同时保留构造器")
+            .doesNotContain("keep()V")
+            .contains("<init>()V")
+    }
+
+    @Test
+    @DisplayName("RemoveMethod 应支持从 handler 签名推断目标方法")
+    fun removeMethodInfersTargetMethodFromHandlerSignature() {
+        // Given
+        AsmRegistry.register(InferredRemoveKeepMethodMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+
+        val methodSignatures = classNode.methods.map { "${it.name}${it.desc}" }
+
+        // Then
+        assertThat(methodSignatures)
+            .`as`("Then: 省略 @RemoveMethod value 时应从 handler 签名推断目标方法并保留构造器")
+            .doesNotContain("keep()V")
+            .contains("<init>()V")
+    }
+
+    @Test
     fun removeMethodWithMissingTargetFailsDuringTransform() {
         AsmRegistry.register(MissingRemoveMethodTargetMixin::class.java)
 
@@ -12626,6 +12717,14 @@ class FrameworkReliabilityTest {
     @AsmMixin("StrictTarget")
     object RemoveKeepMethodMixin {
         @RemoveMethod("keep()V")
+        @JvmStatic
+        fun removeKeepMarker() {
+        }
+    }
+
+    @AsmMixin("StrictTarget")
+    object InferredRemoveKeepMethodMixin {
+        @RemoveMethod
         @JvmStatic
         fun keep() {
         }
@@ -28560,7 +28659,13 @@ class FrameworkReliabilityTest {
         val cw = ClassWriter(0)
         cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SyncTarget", null, "java/lang/Object", null)
         addDefaultConstructor(cw)
-        cw.visitMethod(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "blockSync", "(Ljava/lang/Object;)V", null, null).apply {
+        cw.visitMethod(
+            Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC or Opcodes.ACC_SYNCHRONIZED,
+            "blockSync",
+            "(Ljava/lang/Object;)V",
+            null,
+            null,
+        ).apply {
             visitCode()
             visitVarInsn(Opcodes.ALOAD, 0)
             visitInsn(Opcodes.DUP)

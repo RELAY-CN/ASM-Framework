@@ -473,7 +473,7 @@ annotation class ModifyArg(
  * ASM 方法要求：
  *
  * - 第一个参数必须是 [Args]，用于读取和写回匹配调用点的参数
- * - 构造器调用使用 `<init>` 目标，且 [Args] 只包含构造器参数，不包含未初始化 receiver
+ * - 构造器调用使用 `<init>` 目标，`Args` 只包含构造器参数，不包含未初始化 receiver
  * - `invokedynamic` 调用没有 receiver，且 [Args] 只包含调用点描述符中的参数
  * - handler 必须返回 `void`
  * - 后续参数可按顺序接收目标方法参数前缀
