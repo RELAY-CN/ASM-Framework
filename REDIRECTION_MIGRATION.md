@@ -36,7 +36,7 @@
 | 保留原操作，只改写表达式结果或待写入值 | `@ModifyExpressionValue` | 适合字段读取值、字段待写入值、调用返回值、局部变量表达式等后置调整；`INVOKE` / `INVOKE_ASSIGN` 可按直接字符串实参过滤 |
 | 只改一个调用、构造器或 invokedynamic 参数 | `@ModifyArg` | 保留原调用，只替换指定实参；可用 `at.args = ["ldc=value"]` / `["string=value"]` 锁定直接字符串实参调用点 |
 | 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数；同样支持直接字符串实参过滤 |
-| 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值 |
+| 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值；`INVOKE` 可按直接字符串实参过滤 |
 | 包裹整个目标方法并按需调用原方法 | `@WrapMethod` | handler 接收 `Operation` 原方法句柄，可跳过、调用一次或多次执行原方法 |
 | 把整类方法替换为默认返回值 | `@ReplaceAllMethods` | 只用于默认实现/禁用整类方法，不再经过旧 manager 分派 |
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
@@ -152,14 +152,15 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
 - 只改单个调用参数时使用 `@ModifyArg`。它会保留原调用，只在原调用前替换 `index` 指定或推断出的实参。
 - 批量改写参数组时使用 `@ModifyArgs`。handler 接收 `Args` 容器，可一次读取、校验和写回整组调用参数。
 - 如果旧逻辑靠固定字符串参数区分调用点，可在 `@ModifyArg(INVOKE)`、`@ModifyArgs(INVOKE)`、
-  `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或
+  `@ModifyReceiver(INVOKE)`、`@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)` 或
   `@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 的 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`。
   该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver、局部变量、拼接字符串、方法返回值或 bootstrap 常量。
   `ldc=` / `string=` 后面的过滤值按字面量精确匹配，前后空格也会保留。
 - `INVOKE_STRING` 只用于观察直接字符串常量实参调用点；它不会把字符串传给 handler，也不会替换字符串参数。
   替换字符串实参时使用 `@ModifyArg` 或 `@ModifyArgs`。
 - 只替换实例调用或实例字段访问 receiver 时使用 `@ModifyReceiver`。它保留原调用参数、字段读取值或字段待写入值，
-  只把执行原操作时使用的 receiver 换成 handler 返回值。
+  只把执行原操作时使用的 receiver 换成 handler 返回值；`INVOKE` 模式可使用同样的直接字符串实参过滤，
+  过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver。
 - 需要保留可调用原操作句柄时使用 `@WrapOperation`。这适合“先改 receiver 或参数，再决定是否调用原方法/字段操作”的复杂场景。
 
 字段读取或写入的 `@WrapWithCondition` handler 接收的是字段值或待写入值，不接收 `GETFIELD` / `PUTFIELD` receiver；

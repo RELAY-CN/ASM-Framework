@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Slice
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.DirectStringArgumentMatcher
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.InstructionUtil
 import org.objectweb.asm.Opcodes
@@ -32,10 +33,12 @@ import java.lang.reflect.Modifier
  * handler 返回的新 receiver 会替代原 receiver，随后恢复原调用参数或字段写入值并继续执行原操作。
  * [InjectionPoint.INVOKE] 未指定调用目标时，会按 handler 首参与返回类型筛选兼容的实例调用 receiver；
  * 静态调用、构造器调用和 handler 不兼容的实例调用不会计入 [ModifyReceiver.ordinal] 或命中数。
+ * [InjectionPoint.INVOKE] 可在 [At.args] 中声明唯一的 `ldc=<string>` 或 `string=<string>`，
+ * 只匹配调用参数直接来自该字符串常量的候选；receiver 自身不参与字符串过滤。
  * [InjectionPoint.FIELD] 未指定字段目标时，会按 handler 首参与返回类型筛选兼容的实例字段读取 receiver；
- * 静态字段和 handler 不兼容的字段读取不会计入 [ModifyReceiver.ordinal] 或命中数。
+ * 静态字段和 handler 不兼容的字段读取不会计入 [ModifyReceiver.ordinal] 或命中数；字段模式不使用 [At.args]。
  * [InjectionPoint.FIELD_ASSIGN] 未指定字段目标时，会按 handler 首参与返回类型筛选兼容的实例字段写入 receiver；
- * 静态字段和 handler 不兼容的字段写入不会计入 [ModifyReceiver.ordinal] 或命中数。
+ * 静态字段和 handler 不兼容的字段写入不会计入 [ModifyReceiver.ordinal] 或命中数；字段写入模式不使用 [At.args]。
  *
  * @param at 调用点定位；当前支持 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN]
  * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
@@ -98,6 +101,10 @@ class ModifyReceiverInjector(
         if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyReceiver INVOKE requires at.target method signature")
         }
+        val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@ModifyReceiver(INVOKE)")
+        val frames = stringLiteral?.let {
+            DirectStringArgumentMatcher.analyzeFrames(asmInfo, target, "@ModifyReceiver(INVOKE)")
+        }
 
         var injectionCount = 0
         var matchedOrdinal = 0
@@ -115,6 +122,12 @@ class ModifyReceiverInjector(
             }
             if (inferTarget && !isMethodReceiverCompatible(target, insn)) {
                 continue
+            }
+            if (stringLiteral != null) {
+                val analyzedFrames = frames ?: error("@ModifyReceiver(INVOKE) source frames must be analyzed before filtering")
+                if (!DirectStringArgumentMatcher.hasDirectStringArgument(analyzedFrames[index], insn, stringLiteral)) {
+                    continue
+                }
             }
 
             val currentOrdinal = matchedOrdinal++
@@ -163,7 +176,8 @@ class ModifyReceiverInjector(
      * 在匹配的实例字段读取前改写 receiver。
      *
      * 显式声明目标时按字段 owner、名称和描述符匹配；未声明目标时跳过静态字段读取和
-     * handler 签名不兼容的字段 owner。通过筛选的读取点再应用 [ordinal]。
+     * handler 签名不兼容的字段 owner。通过筛选的读取点再应用 [ordinal]。字段读取没有调用实参，
+     * 因此不消费 [At.args]，避免把错误配置静默解释成普通 receiver 改写。
      *
      * @param target 目标方法
      * @return 实际插入 receiver 改写逻辑的字段读取数量
@@ -174,6 +188,9 @@ class ModifyReceiverInjector(
         val fieldTarget = parseFieldTarget(at.target)
         if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyReceiver FIELD requires at.target field signature")
+        }
+        require(at.args.isEmpty()) {
+            "@ModifyReceiver FIELD does not use at.args; direct string filtering is supported only for INVOKE"
         }
 
         var injectionCount = 0
@@ -224,7 +241,8 @@ class ModifyReceiverInjector(
      * 在匹配的实例字段写入前改写 receiver。
      *
      * 字段写入指令前的栈形态为 receiver 后跟待写入值；生成的改写逻辑会同时保护待写入值，
-     * 确保替换 receiver 后仍能按原顺序执行字段写入。
+     * 确保替换 receiver 后仍能按原顺序执行字段写入。字段写入没有方法调用实参，
+     * 因此不消费 [At.args]，避免把错误配置静默解释成普通 receiver 改写。
      *
      * @param target 目标方法
      * @return 实际插入 receiver 改写逻辑的字段写入数量
@@ -235,6 +253,9 @@ class ModifyReceiverInjector(
         val fieldTarget = parseFieldTarget(at.target)
         if (!inferTarget && fieldTarget.name == null) {
             throw IllegalArgumentException("@ModifyReceiver FIELD_ASSIGN requires at.target field signature")
+        }
+        require(at.args.isEmpty()) {
+            "@ModifyReceiver FIELD_ASSIGN does not use at.args; direct string filtering is supported only for INVOKE"
         }
 
         var injectionCount = 0

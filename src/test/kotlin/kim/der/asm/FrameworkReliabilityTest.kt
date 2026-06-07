@@ -799,6 +799,8 @@ class FrameworkReliabilityTest {
                 "省略 `method`",
                 "`At.target` 为空的 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN`",
                 "不兼容候选不计入",
+                "`INVOKE` 可在 `at.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`",
+                "该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver",
                 "字段写入会保留原待写入值并写入新的 receiver",
             )
         assertThat(guideModifyReceiverSection)
@@ -807,6 +809,8 @@ class FrameworkReliabilityTest {
                 "省略 `method`",
                 "省略 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN` 目标",
                 "静态调用、构造器调用和不兼容实例调用不计入",
+                "`INVOKE` 可在 `At.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>`",
+                "只检查调用参数来源，不匹配 receiver",
                 "静态字段和不兼容字段读取不计入",
                 "`FIELD_ASSIGN` 会把原待写入值写到新 receiver",
             )
@@ -816,12 +820,17 @@ class FrameworkReliabilityTest {
                 "可省略 [method]",
                 "[At.target] 为空时会使用实际可兼容的 receiver 候选参与推断",
                 "静态调用、构造器调用和 handler 不兼容的实例调用不计入 [ordinal] 或命中数",
+                "可在 [At.args] 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤",
+                "该过滤只检查调用参数来源，不匹配 receiver",
                 "静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数",
                 "静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数",
             )
         assertThat(atKDocSection)
             .`as`("Then: 通用 At KDoc 只说明显式 target 格式，不应覆盖 ModifyReceiver 的省略推断例外")
-            .contains("FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。")
+            .contains(
+                "[ModifyArg] / [ModifyArgs] / [ModifyReceiver] 的 INVOKE 模式",
+                "FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。",
+            )
     }
 
     @Test
@@ -934,13 +943,13 @@ class FrameworkReliabilityTest {
             .`as`("Then: API 应说明普通指令点 REPLACE 只有 CONSTANT 会真正删除并替换原指令")
             .contains(
                 "普通指令点的 `Shift.REPLACE` 只有 `CONSTANT` 会删除并替换匹配指令",
-                "`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH` 与 `THROW` 仍只按观察插入处理",
+                "`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`THROW` 与 `ARRAY_LENGTH` 仍只按观察插入处理",
             )
         assertThat(guideAsmInjectSection)
             .`as`("Then: GUIDE 应避免让迁移用户误以为 FIELD/STORE 等普通指令点 REPLACE 会替换原操作")
             .contains(
                 "普通指令点的 `Shift.REPLACE` 只有 `CONSTANT` 会删除并替换匹配指令",
-                "如果需要替换字段、局部变量、类型判断、switch 或异常表达式，应改用 `@Redirect`、`@ModifyExpressionValue`、`@WrapOperation` 或 `@WrapWithCondition`",
+                "如果需要替换字段、局部变量、数组长度、类型判断、switch 或异常表达式，应改用 `@Redirect`、`@ModifyExpressionValue`、`@WrapOperation` 或 `@WrapWithCondition`",
             )
         assertThat(injectionPointSection)
             .`as`("Then: InjectionPoint KDoc 应把 STORE 描述成按注解语义分流的写入相关指令点")
@@ -5333,6 +5342,133 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("first-a:changed-b", result)
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(INVOKE) 可按直接字符串实参过滤调用点")
+    fun modifyReceiverAtInvokeFiltersByDirectStringArgument() {
+        // Given
+        AsmRegistry.register(ModifyReceiverStringLiteralFilterMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: receiver 改写应先按调用参数的直接字符串常量过滤，再计算命中数")
+            .isEqualTo("first-a:changed-b")
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(INVOKE) 支持 string= 作为直接字符串实参过滤别名")
+    fun modifyReceiverAtInvokeStringAliasFiltersByDirectStringArgument() {
+        // Given
+        AsmRegistry.register(ModifyReceiverStringAliasFilterMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: string= 应与 ldc= 使用同一直接字符串实参语义，避免迁移时同义配置分裂")
+            .isEqualTo("first-a:changed-b")
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(INVOKE) 字符串过滤不匹配 receiver 自身的直接常量")
+    fun modifyReceiverAtInvokeStringFilterDoesNotMatchReceiverLiteral() {
+        // Given
+        AsmRegistry.register(ModifyReceiverReceiverLiteralFilterMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: ldc=second 只能匹配调用参数，不能把 second 这个 receiver 常量当作命中点")
+            .isEqualTo("first-a:second-b")
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(INVOKE) 省略调用目标时仍可按直接字符串实参过滤兼容调用点")
+    fun modifyReceiverAtInvokeInfersTargetWithDirectStringArgumentFilter() {
+        // Given
+        AsmRegistry.register(ModifyReceiverInferredStringLiteralFilterMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("MultiModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: 目标推断应先排除不兼容调用，再用直接字符串实参过滤实际 receiver 候选")
+            .isEqualTo("first-a:changed-b")
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(INVOKE) 拒绝无法识别的字符串过滤参数")
+    fun modifyReceiverAtInvokeArgsRejectsUnsupportedStringFilter() {
+        // Given
+        AsmRegistry.register(InvalidModifyReceiverStringFilterMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("MultiModifyReceiverTarget", multiModifyReceiverTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 错误的 At.args 不能被静默忽略，否则 receiver 补丁会误命中调用点")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@ModifyReceiver(INVOKE) supports at.args only as a single ldc=<string> or string=<string> direct string filter",
+            )
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(FIELD) 拒绝直接字符串实参过滤参数")
+    fun modifyReceiverFieldReadRejectsStringLiteralFilterArgs() {
+        // Given
+        AsmRegistry.register(InvalidModifyReceiverFieldReadStringFilterMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: FIELD receiver 没有调用实参，不能静默忽略 At.args 后继续改写字段读取 receiver")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@ModifyReceiver FIELD does not use at.args; direct string filtering is supported only for INVOKE",
+            )
+    }
+
+    @Test
+    @DisplayName("@ModifyReceiver(FIELD_ASSIGN) 拒绝直接字符串实参过滤参数")
+    fun modifyReceiverFieldAssignRejectsStringLiteralFilterArgs() {
+        // Given
+        AsmRegistry.register(InvalidModifyReceiverFieldAssignStringFilterMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: FIELD_ASSIGN receiver 没有调用实参，不能静默忽略 At.args 后继续改写字段写入 receiver")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "@ModifyReceiver FIELD_ASSIGN does not use at.args; direct string filtering is supported only for INVOKE",
+            )
     }
 
     @Test
@@ -17334,6 +17470,131 @@ class FrameworkReliabilityTest {
             original.length
             return "changed"
         }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object ModifyReceiverStringLiteralFilterMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=-b"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object ModifyReceiverStringAliasFilterMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["string=-b"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object ModifyReceiverReceiverLiteralFilterMixin {
+        @Group(name = "receiverLiteralFilter", min = 0, max = 0)
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=second"],
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object ModifyReceiverInferredStringLiteralFilterMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                args = ["ldc=-b"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("MultiModifyReceiverTarget")
+    object InvalidModifyReceiverStringFilterMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["unsupported=-b"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "changed"
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object InvalidModifyReceiverFieldReadStringFilterMixin {
+        @ModifyReceiver(
+            method = "readName()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+                args = ["ldc=unused"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object InvalidModifyReceiverFieldAssignStringFilterMixin {
+        @ModifyReceiver(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = "FieldPointTarget.name:Ljava/lang/String;",
+                args = ["ldc=unused"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
     }
 
     @AsmMixin("ModifyReceiverContractTarget")
