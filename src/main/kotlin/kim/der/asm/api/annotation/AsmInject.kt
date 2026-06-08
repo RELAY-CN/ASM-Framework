@@ -53,7 +53,8 @@ package kim.der.asm.api.annotation
  * @param at 当 [target] 为 INVOKE/INVOKE_ASSIGN/INVOKE_STRING/FIELD/FIELD_ASSIGN/LOAD/STORE/NEW/CAST/INSTANCEOF/JUMP/SWITCH/CONSTANT/ARRAY_LENGTH/THROW 时用于描述具体指令点；
  * 核心字段为 [At.target] 与 [At.shift]；普通 LOAD/STORE 可通过 [At.args] 中的 `index=N`
  * 或 `var=N` 按 JVM 局部变量槽位过滤，也可用 `name=localName` 按 LocalVariableTable 中的变量名过滤；
- * 普通 INVOKE_STRING 需要在 [At.target] 写 `owner.name(desc)`，并通过 [At.args] 中的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串常量实参
+ * 普通 INVOKE_STRING 需要在 [At.target] 写 `owner.name(desc)` 或 `owner/name(desc)`，
+ * 并通过 [At.args] 中的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串常量实参
  * @param ordinal 匹配点序号；-1 表示处理全部匹配点，0 及以上表示只处理第 N 个匹配点（当前对 RETURN/INVOKE/INVOKE_ASSIGN 与指令点注入生效）
  * @param slice 切片范围；当前普通 [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入、普通 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、普通 [InjectionPoint.INVOKE_STRING] 字符串实参调用点注入、普通 [InjectionPoint.LOAD] /
@@ -240,7 +241,8 @@ enum class InjectionPoint {
  *
  * - INVOKE 目标要求包含方法、构造器或 `invokedynamic` 调用点描述符；owner 可使用 JVM internal name 或 Java binary name，也可省略，省略时只按方法名与描述符匹配。
  *   `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
- * - INVOKE_STRING 目标要求包含 owner 的普通方法调用描述符 `owner.name(desc)`，并通过 [args] 中的 `ldc=<string>` 或 `string=<string>`
+ * - INVOKE_STRING 目标要求包含 owner 的普通方法调用描述符 `owner.name(desc)` 或 `owner/name(desc)`，
+ *   并通过 [args] 中的 `ldc=<string>` 或 `string=<string>`
  *   指定直接字符串常量实参。它只观察调用点，不接收或替换该字符串，不匹配局部变量、拼接字符串、`invokedynamic` 或方法返回值。
  * - [ModifyArg] / [ModifyArgs] / [ModifyReceiver] 的 INVOKE 模式，以及 [Redirect]、[WrapOperation]、[WrapWithCondition] 与
  *   [ModifyExpressionValue] 的调用路径，也可通过 [args] 中唯一的 `ldc=<string>` 或 `string=<string>`

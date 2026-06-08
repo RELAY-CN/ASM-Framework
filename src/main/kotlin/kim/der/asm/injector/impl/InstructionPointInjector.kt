@@ -422,7 +422,7 @@ class InstructionPointInjector(
                 val (targetOwner, targetName, targetDesc) = parseTargetMethod(target)
                 if (targetOwner == null || targetName == null || targetDesc == null) {
                     throw IllegalArgumentException(
-                        "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc): $target",
+                        "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc) or owner/name(desc): $target",
                     )
                 }
                 val frames = DirectStringArgumentMatcher.analyzeFrames(asmInfo, method, "@AsmInject(INVOKE_STRING)")

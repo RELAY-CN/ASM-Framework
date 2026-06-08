@@ -46,7 +46,7 @@
 | 把同一组重定向规则应用到整类普通方法 | `@RedirectAllMethods` + `@Redirect` | `@Redirect.method` 不筛选目标方法；跳过 `<init>` / `<clinit>`；`require` / `allow` / `expect` 按全类总命中数校验，`ordinal` / `slice` 仍按单个目标方法计算 |
 | 把整类方法替换为默认返回值 | `@ReplaceAllMethods` | 只用于默认实现/禁用整类方法，不再经过旧 manager 分派 |
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
-| 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |
+| 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 或 `At.target = "owner/name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |
 
 迁移时可按下面顺序快速选型：
 
@@ -150,7 +150,7 @@ name 或 binary name，也可省略以匹配切片内兼容的类型判断，必
   `@ModifyVariable`、`@ModifyExpressionValue`、`@Redirect`、`@WrapOperation` 或 `@WrapWithCondition`。
 
 字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`。它只匹配调用实参中的直接 `LDC String`，
-且 `At.target` 必须写包含 owner 的 `owner.name(desc)`，
+且 `At.target` 必须写包含 owner 的 `owner.name(desc)` 或 `owner/name(desc)`，
 不会把该字符串传给 handler，也不会匹配局部变量、字符串拼接、方法返回值或 `invokedynamic` 生成的字符串。
 需要替换字符串实参时，应使用 `@ModifyArg` 或 `@ModifyArgs`，并可通过
 `at.args = ["ldc=value"]` 或 `["string=value"]` 只匹配调用参数直接来自该常量的调用点；

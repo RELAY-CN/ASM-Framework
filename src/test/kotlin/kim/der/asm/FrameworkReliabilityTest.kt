@@ -765,6 +765,22 @@ class FrameworkReliabilityTest {
         val migration = Files.readString(Path.of("REDIRECTION_MIGRATION.md"))
         val asmMixinKDoc =
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val asmInjectKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
+        val instructionPointInjectorSource =
+            Files.readString(
+                Path.of(
+                    "src",
+                    "main",
+                    "kotlin",
+                    "kim",
+                    "der",
+                    "asm",
+                    "injector",
+                    "impl",
+                    "InstructionPointInjector.kt",
+                ),
+            )
         val explicitFieldTargetRequirement = "字段名必填"
         val apiTargetFormatSection =
             requiredSection(
@@ -874,16 +890,52 @@ class FrameworkReliabilityTest {
                 "字段读取这类“原逻辑仍然执行",
                 "数组元素读取和字段来源数组长度读取",
             )
+        val guideInvokeStringOverviewSection =
+            requiredSection(
+                guide,
+                "普通 `INVOKE_STRING` 只观察普通方法调用实参中的直接 `LDC String`",
+                "`ldc=` / `string=` 后面的过滤值按字面量精确匹配",
+            )
+        val guideInvokeStringScenarioSection =
+            requiredSection(
+                guide,
+                "普通 `INVOKE_STRING` 同样属于观察型指令点",
+                "## 最佳实践",
+            )
+        val migrationInvokeStringMappingSection =
+            requiredSection(
+                migration,
+                "按直接字符串常量实参观察调用点",
+                "迁移时可按下面顺序快速选型：",
+            )
+        val migrationInvokeStringScenarioSection =
+            requiredSection(
+                migration,
+                "字符串实参调用监听应迁移为普通 `@AsmInject(INVOKE_STRING)`",
+                "需要替换整个调用",
+            )
 
         // Then
         assertThat(apiTargetFormatSection)
             .`as`("Then: API target 格式总表应明确 INVOKE 可省略 owner，但 descriptor 仍是显式调用签名的一部分")
             .contains(
-                "- `INVOKE`: `owner.name(desc)` 或 `name(desc)`",
+                "- `INVOKE`: `owner.name(desc)`、`owner/name(desc)` 或 `name(desc)`",
                 "owner 可使用 JVM internal name 或 Java binary name",
-                "- `INVOKE_STRING`: `owner.name(desc)`",
+                "- `INVOKE_STRING`: `owner.name(desc)` 或 `owner/name(desc)`",
                 "owner 必填",
             )
+        listOf(
+            "GUIDE overview" to guideInvokeStringOverviewSection,
+            "GUIDE scenario" to guideInvokeStringScenarioSection,
+            "REDIRECTION_MIGRATION mapping" to migrationInvokeStringMappingSection,
+            "REDIRECTION_MIGRATION scenario" to migrationInvokeStringScenarioSection,
+            "AsmInject KDoc" to asmInjectKDoc,
+            "InstructionPointInjector diagnostic" to instructionPointInjectorSource,
+        ).forEach { (context, section) ->
+            assertThat(section)
+                .`as`("Then: $context 应把 INVOKE_STRING owner selector 同步为 dot 与 slash 两种公开格式")
+                .contains("owner.name(desc)", "owner/name(desc)")
+        }
         listOf(
             "@ModifyArg API" to apiModifyArgSection,
             "@ModifyArgs API" to apiModifyArgsSection,
@@ -8798,6 +8850,34 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("slash owner 的 target 应命中直接字符串实参调用")
+        fun slashOwnerTargetMatchesDirectStringArgumentInvocation() {
+            // Given
+            AsmRegistry.register(InvokeStringSlashOwnerMixin::class.java)
+
+            // When
+            val transformed = AsmProcessor().transform(
+                "InvokeStringTarget",
+                invokeStringTargetBytes(),
+                javaClass.classLoader,
+            )
+            val method = readClass(transformed).methods.single { it.name == "run" && it.desc == "()V" }
+            val mixinOwner = org.objectweb.asm.Type.getInternalName(InvokeStringSlashOwnerMixin::class.java)
+            val handlerCallCount = method.instructions.toArray().count { insn ->
+                insn is org.objectweb.asm.tree.MethodInsnNode &&
+                    insn.owner == mixinOwner &&
+                    insn.name == "inject"
+            }
+
+            // Then
+            assertThat(handlerCallCount)
+                .`as`(
+                    "Then: INVOKE_STRING 的 owner/name(desc) selector 应与 owner.name(desc) 一样按直接 marker 实参命中",
+                )
+                .isEqualTo(1)
+        }
+
+        @Test
         @DisplayName("缺少 ldc 参数时应在转换阶段暴露配置错误")
         fun missingLdcArgumentFailsWithClearConfigurationError() {
             // Given
@@ -8864,7 +8944,8 @@ class FrameworkReliabilityTest {
                 .`as`("Then: INVOKE_STRING 的目标调用必须精确到 owner，避免同名同签名调用误命中")
                 .isInstanceOf(AsmTransformException::class.java)
                 .hasRootCauseMessage(
-                    "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc): target(Ljava/lang/String;)V",
+                    "@AsmInject(INVOKE_STRING) requires at.target owner.name(desc) or owner/name(desc): " +
+                        "target(Ljava/lang/String;)V",
                 )
         }
 
@@ -25467,6 +25548,24 @@ class FrameworkReliabilityTest {
             at = At(
                 value = InjectionPoint.INVOKE_STRING,
                 target = "InvokeStringTarget.target(Ljava/lang/String;)V",
+                args = ["ldc=marker"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("InvokeStringTarget")
+    object InvokeStringSlashOwnerMixin {
+        @AsmInject(
+            method = "run()V",
+            target = InjectionPoint.INVOKE_STRING,
+            at = At(
+                value = InjectionPoint.INVOKE_STRING,
+                target = "InvokeStringTarget/target(Ljava/lang/String;)V",
                 args = ["ldc=marker"],
             ),
             require = 1,

@@ -193,7 +193,7 @@ object LoggingMixin {
 `param` 来自 `process` 目标方法。`INVOKE_ASSIGN` 默认在匹配调用完成后插入 handler；需要调用前注入时使用 `INVOKE`。
 普通 `INVOKE` / `INVOKE_ASSIGN` 也可匹配 `invokedynamic` 调用；动态调用没有 receiver，handler 参数来自动态调用点描述符，
 目标按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
-普通 `INVOKE_STRING` 只观察普通方法调用实参中的直接 `LDC String`，必须在 `At.target` 写包含 owner 的 `owner.name(desc)` 调用描述符，并在
+普通 `INVOKE_STRING` 只观察普通方法调用实参中的直接 `LDC String`，必须在 `At.target` 写包含 owner 的 `owner.name(desc)` 或 `owner/name(desc)` 调用描述符，并在
 `At.args` 中声明唯一一个 `ldc=value` 或 `string=value`。它不会把字符串传给 handler，也不会替换字符串；
 handler 只能像上面的 `beforeMarkerAudit` 一样继续接收目标方法参数前缀。局部变量中的同值字符串、字符串拼接、
 方法返回值或 `invokedynamic` 生成的字符串不会被 `INVOKE_STRING` 匹配。
@@ -1600,7 +1600,7 @@ object FieldPointMixin {
 
 只需要按额外条件决定是否保留原 `INSTANCEOF` 判断结果时，使用 `@WrapWithCondition(at = At(value = InjectionPoint.INSTANCEOF, target = "..."))`；handler 首参接收原始 `Boolean` 判断结果，返回 `false` 会把本次判断替换为 `false`。
 
-普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；过滤值按 `=` 后的完整文本匹配，前后空格不会被修剪；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。需要在同一类调用点上替换调用、包裹操作、条件保留、改写返回值或替换 receiver 时，使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)`、`@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyReceiver(INVOKE)` 并声明同样的直接字符串实参过滤；`@ModifyReceiver(INVOKE)` 的过滤只检查调用参数来源，不匹配 receiver。
+普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 或 `At.target = "owner/name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；过滤值按 `=` 后的完整文本匹配，前后空格不会被修剪；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。需要在同一类调用点上替换调用、包裹操作、条件保留、改写返回值或替换 receiver 时，使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)`、`@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyReceiver(INVOKE)` 并声明同样的直接字符串实参过滤；`@ModifyReceiver(INVOKE)` 的过滤只检查调用参数来源，不匹配 receiver。
 
 ## 最佳实践
 
