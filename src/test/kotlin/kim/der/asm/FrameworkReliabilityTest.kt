@@ -9793,6 +9793,62 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ReplaceAllMethods 应覆盖默认返回提供器的引用类型矩阵")
+    fun replaceAllMethodsUsesDefaultReturnValueProviderMatrixForReferenceReturns() {
+        // Given
+        AsmRegistry.register(ReplaceAllDefaultReturnMatrixMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("DefaultReturnMatrixTarget", defaultReturnMatrixTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("DefaultReturnMatrixTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        val contract = clazz.getMethod("contract").invoke(instance) as DefaultReturnContract
+        assertThat(contract.text())
+            .`as`("Then: 接口代理方法应继续按返回类型生成默认 String")
+            .isEqualTo("")
+        assertThat(contract.number())
+            .`as`("Then: 接口代理方法应继续按返回类型生成默认 Int")
+            .isZero()
+        assertThat(contract.nested().text())
+            .`as`("Then: 嵌套接口返回值也应继续生成动态代理默认值")
+            .isEqualTo("")
+
+        val strings = clazz.getMethod("strings").invoke(instance)
+        assertThat(java.lang.reflect.Array.getLength(strings))
+            .`as`("Then: 一维对象数组应返回对应组件类型的空数组")
+            .isZero()
+        assertThat(strings.javaClass.componentType)
+            .`as`("Then: 一维对象数组组件类型应保持为 String")
+            .isEqualTo(String::class.java)
+
+        val primitiveMatrix = clazz.getMethod("primitiveMatrix").invoke(instance)
+        assertThat(java.lang.reflect.Array.getLength(primitiveMatrix))
+            .`as`("Then: 二维基础类型数组应返回外层长度为 0 的空数组")
+            .isZero()
+        assertThat(primitiveMatrix.javaClass.name)
+            .`as`("Then: 二维基础类型数组描述符应保持原始返回类型")
+            .isEqualTo("[[I")
+
+        assertThat(clazz.getMethod("abstractValue").invoke(instance))
+            .`as`("Then: 抽象类返回值无法安全构造时应返回 null")
+            .isNull()
+
+        val constructed = clazz.getMethod("constructed").invoke(instance) as DefaultReturnNoDefaultConstructorValue
+        assertThat(constructed.count)
+            .`as`("Then: 无无参构造类应使用基础类型默认参数调用首个构造器")
+            .isZero()
+        assertThat(constructed.enabled)
+            .`as`("Then: Boolean 构造参数应使用 false 默认值")
+            .isFalse()
+        assertThat(constructed.name)
+            .`as`("Then: 引用类型构造参数应使用 null 默认值")
+            .isNull()
+    }
+
+    @Test
     fun replaceAllMethodsUsesJvmDefaultForCharReturn() {
         AsmRegistry.register(ReplaceAllCharReturnMixin::class.java)
 
@@ -20832,6 +20888,30 @@ class FrameworkReliabilityTest {
     object ReplaceAllReferenceReturnMixin
 
     @ReplaceAllMethods
+    @AsmMixin("DefaultReturnMatrixTarget")
+    object ReplaceAllDefaultReturnMatrixMixin
+
+    interface DefaultReturnContract {
+        fun text(): String
+
+        fun number(): Int
+
+        fun nested(): DefaultReturnNestedContract
+    }
+
+    interface DefaultReturnNestedContract {
+        fun text(): String
+    }
+
+    abstract class DefaultReturnAbstractValue
+
+    class DefaultReturnNoDefaultConstructorValue(
+        val count: Int,
+        val enabled: Boolean,
+        val name: String?,
+    )
+
+    @ReplaceAllMethods
     @AsmMixin("CharReturnTarget")
     object ReplaceAllCharReturnMixin
 
@@ -24534,6 +24614,53 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun defaultReturnMatrixTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        val contractName = org.objectweb.asm.Type.getInternalName(DefaultReturnContract::class.java)
+        val abstractName = org.objectweb.asm.Type.getInternalName(DefaultReturnAbstractValue::class.java)
+        val constructedName = org.objectweb.asm.Type.getInternalName(DefaultReturnNoDefaultConstructorValue::class.java)
+
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "DefaultReturnMatrixTarget", null, "java/lang/Object", null)
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "contract", "()L$contractName;", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "strings", "()[Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "primitiveMatrix", "()[[I", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "abstractValue", "()L$abstractName;", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "constructed", "()L$constructedName;", null, null).apply {
+            visitCode()
+            visitInsn(Opcodes.ACONST_NULL)
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
             visitEnd()
         }
         cw.visitEnd()
