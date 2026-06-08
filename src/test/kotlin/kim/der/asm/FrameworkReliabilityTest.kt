@@ -3665,6 +3665,23 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("WrapWithCondition INVOKE 应接受 name(desc) ownerless selector")
+    fun wrapWithConditionInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(WrapConditionNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("WrapConditionStaticTarget", wrapConditionStaticTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("WrapConditionStaticTarget", transformed)
+        val result = clazz.getMethod("run").invoke(null)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中 record 调用并阻止原调用")
+            .isNull()
+    }
+
+    @Test
     fun wrapWithConditionInfersTargetWhenMethodIsOmitted() {
         AsmRegistry.register(InferredWrapConditionStaticTargetMixin::class.java)
 
@@ -4476,6 +4493,24 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("raw-changed", result)
+    }
+
+    @Test
+    @DisplayName("ModifyExpressionValue INVOKE 应接受 name(desc) ownerless selector")
+    fun modifyExpressionValueInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(ModifyExpressionValueNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("ExpressionValueTarget", expressionValueTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ExpressionValueTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中唯一兼容 trim 调用返回值")
+            .isEqualTo("raw-ownerless")
     }
 
     @Test
@@ -6195,6 +6230,24 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("changed-call", result)
+    }
+
+    @Test
+    @DisplayName("ModifyReceiver INVOKE 应接受 name(desc) ownerless selector")
+    fun modifyReceiverInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(ModifyReceiverNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("ModifyReceiverTarget", modifyReceiverTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyReceiverTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中 concat 调用并替换 receiver")
+            .isEqualTo("ownerless-call")
     }
 
     @Test
@@ -9539,18 +9592,96 @@ class FrameworkReliabilityTest {
         }
 
         @Test
-        @DisplayName("字段 Slice 边界只写 descriptor 时应在 Redirect 与 WrapOperation 中快速失败")
-        fun sliceFieldBoundarySelectorRejectsDescriptorOnlyTargetAcrossRedirectAndWrapOperation() {
+        @DisplayName("字段 Slice 边界只写 descriptor 时各字段注入器应快速失败")
+        fun sliceFieldBoundarySelectorRejectsDescriptorOnlyTargetAcrossFieldInjectors() {
             // Given
             data class BoundaryCase(
                 val context: String,
                 val mixin: Class<*>,
+                val targetClass: String,
+                val targetBytes: () -> ByteArray,
+                val expectedMessage: String,
             )
 
             val cases =
                 listOf(
-                    BoundaryCase("@Redirect", RedirectFieldSliceDescriptorOnlyBoundaryMixin::class.java),
-                    BoundaryCase("@WrapOperation", WrapOperationFieldSliceDescriptorOnlyBoundaryMixin::class.java),
+                    BoundaryCase(
+                        "@Redirect FIELD",
+                        RedirectFieldSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldReadTarget",
+                        { sliceFieldReadTargetBytes() },
+                        "Invalid @Redirect slice boundary FIELD target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@Redirect FIELD_ASSIGN",
+                        RedirectFieldAssignSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldAssignTarget",
+                        { sliceFieldAssignTargetBytes() },
+                        "Invalid @Redirect slice boundary FIELD_ASSIGN target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@WrapOperation FIELD",
+                        WrapOperationFieldSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldReadTarget",
+                        { sliceFieldReadTargetBytes() },
+                        "Invalid @WrapOperation slice boundary FIELD target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@WrapOperation FIELD_ASSIGN",
+                        WrapOperationFieldAssignSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldAssignTarget",
+                        { sliceFieldAssignTargetBytes() },
+                        "Invalid @WrapOperation slice boundary FIELD_ASSIGN target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@WrapWithCondition FIELD",
+                        WrapConditionFieldSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldReadTarget",
+                        { sliceFieldReadTargetBytes() },
+                        "Invalid @WrapWithCondition slice boundary FIELD target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@WrapWithCondition FIELD_ASSIGN",
+                        WrapConditionFieldAssignSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldAssignTarget",
+                        { sliceFieldAssignTargetBytes() },
+                        "Invalid @WrapWithCondition slice boundary FIELD_ASSIGN target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@ModifyExpressionValue FIELD_ASSIGN",
+                        ModifyExpressionValueFieldAssignBoundaryWithoutNameMixin::class.java,
+                        "SliceFieldAssignTarget",
+                        { sliceFieldAssignTargetBytes() },
+                        "Invalid @ModifyExpressionValue slice boundary FIELD_ASSIGN target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@ModifyReceiver FIELD",
+                        ModifyReceiverFieldSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceModifyReceiverFieldTarget",
+                        { sliceModifyReceiverFieldTargetBytes() },
+                        "Invalid @ModifyReceiver slice boundary FIELD target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@ModifyReceiver FIELD_ASSIGN",
+                        ModifyReceiverFieldAssignSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceModifyReceiverFieldTarget",
+                        { sliceModifyReceiverFieldTargetBytes() },
+                        "Invalid @ModifyReceiver slice boundary FIELD_ASSIGN target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@AsmInject FIELD",
+                        FieldReadSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldReadTarget",
+                        { sliceFieldReadTargetBytes() },
+                        "Invalid @AsmInject instruction points slice boundary FIELD target: field name must not be empty",
+                    ),
+                    BoundaryCase(
+                        "@AsmInject FIELD_ASSIGN",
+                        FieldAssignSliceDescriptorOnlyBoundaryMixin::class.java,
+                        "SliceFieldAssignTarget",
+                        { sliceFieldAssignTargetBytes() },
+                        "Invalid @AsmInject instruction points slice boundary FIELD_ASSIGN target: field name must not be empty",
+                    ),
                 )
 
             cases.forEach { case ->
@@ -9559,13 +9690,11 @@ class FrameworkReliabilityTest {
 
                 // When / Then
                 assertThatThrownBy {
-                    AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+                    AsmProcessor().transform(case.targetClass, case.targetBytes(), javaClass.classLoader)
                 }
-                    .`as`("Then: ${case.context} 的 FIELD slice 边界不能只靠 descriptor 宽匹配")
+                    .`as`("Then: ${case.context} 的字段 slice 边界不能只靠 descriptor 宽匹配")
                     .isInstanceOf(AsmTransformException::class.java)
-                    .hasRootCauseMessage(
-                        "Invalid ${case.context} slice boundary FIELD target: field name must not be empty",
-                    )
+                    .hasRootCauseMessage(case.expectedMessage)
             }
         }
     }
@@ -13518,6 +13647,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("显式 INVOKE selector 缺 descriptor 时非 Redirect 注入器应快速失败")
+    fun invokeSelectorRejectsMissingDescriptorAcrossNonRedirectInjectors() {
+        // Given
+        data class InvokeSelectorCase(
+            val context: String,
+            val mixin: Class<*>,
+            val targetClass: String,
+            val targetBytes: ByteArray,
+            val expectedMessage: String,
+        )
+
+        val cases =
+            listOf(
+                InvokeSelectorCase(
+                    "@ModifyExpressionValue(INVOKE)",
+                    ModifyExpressionValueMissingDescriptorTargetMixin::class.java,
+                    "ExpressionValueTarget",
+                    expressionValueTargetBytes(),
+                    "@ModifyExpressionValue requires at.target method signature",
+                ),
+                InvokeSelectorCase(
+                    "@ModifyReceiver(INVOKE)",
+                    ModifyReceiverMissingDescriptorTargetMixin::class.java,
+                    "ModifyReceiverTarget",
+                    modifyReceiverTargetBytes(),
+                    "@ModifyReceiver INVOKE requires at.target method signature",
+                ),
+                InvokeSelectorCase(
+                    "@WrapWithCondition(INVOKE)",
+                    WrapConditionMissingDescriptorTargetMixin::class.java,
+                    "WrapConditionStaticTarget",
+                    wrapConditionStaticTargetBytes(),
+                    "@WrapWithCondition INVOKE requires at.target method signature",
+                ),
+            )
+
+        cases.forEach { case ->
+            AsmRegistry.clear()
+            AsmRegistry.register(case.mixin)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform(case.targetClass, case.targetBytes, javaClass.classLoader)
+            }
+                .`as`("Then: ${case.context} 显式 selector 缺 descriptor 时应暴露配置错误")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(case.expectedMessage)
+        }
+    }
+
+    @Test
     fun newInjectInsertsHandlerBeforeMatchedNewInstruction() {
         AsmRegistry.register(NewInstructionInjectMixin::class.java)
 
@@ -15781,6 +15961,40 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionNameDescriptorTargetMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "record(Ljava/lang/String;)V",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return false
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
+    object WrapConditionMissingDescriptorTargetMixin {
+        @WrapWithCondition(
+            method = "run()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "WrapConditionStaticTarget.record",
+            ),
+        )
+        @JvmStatic
+        fun shouldRun(value: String): Boolean {
+            value.length
+            return true
+        }
+    }
+
+    @AsmMixin("WrapConditionStaticTarget")
     object InferredWrapConditionStaticTargetMixin {
         @WrapWithCondition(
             at = At(
@@ -16304,6 +16518,40 @@ class FrameworkReliabilityTest {
             target.hashCode()
             value.length
             return false
+        }
+    }
+
+    @AsmMixin("SliceFieldReadTarget")
+    object WrapConditionFieldSliceDescriptorOnlyBoundaryMixin {
+        @WrapWithCondition(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean = value.isNotEmpty()
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object WrapConditionFieldAssignSliceDescriptorOnlyBoundaryMixin {
+        @WrapWithCondition(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            return value.isNotEmpty()
         }
     }
 
@@ -17170,6 +17418,34 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-changed"
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object ModifyExpressionValueNameDescriptorTargetMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "trim()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-ownerless"
+    }
+
+    @AsmMixin("ExpressionValueTarget")
+    object ModifyExpressionValueMissingDescriptorTargetMixin {
+        @ModifyExpressionValue(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
     }
 
     @AsmMixin("StringFilteredModifyArgsTarget")
@@ -18964,6 +19240,20 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "expression-$original"
     }
 
+    @AsmMixin("SliceFieldAssignTarget")
+    object ModifyExpressionValueFieldAssignBoundaryWithoutNameMixin {
+        @ModifyExpressionValue(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
     @AsmMixin("MixedConstantTarget")
     object RedirectConstantMixin {
         @Redirect(
@@ -19528,6 +19818,40 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ModifyReceiverTarget")
+    object ModifyReceiverNameDescriptorTargetMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "ownerless"
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
+    object ModifyReceiverMissingDescriptorTargetMixin {
+        @ModifyReceiver(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat",
+            ),
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return original
+        }
+    }
+
+    @AsmMixin("ModifyReceiverTarget")
     object InferredModifyReceiverTargetMixin {
         @ModifyReceiver(
             at = At(
@@ -19914,6 +20238,34 @@ class FrameworkReliabilityTest {
             field.isAccessible = true
             return field.get(original)
         }
+    }
+
+    @AsmMixin("SliceModifyReceiverFieldTarget")
+    object ModifyReceiverFieldSliceDescriptorOnlyBoundaryMixin {
+        @ModifyReceiver(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceModifyReceiverFieldTarget.value:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
+    }
+
+    @AsmMixin("SliceModifyReceiverFieldTarget")
+    object ModifyReceiverFieldAssignSliceDescriptorOnlyBoundaryMixin {
+        @ModifyReceiver(
+            method = "writeSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceModifyReceiverFieldTarget.value:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
     }
 
     @AsmMixin("StaticInvokeArgTarget")
@@ -20846,6 +21198,27 @@ class FrameworkReliabilityTest {
         ) {
             target.hashCode()
             operation.call(target, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object WrapOperationFieldAssignSliceDescriptorOnlyBoundaryMixin {
+        @WrapOperation(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            target.hashCode()
+            operation.call(target, value)
         }
     }
 
@@ -23634,6 +24007,22 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceFieldReadTarget")
+    object FieldReadSliceDescriptorOnlyBoundaryMixin {
+        @AsmInject(
+            method = "readSelected()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
     @AsmMixin("FieldPointTarget")
     object MissingFieldReadInjectMixin {
         @AsmInject(
@@ -24383,6 +24772,26 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceFieldAssignTarget")
+    object RedirectFieldAssignSliceDescriptorOnlyBoundaryMixin {
+        @Redirect(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            value.length
+        }
+    }
+
     @AsmMixin("SliceArrayExpressionValueTarget")
     object RedirectArrayReadSliceMixin {
         @Redirect(
@@ -24546,6 +24955,22 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun inject() {
             injectCount++
+        }
+    }
+
+    @AsmMixin("SliceFieldAssignTarget")
+    object FieldAssignSliceDescriptorOnlyBoundaryMixin {
+        @AsmInject(
+            method = "writeSelected(Ljava/lang/String;Ljava/lang/String;)V",
+            target = InjectionPoint.FIELD_ASSIGN,
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "SliceFieldAssignTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun inject() {
         }
     }
 
