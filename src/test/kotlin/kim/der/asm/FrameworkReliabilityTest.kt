@@ -23754,6 +23754,23 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceFieldReadTarget")
+    object RedirectFieldSliceDescriptorOnlyBoundaryMixin {
+        @Redirect(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(target: Any): String {
+            target.hashCode()
+            return "redirected"
+        }
+    }
+
     @AsmMixin("SliceFieldAssignTarget")
     object RedirectFieldAssignSliceMixin {
         var lastValue: String? = null
