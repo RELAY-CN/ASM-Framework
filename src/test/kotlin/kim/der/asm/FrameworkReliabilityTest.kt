@@ -1203,6 +1203,22 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@ModifyVariable(STORE) 应在真实局部变量表中写回 second 槽位")
+        fun modifyVariableStoreNameSecondInTestClassWritesBackStoredLocal() {
+            // Given
+            AsmRegistry.register(ModifyVariableNamedStoreTestMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeLocalNameDiscriminator(instance, "value")
+
+            // Then
+            assertThat(result)
+                .`as`("Then: @ModifyVariable(STORE) 应在 second 写入后读取槽位、写回修改值，并保持 first 不变")
+                .isEqualTo("value-first:named-value-second")
+        }
+
+        @Test
         @DisplayName("Redirect LOAD 应在真实局部变量表中只替换 second 读取")
         fun redirectLoadNameSecondInTestClassOnlyChangesReturnRead() {
             // Given
@@ -1264,6 +1280,48 @@ class FrameworkReliabilityTest {
             assertThat(result)
                 .`as`("Then: WrapOperation STORE 应通过 Operation 写入替换后的 second，first 保持原始写入")
                 .isEqualTo("value-first:wrap-store-value-second")
+        }
+
+        @Test
+        @DisplayName("@ModifyConstant 应在真实静态方法中只替换目标字符串常量")
+        fun modifyConstantInTestB0RewritesStaticFinalStringLiteralOnly() {
+            // Given
+            AsmRegistry.register(TestStaticFinalStringModifyConstantMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor().newInstance()
+
+            // When
+            val staticResult = clazz.getMethod("testB0").invoke(null)
+            val comprehensiveResult = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(staticResult)
+                .`as`("Then: @ModifyConstant 应替换真实 testB0() 中由 static final 折叠出的字符串常量")
+                .isEqualTo("StaticFinalString-Migrated")
+            assertThat(comprehensiveResult)
+                .`as`("Then: 综合方法只应观察到 testB0() 的常量迁移，其他真实调用片段仍保持原语义")
+                .startsWith("StaticFinalString-Migrated|DefaultConstructor|")
+                .contains("InterfaceImpl-Test|", "DefaultMethod|", "PrivateMethod-DefaultConstructor|")
+        }
+
+        @Test
+        @DisplayName("@ModifyConstant Slice 应在真实综合方法中只改写边界内分隔符")
+        fun modifyConstantSliceInComprehensiveTestOnlyRewritesSeparatorsBetweenParentAndDefaultCalls() {
+            // Given
+            AsmRegistry.register(TestComprehensiveModifyConstantSliceMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Slice 应只覆盖 parentMethod() 之后、defaultMethod() 之前的三个分隔符")
+                .startsWith(
+                    "StaticFinalString|DefaultConstructor|" +
+                        "ParentMethod#ChildOverride-ParentOverridable#InterfaceImpl-Test#DefaultMethod|",
+                )
+                .contains("LambdaSupplier-LambdaFunction-Test-5-30|")
         }
 
         @Test
@@ -11951,32 +12009,6 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    fun modifyVariableAtStoreSelectsLocalVariableByNameInTestClass() {
-        AsmRegistry.register(ModifyVariableNamedStoreTestMixin::class.java)
-
-        val fixtureLoader = testFixtureClassLoader("Test", "TestParent", "TestInterface")
-        val transformed = AsmProcessor().transform("Test", testFixtureClassBytes("Test"), fixtureLoader)
-        val clazz =
-            loadClasses(
-                "Test",
-                mapOf(
-                    "Test" to transformed,
-                    "TestParent" to testFixtureClassBytes("TestParent"),
-                    "TestInterface" to testFixtureClassBytes("TestInterface"),
-                    "TestFunctionalInterface" to testFixtureClassBytes("TestFunctionalInterface"),
-                    "Test\$CustomException" to testFixtureClassBytes("Test\$CustomException"),
-                    "Test\$InnerClass" to testFixtureClassBytes("Test\$InnerClass"),
-                    "Test\$StaticInnerClass" to testFixtureClassBytes("Test\$StaticInnerClass"),
-                    "Test\$TestEnum" to testFixtureClassBytes("Test\$TestEnum"),
-                ),
-            )
-        val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("raw")
-        val result = clazz.getMethod("localNameDiscriminatorTest", String::class.java).invoke(instance, "value")
-
-        assertEquals("value-first:named-value-second", result)
-    }
-
-    @Test
     fun modifyVariableRequireGreaterThanMatchedCountFailsDuringTransform() {
         AsmRegistry.register(RequireThreeModifyVariableMixin::class.java)
 
@@ -22591,6 +22623,35 @@ class FrameworkReliabilityTest {
         @ModifyConstant(method = "value()Ljava/lang/String;", constant = "original")
         @JvmStatic
         fun modify(original: String): Any = "generic-$original"
+    }
+
+    @AsmMixin("Test")
+    object TestStaticFinalStringModifyConstantMixin {
+        @ModifyConstant(
+            method = "testB0()Ljava/lang/String;",
+            constant = "StaticFinalString",
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-Migrated"
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveModifyConstantSliceMixin {
+        @ModifyConstant(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            constant = "|",
+            slice =
+                Slice(
+                    from = At(value = InjectionPoint.INVOKE, target = "Test.parentMethod()Ljava/lang/String;"),
+                    to = At(value = InjectionPoint.INVOKE, target = "Test.defaultMethod()Ljava/lang/String;"),
+                ),
+            require = 3,
+            allow = 3,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "#"
     }
 
     @AsmMixin("SliceConstantTarget")
