@@ -112,6 +112,7 @@ val transformedBytes = processor.transform(
 
 - **@AsmMixin** - 标记 Mixin 类
 - **@Group** - 将同一 Mixin 内多个处理器合并为一个组级命中数契约
+- **@AsmDelete** - 表达删除或屏蔽目标声明的治理意图；当前仅作为元数据，不保证存在对应转换处理逻辑
 - **@AddInterface** - 为目标类追加接口声明
 - **@RemoveInterface** - 从目标类移除接口声明
 - **@AsmInject** - 在指定位置注入代码
@@ -135,8 +136,8 @@ val transformedBytes = processor.transform(
 - **@Unique** - 避免复制辅助方法与目标类已有方法冲突
 - **@AddField** - 添加字段
 - **@RemoveField** - 移除字段
-- **@RemoveMethod** - 移除方法
-- **@RemoveSynchronized** - 移除 synchronized
+- **@RemoveMethod** - 移除方法；目标方法不存在时转换失败
+- **@RemoveSynchronized** - 移除 synchronized；目标方法不存在时转换失败，并移除方法标志与 monitor 指令
 - **@ReplaceAllMethods** - 替换所有方法
 
 详细说明请参考 [API.md](API.md)
@@ -261,6 +262,8 @@ LocalVariableTable 仍保留时，可改用 `@Local(index = N)` 按槽位过滤�
 当目标方法内有多个相同调用、字符串实参调用点、字段读写点、局部变量读写点、对象创建点、类型转换点、类型判断点、跳转点、switch、常量、裸数组长度或抛异常点时，可以用 `Slice` 把普通 `INVOKE`、`INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD`、`FIELD_ASSIGN`、`LOAD`、`STORE`、`NEW`、`CAST`、`INSTANCEOF`、`JUMP`、`SWITCH`、`CONSTANT`、`ARRAY_LENGTH` 或 `THROW`
 注入限制在一段边界内。
 支持 `Slice` 的注解可使用 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 与 `CONSTANT` 作为切片边界。
+默认 `At()` 表示未声明边界；显式边界必须提供非空 `At.target`，字段边界必须包含字段名。
+`from` 或 `to` 边界未命中时按空范围处理，边界指令本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 ```kotlin
 @AsmInject(
@@ -1756,6 +1759,7 @@ object VersionedConfigMixin {
 
 `@Group` 不改变 Mixin 应用顺序；如果需要调整不同 Mixin 的先后顺序，仍应使用 `@AsmMixin(priority = ...)`
 或调整注册方式。同组处理器显式声明自身 `require` / `allow` / 非默认 `expect` 时，会先校验单处理器契约，再参与组级累计。
+同一组内的 `min` / `max` / `expect` 必须一致；`name` 空白、`min` / `max` 为负数、`min > max` 或 `expect < -1` 会在转换阶段失败。
 `@WrapMethod(method = "...")` 也遵循该规则：带组的旧版本整方法候选缺失按 0 命中累计，未分组候选仍直接失败。
 
 当需要把同一组重定向规则应用到目标类的所有普通方法时，使用 `@RedirectAllMethods`。它会跳过构造器和类初始化方法，并按整个目标类的总命中数校验 `require` / `allow` / `expect`；`ordinal` 和 `slice` 仍然只在单个目标方法内生效。

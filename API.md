@@ -282,6 +282,7 @@ object MultiTargetMixin
 当前版本缺失会按 0 命中参与组级累计。如果处理器自身显式设置 `require`、`allow` 或非默认 `expect`，
 该处理器仍会先执行自身命中数校验。未使用 `@Group` 的处理器保持原有默认契约：普通处理器默认至少命中一次。
 同一组内的 `min`、`max` 与 `expect` 必须保持一致，否则转换阶段会失败。
+`name` 为空白、`min` / `max` 为负数、`min > max` 或 `expect < -1` 也会在转换阶段失败。
 
 **示例：**
 
@@ -1009,6 +1010,7 @@ fun newMethod() {
 ### @RemoveMethod
 
 移除目标类中的方法。
+目标方法不存在时转换失败；`method` 为空时从 handler 自身名称与描述符推断目标方法。
 
 **参数：**
 
@@ -1068,6 +1070,7 @@ private var mixinScore: Int = 0
 ### @RemoveSynchronized
 
 移除目标方法的 `synchronized` 关键字。
+目标方法不存在时转换失败；命中后会同时移除方法同步标志与方法体中的 monitor 指令。
 
 **参数：**
 

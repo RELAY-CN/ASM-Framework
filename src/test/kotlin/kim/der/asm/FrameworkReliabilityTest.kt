@@ -355,6 +355,135 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持 @Group 配置失败契约一致")
+    fun documentationContractsKeepGroupValidationContractAligned() {
+        // Given
+        val readme = Files.readString(Path.of("README.md"))
+        val apiGroupSection =
+            Files.readString(Path.of("API.md"))
+                .substringAfter("### @Group")
+                .substringBefore("### @AsmDelete")
+        val guideGroupSection =
+            Files.readString(Path.of("GUIDE.md"))
+                .substringAfter("多版本目标字节码适配时，可以用 `@Group`")
+                .substringBefore("当需要把同一组重定向规则应用到目标类的所有普通方法时")
+        val groupKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+                .substringAfter("注入处理器分组注解。")
+                .substringBefore("annotation class Group")
+
+        // Then
+        assertThat(readme)
+            .`as`("Then: README 特性摘要应提示组级配置错误会快速失败")
+            .contains(
+                "同组 `min`、`max` 与 `expect` 必须一致",
+                "空白名称或非法范围会在转换阶段失败",
+            )
+        assertThat(apiGroupSection)
+            .`as`("Then: API 文档应说明 @Group 名称、范围和同组配置一致性")
+            .contains(
+                "不能为空白",
+                "同一组内的 `min`、`max` 与 `expect` 必须保持一致",
+                "`name` 为空白、`min` / `max` 为负数、`min > max` 或 `expect < -1`",
+            )
+        assertThat(guideGroupSection)
+            .`as`("Then: GUIDE 应把多版本候选的配置失败条件暴露给迁移用户")
+            .contains(
+                "同一组内的 `min` / `max` / `expect` 必须一致",
+                "`name` 空白、`min` / `max` 为负数、`min > max` 或 `expect < -1`",
+            )
+        assertThat(groupKDoc)
+            .`as`("Then: @Group KDoc 应与公开文档保持相同的配置失败契约")
+            .contains(
+                "[name] 必须非空白",
+                "同一分组内所有处理器的 [min]、[max] 与 [expect] 必须保持一致",
+                "[min] 不得大于 [max]",
+                "[expect] 不得小于 `-1`",
+            )
+    }
+
+    @Test
+    @DisplayName("公开指南应保持删除意图与 Slice 边界失败契约一致")
+    fun guideKeepsDeleteIntentAndSliceBoundaryFailureContractsAligned() {
+        // Given
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val api = Files.readString(Path.of("API.md"))
+        val asmDeleteKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmDelete.kt"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val guideAnnotationList =
+            guide
+                .substringAfter("### 支持的注解")
+                .substringBefore("详细说明请参考")
+        val guideSliceOverview =
+            guide
+                .substringAfter("当目标方法内有多个相同调用")
+                .substringBefore("```kotlin")
+        val apiAsmDeleteSection =
+            api
+                .substringAfter("### @AsmDelete")
+                .substringBefore("### @Shadow")
+        val apiRemoveMethodSection =
+            api
+                .substringAfter("### @RemoveMethod")
+                .substringBefore("### @RemoveField")
+        val apiRemoveSynchronizedSection =
+            api
+                .substringAfter("### @RemoveSynchronized")
+                .substringBefore("### @ReplaceAllMethods")
+
+        // Then
+        assertThat(guideAnnotationList)
+            .`as`("Then: GUIDE 支持列表应区分 AsmDelete 元数据意图和实际转换型删除注解")
+            .contains(
+                "**@AsmDelete** - 表达删除或屏蔽目标声明的治理意图",
+                "当前仅作为元数据，不保证存在对应转换处理逻辑",
+                "**@RemoveMethod** - 移除方法；目标方法不存在时转换失败",
+                "**@RemoveSynchronized** - 移除 synchronized；目标方法不存在时转换失败",
+                "移除方法标志与 monitor 指令",
+            )
+        assertThat(apiAsmDeleteSection)
+            .`as`("Then: API 的 AsmDelete 段应保持非执行元数据语义")
+            .contains(
+                "当前模块仅提供注解定义与元数据",
+                "不保证存在对应的转换处理逻辑",
+            )
+        assertThat(asmDeleteKDoc)
+            .`as`("Then: AsmDelete KDoc 应说明它不是当前转换器保证执行的删除能力")
+            .contains(
+                "ASM 删除意图标记",
+                "当前模块仅提供注解定义与元数据",
+                "不保证存在对应的处理逻辑",
+            )
+        assertThat(apiRemoveMethodSection)
+            .`as`("Then: RemoveMethod API 应说明缺失目标失败，避免删除治理静默失效")
+            .contains("目标方法不存在时转换失败")
+        assertThat(apiRemoveSynchronizedSection)
+            .`as`("Then: RemoveSynchronized API 应说明缺失目标失败和同步语义移除范围")
+            .contains(
+                "目标方法不存在时转换失败",
+                "同时移除方法同步标志与方法体中的 monitor 指令",
+            )
+        assertThat(asmMixinKDoc)
+            .`as`("Then: RemoveMethod 与 RemoveSynchronized KDoc 应暴露目标漂移失败语义")
+            .contains(
+                "目标方法不存在时转换失败，避免删除治理在目标字节码漂移后静默失效",
+                "目标方法不存在时转换失败，避免同步语义漂移后仍误以为补丁已经生效",
+            )
+        assertThat(guideSliceOverview)
+            .`as`("Then: GUIDE 早期 Slice 总览应说明显式边界和空切片失败语义")
+            .contains(
+                "默认 `At()` 表示未声明边界",
+                "显式边界必须提供非空 `At.target`",
+                "字段边界必须包含字段名",
+                "`from` 或 `to` 边界未命中时按空范围处理",
+                "边界指令本身不参与候选匹配",
+                "`ordinal` 会在切片内重新计数",
+            )
+    }
+
+    @Test
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
         // Given
@@ -9671,12 +9800,27 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("RemoveMethod 目标缺失时应暴露可诊断的转换失败")
     fun removeMethodWithMissingTargetFailsDuringTransform() {
+        // Given
         AsmRegistry.register(MissingRemoveMethodTargetMixin::class.java)
 
-        assertThrows(AsmTransformException::class.java) {
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
         }
+
+        // Then
+        val rootCause = generateSequence(exception) { it.cause }.last()
+        assertThat(rootCause)
+            .`as`("Then: @RemoveMethod 不应在目标方法漂移后静默跳过删除治理")
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(rootCause.message)
+            .`as`("Then: 根因消息应指出缺失方法和当前目标类实际可用方法，便于定位字节码漂移")
+            .contains(
+                "Cannot find target method missing()V in class StrictTarget",
+                "Available methods in StrictTarget: [<init>()V, keep()V]",
+            )
     }
 
     @Test
@@ -9872,12 +10016,27 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("RemoveSynchronized 目标缺失时应暴露可诊断的转换失败")
     fun removeSynchronizedWithMissingTargetFailsDuringTransform() {
+        // Given
         AsmRegistry.register(MissingRemoveSynchronizedTargetMixin::class.java)
 
-        assertThrows(AsmTransformException::class.java) {
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
             AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
         }
+
+        // Then
+        val rootCause = generateSequence(exception) { it.cause }.last()
+        assertThat(rootCause)
+            .`as`("Then: @RemoveSynchronized 不应在同步目标漂移后静默跳过同步语义治理")
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(rootCause.message)
+            .`as`("Then: 根因消息应指出缺失方法和当前目标类实际可用方法，便于定位字节码漂移")
+            .contains(
+                "Cannot find target method missing()V in class StrictTarget",
+                "Available methods in StrictTarget: [<init>()V, keep()V]",
+            )
     }
 
     @Test
