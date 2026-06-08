@@ -1295,6 +1295,36 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@WrapWithCondition(THROW) 应在真实异常方法中跳过原抛出并保留 finally")
+        fun wrapWithConditionThrowInTestClassSkipsCustomExceptionAndKeepsFinallySideEffect() {
+            // Given
+            TestExceptionWrapConditionThrowMixin.reset()
+            AsmRegistry.register(TestExceptionWrapConditionThrowMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+            lateinit var result: String
+
+            // When
+            val output =
+                captureStandardOut {
+                    result = invokeExceptionTest(instance, true)
+                }
+
+            // Then
+            assertThat(result)
+                .`as`("Then: handler 返回 false 后应跳过 CustomException 原抛出，并继续走 try 块的正常返回路径")
+                .isEqualTo("NoException")
+            assertThat(output)
+                .`as`("Then: 跳过 ATHROW 后仍应执行 Java finally 块，证明异常表和控制流未被破坏")
+                .contains("Finally block")
+            assertThat(TestExceptionWrapConditionThrowMixin.observedMessage)
+                .`as`("Then: THROW handler 应收到原本即将抛出的 CustomException")
+                .isEqualTo("TestException")
+            assertThat(TestExceptionWrapConditionThrowMixin.observedThrowFlag)
+                .`as`("Then: THROW handler 应能继续接收目标方法参数")
+                .isTrue()
+        }
+
+        @Test
         @DisplayName("@ModifyReturnValue 应在真实方法中只改返回值并保留原副作用")
         fun modifyReturnValueInTestClassPreservesOriginalMethodSideEffect() {
             // Given
@@ -4507,6 +4537,33 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("", result)
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidWrapWithConditionLocalVariableFilterCases")
+    @DisplayName("@WrapWithCondition 局部变量过滤配置错误应快速失败")
+    fun wrapWithConditionLocalVariableFilterRejectsInvalidAtArgs(
+        caseName: String,
+        mixinClass: Class<*>,
+        targetClassName: String,
+        expectedMessage: String,
+    ) {
+        // Given
+        AsmRegistry.register(mixinClass)
+        val targetBytes =
+            when (targetClassName) {
+                "LoadExpressionValueTarget" -> loadExpressionValueTargetBytes()
+                "ConditionalStoreTarget" -> conditionalStoreTargetBytes()
+                else -> error("Unsupported target class: $targetClassName")
+            }
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform(targetClassName, targetBytes, javaClass.classLoader)
+        }
+            .`as`("Then: $caseName 应暴露用户配置错误，不能静默扩大或丢弃局部变量过滤条件")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(expectedMessage)
     }
 
     @Test
@@ -16490,6 +16547,33 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("Test")
+    object TestExceptionWrapConditionThrowMixin {
+        var observedMessage: String? = null
+        var observedThrowFlag: Boolean? = null
+
+        fun reset() {
+            observedMessage = null
+            observedThrowFlag = null
+        }
+
+        @WrapWithCondition(
+            method = "exceptionTest(Z)Ljava/lang/String;",
+            at = At(value = InjectionPoint.THROW, target = "Test\$CustomException"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldThrow(
+            original: Throwable,
+            throwException: Boolean,
+        ): Boolean {
+            observedMessage = original.message
+            observedThrowFlag = throwException
+            return false
+        }
+    }
+
+    @AsmMixin("Test")
     object TestModifyReturnValueTestC0Mixin {
         @ModifyReturnValue(
             method = "testC0(Ljava/lang/String;)Ljava/lang/String;",
@@ -17384,6 +17468,46 @@ class FrameworkReliabilityTest {
             value.hashCode()
             return false
         }
+    }
+
+    @AsmMixin("LoadExpressionValueTarget")
+    object WrapConditionLoadDuplicateSlotFilterMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=1", "var=1"]),
+        )
+        @JvmStatic
+        fun shouldLoad(value: String): Boolean = value.isNotEmpty()
+    }
+
+    @AsmMixin("LoadExpressionValueTarget")
+    object WrapConditionLoadNonIntegerSlotFilterMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.LOAD, args = ["index=first"]),
+        )
+        @JvmStatic
+        fun shouldLoad(value: String): Boolean = value.isNotEmpty()
+    }
+
+    @AsmMixin("ConditionalStoreTarget")
+    object WrapConditionStoreNegativeSlotFilterMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["index=-1"]),
+        )
+        @JvmStatic
+        fun shouldStore(value: String): Boolean = value.isNotEmpty()
+    }
+
+    @AsmMixin("ConditionalStoreTarget")
+    object WrapConditionStoreBlankNameFilterMixin {
+        @WrapWithCondition(
+            method = "value()Ljava/lang/String;",
+            at = At(value = InjectionPoint.STORE, args = ["name= "]),
+        )
+        @JvmStatic
+        fun shouldStore(value: String): Boolean = value.isNotEmpty()
     }
 
     @AsmMixin("ArrayAccessTarget")
@@ -31336,6 +31460,35 @@ class FrameworkReliabilityTest {
                     WrapWithConditionArrayLengthInstructionWithArgsMixin::class.java,
                     "@WrapWithCondition ARRAY_LENGTH does not use at.args; " +
                         "use FIELD with array=length for array field matching",
+                    ),
+                )
+
+        @JvmStatic
+        fun invalidWrapWithConditionLocalVariableFilterCases(): Stream<Arguments> =
+            Stream.of(
+                Arguments.of(
+                    "LOAD 同时声明 index 和 var",
+                    WrapConditionLoadDuplicateSlotFilterMixin::class.java,
+                    "LoadExpressionValueTarget",
+                    "@WrapWithCondition LOAD supports only one local variable slot filter in At.args",
+                ),
+                Arguments.of(
+                    "LOAD 声明非整数 slot",
+                    WrapConditionLoadNonIntegerSlotFilterMixin::class.java,
+                    "LoadExpressionValueTarget",
+                    "@WrapWithCondition LOAD local variable slot filter must be an integer: first",
+                ),
+                Arguments.of(
+                    "STORE 声明负数 slot",
+                    WrapConditionStoreNegativeSlotFilterMixin::class.java,
+                    "ConditionalStoreTarget",
+                    "@WrapWithCondition STORE local variable slot filter must be non-negative: -1",
+                ),
+                Arguments.of(
+                    "STORE 声明空白 name",
+                    WrapConditionStoreBlankNameFilterMixin::class.java,
+                    "ConditionalStoreTarget",
+                    "@WrapWithCondition STORE local variable name filter must not be blank",
                 ),
             )
 
