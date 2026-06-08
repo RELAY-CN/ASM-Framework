@@ -1328,6 +1328,51 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@ModifyExpressionValue(INVOKE_ASSIGN) 应在真实综合方法中只改写接口调用返回值")
+        fun modifyExpressionValueInvokeAssignInComprehensiveTestRewritesLiteralInterfaceReturnValue() {
+            // Given
+            TestComprehensiveModifyExpressionValueInvokeAssignMixin.reset()
+            AsmRegistry.register(TestComprehensiveModifyExpressionValueInvokeAssignMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 调用返回值迁移应保留 interfaceMethod(\"Test\") 原调用，只把返回表达式改成 Normalized")
+                .contains("StaticFinalString|", "DefaultConstructor|", "InterfaceImpl-Normalized|")
+                .doesNotContain("InterfaceImpl-Test|")
+            assertThat(TestComprehensiveModifyExpressionValueInvokeAssignMixin.observedReturnValue)
+                .`as`("Then: @ModifyExpressionValue(INVOKE_ASSIGN) handler 应接收真实接口调用完成后的原始返回值")
+                .isEqualTo("InterfaceImpl-Test")
+        }
+
+        @Test
+        @DisplayName("@WrapWithCondition(INVOKE_ASSIGN) 应在真实综合方法中保留接口调用副作用并替换返回表达式")
+        fun wrapWithConditionInvokeAssignInComprehensiveTestKeepsCallAndDefaultsLiteralInterfaceReturnValue() {
+            // Given
+            TestComprehensiveWrapConditionInvokeAssignMixin.reset()
+            AsmRegistry.register(TestComprehensiveWrapConditionInvokeAssignMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 条件返回值迁移返回 false 时应只把调用返回表达式替换为默认空字符串")
+                .contains("ChildOverride-ParentOverridable||DefaultMethod")
+                .doesNotContain("InterfaceImpl-Test|")
+            assertThat(TestComprehensiveWrapConditionInvokeAssignMixin.observedReturnValue)
+                .`as`("Then: @WrapWithCondition(INVOKE_ASSIGN) handler 应证明原接口调用已完成")
+                .isEqualTo("InterfaceImpl-Test")
+            assertThat(TestComprehensiveWrapConditionInvokeAssignMixin.decisions)
+                .`as`("Then: 直接字符串过滤后 handler 应只命中 interfaceMethod(\"Test\") 这一处调用返回值")
+                .isEqualTo(1)
+        }
+
+        @Test
         @DisplayName("@ModifyReceiver(INVOKE) 应在真实综合方法中只替换 testA0 接收者")
         fun modifyReceiverInvokeInComprehensiveTestUsesReplacementReceiverForTestA0Only() {
             // Given
@@ -16702,6 +16747,59 @@ class FrameworkReliabilityTest {
             observedArgument = args[0]
             observedArgumentCount = args.size
             args[0] = "MigratedArgs"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveModifyExpressionValueInvokeAssignMixin {
+        var observedReturnValue: String? = null
+
+        fun reset() {
+            observedReturnValue = null
+        }
+
+        @ModifyExpressionValue(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "Test.interfaceMethod(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=Test"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            observedReturnValue = original
+            return original.replace("Test", "Normalized")
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveWrapConditionInvokeAssignMixin {
+        var observedReturnValue: String? = null
+        var decisions = 0
+
+        fun reset() {
+            observedReturnValue = null
+            decisions = 0
+        }
+
+        @WrapWithCondition(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE_ASSIGN,
+                target = "Test.interfaceMethod(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=Test"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: String): Boolean {
+            observedReturnValue = original
+            decisions += 1
+            return false
         }
     }
 
