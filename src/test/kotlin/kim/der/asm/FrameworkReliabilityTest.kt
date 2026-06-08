@@ -1098,6 +1098,99 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@ModifyReturnValue 应在真实方法中只改返回值并保留原副作用")
+        fun modifyReturnValueInTestClassPreservesOriginalMethodSideEffect() {
+            // Given
+            AsmRegistry.register(TestModifyReturnValueTestC0Mixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+            lateinit var result: String
+
+            // When
+            val output =
+                captureStandardOut {
+                    result = invokeTestC0(instance, "value")
+                }
+
+            // Then
+            assertThat(result)
+                .`as`("Then: @ModifyReturnValue 应只改写 testC0 的最终返回值")
+                .isEqualTo("modified-valuetestC0")
+            assertThat(output)
+                .`as`("Then: 原 testC0 方法体仍应执行并打印原始中间值，证明没有被整方法替换吞掉副作用")
+                .contains("testC0 called with: valuetestC0")
+        }
+
+        @Test
+        @DisplayName("@RemoveSynchronized 应移除真实同步方法标志并保留业务状态推进")
+        fun removeSynchronizedInTestClassRemovesFlagsAndKeepsBusinessState() {
+            // Given
+            AsmRegistry.register(TestRemoveSynchronizedMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val instanceMethod = clazz.getMethod("synchronizedMethod")
+            val staticMethod = clazz.getMethod("synchronizedStaticMethod")
+
+            // When
+            val instanceResult = instanceMethod.invoke(instance)
+            val staticResult = staticMethod.invoke(null)
+
+            // Then
+            assertThat(java.lang.reflect.Modifier.isSynchronized(instanceMethod.modifiers))
+                .`as`("Then: 真实实例方法 synchronizedMethod 的 ACC_SYNCHRONIZED 标志应被移除")
+                .isFalse()
+            assertThat(java.lang.reflect.Modifier.isSynchronized(staticMethod.modifiers))
+                .`as`("Then: 真实静态方法 synchronizedStaticMethod 的 ACC_SYNCHRONIZED 标志应被移除")
+                .isFalse()
+            assertThat(instanceResult)
+                .`as`("Then: 移除同步标志不应跳过实例计数状态推进")
+                .isEqualTo("SyncInstance-51")
+            assertThat(staticResult)
+                .`as`("Then: 移除同步标志不应跳过静态初始化后的计数状态推进")
+                .isEqualTo("SyncStatic-101")
+        }
+
+        @Test
+        @DisplayName("@Accessor 与 @Invoker 应桥接真实私有字段和私有方法")
+        fun accessorAndInvokerBridgePrivateMembersInTestClass() {
+            // Given
+            AsmRegistry.register(TestPrivateMemberBridgeMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("Original")
+            val getter = clazz.getMethod("getDynamicString")
+            val setter = clazz.getMethod("setDynamicString", String::class.java)
+            val invoker = clazz.getMethod("callPrivateMethod")
+
+            // When
+            val initialFieldValue = getter.invoke(instance)
+            val initialPrivateCall = invoker.invoke(instance)
+            setter.invoke(instance, "Updated")
+            val updatedPublicRead = clazz.getMethod("testA0").invoke(instance)
+            val updatedFieldValue = getter.invoke(instance)
+            val updatedPrivateCall = invoker.invoke(instance)
+            val reflectionFieldRead = clazz.getMethod("reflectionFieldTest").invoke(instance)
+
+            // Then
+            assertThat(initialFieldValue)
+                .`as`("Then: Accessor getter 应读取真实构造器写入的 private dynamicString 字段")
+                .isEqualTo("Original")
+            assertThat(initialPrivateCall)
+                .`as`("Then: Invoker 应调用真实 privateMethod，并观察 setter 前的字段状态")
+                .isEqualTo("PrivateMethod-Original")
+            assertThat(updatedPublicRead)
+                .`as`("Then: Accessor setter 写入后，原业务方法 testA0 应读取到同一字段的新状态")
+                .isEqualTo("Updated")
+            assertThat(updatedFieldValue)
+                .`as`("Then: Accessor getter 应读取 setter 写回后的 private 字段状态")
+                .isEqualTo("Updated")
+            assertThat(updatedPrivateCall)
+                .`as`("Then: Invoker 桥接的 privateMethod 应观察到更新后的字段状态")
+                .isEqualTo("PrivateMethod-Updated")
+            assertThat(reflectionFieldRead)
+                .`as`("Then: Java 反射读取同一 private 字段也应看到 Accessor setter 的写入结果")
+                .isEqualTo("ReflectionField-Updated")
+        }
+
+        @Test
         @DisplayName("@AsmInject RETURN 应在真实局部变量表中只读捕获 second")
         fun asmInjectReturnCanCaptureLocalByNameInTestClassWithoutModifyingReturn() {
             // Given
@@ -1260,6 +1353,14 @@ class FrameworkReliabilityTest {
                 .getMethod("comprehensiveTest")
                 .invoke(instance) as String
 
+        private fun invokeTestC0(
+            instance: Any,
+            value: String,
+        ): String =
+            instance.javaClass
+                .getMethod("testC0", String::class.java)
+                .invoke(instance, value) as String
+
         private fun invokeExceptionTest(
             instance: Any,
             throwException: Boolean,
@@ -1267,6 +1368,22 @@ class FrameworkReliabilityTest {
             instance.javaClass
                 .getMethod("exceptionTest", Boolean::class.javaPrimitiveType)
                 .invoke(instance, throwException) as String
+
+        private fun captureStandardOut(block: () -> Unit): String {
+            val originalOut = System.out
+            val output = ByteArrayOutputStream()
+
+            try {
+                PrintStream(output, true, Charsets.UTF_8.name()).use { capture ->
+                    System.setOut(capture)
+                    block()
+                }
+            } finally {
+                System.setOut(originalOut)
+            }
+
+            return output.toString(Charsets.UTF_8.name())
+        }
     }
 
     @Test
@@ -10230,6 +10347,21 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("@AddInterface 空白接口名应快速失败")
+    fun addInterfaceRejectsBlankInterfaceName() {
+        // Given
+        AsmRegistry.register(BlankAddInterfaceMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("InterfaceTarget", interfaceTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 空白接口名不能进入 ClassNode.interfaces，否则配置错误会退化成不可诊断的 classfile 问题")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@AddInterface interface name must not be blank in InterfaceTarget")
+    }
+
+    @Test
     fun removeInterfaceRemovesExistingInterface() {
         AsmRegistry.register(RemoveRunnableInterfaceMixin::class.java)
 
@@ -10249,6 +10381,76 @@ class FrameworkReliabilityTest {
         assertEquals(false, classNode.interfaces.contains("java/lang/Runnable"))
         assertEquals(false, classNode.interfaces.contains("java/lang/Cloneable"))
         assertEquals(true, classNode.interfaces.contains("java/io/Serializable"))
+    }
+
+    @Test
+    @DisplayName("@RemoveInterface 空白接口名应快速失败")
+    fun removeInterfaceRejectsBlankInterfaceName() {
+        // Given
+        AsmRegistry.register(BlankRemoveInterfaceMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("InterfaceTarget", interfaceTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 空白移除目标是用户配置错误，不能静默当成未声明接口跳过")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@RemoveInterface interface name must not be blank in InterfaceTarget")
+    }
+
+    @Test
+    @DisplayName("公开文档应保持接口声明名称规范化与空白失败契约一致")
+    fun documentationContractsKeepInterfaceDeclarationNameValidationAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val kdoc = Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val apiAddInterfaceSection = api
+            .substringAfter("### @AddInterface")
+            .substringBefore("### @RemoveInterface")
+        val apiRemoveInterfaceSection = api
+            .substringAfter("### @RemoveInterface")
+            .substringBefore("### @AsmInject")
+        val guideFeatureList = guide
+            .substringAfter("### 支持的注解")
+            .substringBefore("详细说明请参考")
+        val kdocAddInterfaceSection = kdoc
+            .substringBefore("annotation class AddInterface")
+            .substringAfterLast("/**")
+        val kdocRemoveInterfaceSection = kdoc
+            .substringBefore("annotation class RemoveInterface")
+            .substringAfterLast("/**")
+
+        // Then
+        assertThat(apiAddInterfaceSection)
+            .`as`("Then: AddInterface API 应暴露 trim、blank failure、去重和只改接口声明列表的边界")
+            .contains(
+                "接口名会去除首尾空白",
+                "空白接口名会在转换阶段失败",
+                "已存在的接口会被跳过，不会重复写入",
+                "只修改目标类的 `interfaces` 列表",
+            )
+        assertThat(apiRemoveInterfaceSection)
+            .`as`("Then: RemoveInterface API 应区分空白配置错误和未声明接口跳过")
+            .contains(
+                "接口名会去除首尾空白",
+                "空白接口名会在转换阶段失败",
+                "目标类未声明的接口会被跳过",
+                "只修改目标类的 `interfaces` 列表",
+            )
+        assertThat(guideFeatureList)
+            .`as`("Then: GUIDE 摘要应提示接口名规范化和空白失败，避免用户只看摘要时误判")
+            .contains(
+                "**@AddInterface** - 为目标类追加接口声明",
+                "**@RemoveInterface** - 从目标类移除接口声明",
+                "接口名会去除首尾空白，空白接口名会在转换阶段失败",
+            )
+        assertThat(kdocAddInterfaceSection)
+            .`as`("Then: @AddInterface KDoc 应同步 IDE 用户可见的名称校验契约")
+            .contains("接口名会先去除首尾空白", "空白接口名会在转换阶段失败")
+        assertThat(kdocRemoveInterfaceSection)
+            .`as`("Then: @RemoveInterface KDoc 应同步 IDE 用户可见的名称校验契约")
+            .contains("接口名会先去除首尾空白", "空白接口名会在转换阶段失败")
     }
 
     @Test
@@ -15251,6 +15453,44 @@ class FrameworkReliabilityTest {
             throwException: Boolean,
             operation: Operation<String>,
         ): String = "wrapped-${operation.call(throwException)}"
+    }
+
+    @AsmMixin("Test")
+    object TestModifyReturnValueTestC0Mixin {
+        @ModifyReturnValue(
+            method = "testC0(Ljava/lang/String;)Ljava/lang/String;",
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "modified-$original"
+    }
+
+    @AsmMixin("Test")
+    object TestRemoveSynchronizedMixin {
+        @RemoveSynchronized("synchronizedMethod()Ljava/lang/String;")
+        @JvmStatic
+        fun removeInstanceFlag() {
+        }
+
+        @RemoveSynchronized("synchronizedStaticMethod()Ljava/lang/String;")
+        @JvmStatic
+        fun removeStaticFlag() {
+        }
+    }
+
+    @AsmMixin("Test")
+    class TestPrivateMemberBridgeMixin {
+        @Accessor("dynamicString")
+        fun getDynamicString(): String = throw UnsupportedOperationException()
+
+        @Accessor("dynamicString")
+        fun setDynamicString(value: String) {
+            throw UnsupportedOperationException()
+        }
+
+        @Invoker("privateMethod")
+        fun callPrivateMethod(): String = throw UnsupportedOperationException()
     }
 
     @AsmMixin("MultiWrapConditionTarget")
@@ -21198,6 +21438,10 @@ class FrameworkReliabilityTest {
     object AddNormalizedInterfacesMixin
 
     @AsmMixin("InterfaceTarget")
+    @AddInterface("   ")
+    object BlankAddInterfaceMixin
+
+    @AsmMixin("InterfaceTarget")
     @RemoveInterface("java/lang/Runnable")
     object RemoveRunnableInterfaceMixin
 
@@ -21207,6 +21451,10 @@ class FrameworkReliabilityTest {
         interfaces = ["java.lang.Cloneable", "java/lang/Runnable"],
     )
     object RemoveNormalizedInterfacesMixin
+
+    @AsmMixin("InterfaceTarget")
+    @RemoveInterface(interfaces = ["\t "])
+    object BlankRemoveInterfaceMixin
 
     @AsmMixin("StrictTarget")
     object MissingRemoveSynchronizedTargetMixin {

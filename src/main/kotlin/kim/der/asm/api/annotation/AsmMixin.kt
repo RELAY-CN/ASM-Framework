@@ -119,6 +119,7 @@ annotation class Group(
  * ## 使用边界
  *
  * - [value] 与 [interfaces] 均为空时不会产生改写。
+ * - 接口名会先去除首尾空白，空白接口名会在转换阶段失败。
  * - 接口名可使用 JVM internal name（如 `java/io/Closeable`）或 Java binary name（如 `java.io.Closeable`），转换时会统一为 internal name。
  * - 已存在的接口会被跳过，不会重复写入 [org.objectweb.asm.tree.ClassNode.interfaces]。
  *
@@ -163,6 +164,7 @@ annotation class AddInterface(
  * ## 使用边界
  *
  * - [value] 与 [interfaces] 均为空时不会产生改写。
+ * - 接口名会先去除首尾空白，空白接口名会在转换阶段失败。
  * - 接口名可使用 JVM internal name（如 `java/lang/Runnable`）或 Java binary name（如 `java.lang.Runnable`），转换时会统一为 internal name。
  * - 目标类未声明的接口会被跳过，不会视为转换失败。
  *

@@ -3932,7 +3932,7 @@ class TargetClassContext(
      * 只改写目标类的接口声明列表；接口方法实现由其他 ASM 操作或目标类已有方法负责。
      */
     private fun applyAddInterface(annotation: AddInterface): Boolean {
-        val interfaceNames = normalizeInterfaceNames(annotation.value, annotation.interfaces)
+        val interfaceNames = normalizeInterfaceNames("@AddInterface", annotation.value, annotation.interfaces)
 
         var transformed = false
         for (interfaceName in interfaceNames) {
@@ -3951,7 +3951,7 @@ class TargetClassContext(
      * 只改写目标类的接口声明列表；不会删除目标类中已有的方法实现。
      */
     private fun applyRemoveInterface(annotation: RemoveInterface): Boolean {
-        val interfaceNames = normalizeInterfaceNames(annotation.value, annotation.interfaces).toSet()
+        val interfaceNames = normalizeInterfaceNames("@RemoveInterface", annotation.value, annotation.interfaces).toSet()
         val originalSize = classNode.interfaces.size
 
         classNode.interfaces.removeAll(interfaceNames)
@@ -3960,16 +3960,29 @@ class TargetClassContext(
     }
 
     private fun normalizeInterfaceNames(
+        annotationName: String,
         value: String,
         interfaces: Array<String>,
     ): List<String> =
         buildList {
-            if (value.isNotEmpty()) {
-                add(value)
-            }
-            addAll(interfaces.filter { it.isNotEmpty() })
+            collectInterfaceName(annotationName, value)?.let(::add)
+            interfaces.mapNotNull { collectInterfaceName(annotationName, it) }.forEach(::add)
         }.map { it.replace('.', '/') }
             .distinct()
+
+    private fun collectInterfaceName(
+        annotationName: String,
+        rawName: String,
+    ): String? {
+        if (rawName.isEmpty()) {
+            return null
+        }
+        val name = rawName.trim()
+        if (name.isEmpty()) {
+            throw IllegalStateException("$annotationName interface name must not be blank in $className")
+        }
+        return name
+    }
 
     /**
      * 解析方法签名

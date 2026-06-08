@@ -113,8 +113,8 @@ val transformedBytes = processor.transform(
 - **@AsmMixin** - 标记 Mixin 类
 - **@Group** - 将同一 Mixin 内多个处理器合并为一个组级命中数契约
 - **@AsmDelete** - 表达删除或屏蔽目标声明的治理意图；当前仅作为元数据，不保证存在对应转换处理逻辑
-- **@AddInterface** - 为目标类追加接口声明
-- **@RemoveInterface** - 从目标类移除接口声明
+- **@AddInterface** - 为目标类追加接口声明；接口名会去除首尾空白，空白接口名会在转换阶段失败
+- **@RemoveInterface** - 从目标类移除接口声明；接口名会去除首尾空白，空白接口名会在转换阶段失败
 - **@AsmInject** - 在指定位置注入代码
 - **@Overwrite** - 完全覆盖方法
 - **@ModifyArg** - 修改方法参数
@@ -139,6 +139,8 @@ val transformedBytes = processor.transform(
 - **@RemoveMethod** - 移除方法；目标方法不存在时转换失败
 - **@RemoveSynchronized** - 移除 synchronized；目标方法不存在时转换失败，并移除方法标志与 monitor 指令
 - **@ReplaceAllMethods** - 替换所有普通方法，跳过构造器与类初始化器
+
+`@AddInterface` / `@RemoveInterface` 的接口名会去除首尾空白，空白接口名会在转换阶段失败；新增时已存在的接口会去重，移除时目标类未声明的接口会跳过。
 
 详细说明请参考 [API.md](API.md)
 
