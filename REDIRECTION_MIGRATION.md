@@ -23,6 +23,7 @@
 - `@ModifyArgs`
 - `@ModifyReceiver`
 - `@WrapMethod`
+- `@RedirectAllMethods`
 - `@ReplaceAllMethods`
 
 `@ReplaceAllMethods` 仍可用于把目标类所有普通方法替换为默认返回值，但内部不再走旧式 Redirection manager 分派。
@@ -42,6 +43,7 @@
 | 批量改写一次调用、构造器或 invokedynamic 参数组 | `@ModifyArgs` | handler 接收 `Args` 容器，可一次读取和写回整组参数；同样支持直接字符串实参过滤 |
 | 只替换实例方法调用或实例字段访问 receiver | `@ModifyReceiver` | 保留原参数、字段值与原操作逻辑，只把 receiver 换成 handler 返回值；`INVOKE` 可按直接字符串实参过滤 |
 | 包裹整个目标方法并按需调用原方法 | `@WrapMethod` | handler 接收 `Operation` 原方法句柄，可跳过、调用一次或多次执行原方法 |
+| 把同一组重定向规则应用到整类普通方法 | `@RedirectAllMethods` + `@Redirect` | `@Redirect.method` 不筛选目标方法；跳过 `<init>` / `<clinit>`；`require` / `allow` / `expect` 按全类总命中数校验，`ordinal` / `slice` 仍按单个目标方法计算 |
 | 把整类方法替换为默认返回值 | `@ReplaceAllMethods` | 只用于默认实现/禁用整类方法，不再经过旧 manager 分派 |
 | 只观察注入点或追加副作用代码 | `@AsmInject` | 不替换原指令，也不会自动接收栈顶表达式值 |
 | 按直接字符串常量实参观察调用点 | `@AsmInject(INVOKE_STRING)` | 用 `At.target = "owner.name(desc)"` 指定普通方法调用，并用 `ldc=value` 或 `string=value` 过滤直接 `LDC String` 实参 |

@@ -128,7 +128,7 @@ val transformedBytes = processor.transform(
 - **@ModifyReturnValue** - 修改返回值
 - **@ModifyConstant** - 修改常量值
 - **@Redirect** - 重定向方法调用、`invokedynamic` 调用、构造器调用、字段访问、简单数组元素访问、字段来源或裸 `ARRAYLENGTH` 数组长度读取、局部变量读取或待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载或即将抛出的异常；`INVOKE` 可按直接字符串实参过滤
-- **@RedirectAllMethods** - 将 `@Redirect` 应用于目标类所有普通方法，并按全类总命中数校验 `require` / `allow` / `expect`
+- **@RedirectAllMethods** - 将 `@Redirect` 应用于目标类所有普通方法，跳过构造器与类初始化器；`@Redirect.method` 不参与筛选，并按全类总命中数校验 `require` / `allow` / `expect`
 - **@Shadow** - 引用目标类的字段/方法
 - **@Accessor** - 生成字段访问器
 - **@Invoker** - 调用私有方法
@@ -1764,7 +1764,7 @@ object VersionedConfigMixin {
 同一组内的 `min` / `max` / `expect` 必须一致；`name` 空白、`min` / `max` 为负数、`min > max` 或 `expect < -1` 会在转换阶段失败。
 `@WrapMethod(method = "...")` 也遵循该规则：带组的旧版本整方法候选缺失按 0 命中累计，未分组候选仍直接失败。
 
-当需要把同一组重定向规则应用到目标类的所有普通方法时，使用 `@RedirectAllMethods`。它会跳过构造器和类初始化方法，并按整个目标类的总命中数校验 `require` / `allow` / `expect`；`ordinal` 和 `slice` 仍然只在单个目标方法内生效。
+当需要把同一组重定向规则应用到目标类的所有普通方法时，使用 `@RedirectAllMethods`。它不会用 `@Redirect.method` 筛选目标方法，会跳过构造器 `<init>` 和类初始化方法 `<clinit>`，并按整个目标类的总命中数校验 `require` / `allow` / `expect`；`ordinal` 和 `slice` 仍然只在单个目标方法内生效。
 
 ### 4. 错误处理
 

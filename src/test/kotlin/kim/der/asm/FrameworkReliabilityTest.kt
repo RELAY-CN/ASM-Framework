@@ -527,6 +527,82 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持 RedirectAllMethods 全类重定向边界一致")
+    fun documentationContractsKeepRedirectAllMethodsClassWideBoundaryAligned() {
+        // Given
+        val readme = Files.readString(Path.of("README.md"))
+        val apiRedirectAllSection =
+            Files.readString(Path.of("API.md"))
+                .substringAfter("### @RedirectAllMethods")
+                .substringBefore("### @Shadow")
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val migration = Files.readString(Path.of("REDIRECTION_MIGRATION.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val redirectAllKDoc =
+            asmMixinKDoc
+                .substringAfter("全方法重定向注解。")
+                .substringBefore("annotation class RedirectAllMethods")
+        val redirectAnnotationDeclaration =
+            asmMixinKDoc
+                .substringAfter("annotation class Redirect(")
+                .substringBefore("annotation class Shadow")
+        val redirectMethodKDoc =
+            redirectAnnotationDeclaration
+                .substringAfter("* 目标方法 JVM 签名。")
+                .substringBefore("val method: String")
+
+        // Then
+        assertThat(readme)
+            .`as`("Then: README 应把 RedirectAllMethods 描述为普通方法级全类重定向能力")
+            .contains(
+                "`@RedirectAllMethods` 可把同一组重定向规则应用到目标类所有普通方法",
+                "跳过 `<init>` / `<clinit>`",
+                "`@Redirect.method` 不参与目标方法筛选",
+                "`ordinal` / `slice` 按单个普通方法内计算",
+            )
+        assertThat(apiRedirectAllSection)
+            .`as`("Then: API 应说明 RedirectAllMethods 的 method、计数和单方法定位边界")
+            .contains(
+                "所有普通方法",
+                "不会用 `method` 字段筛选目标方法",
+                "跳过构造器和类初始化方法",
+                "`require` / `allow` / `expect` 按整个目标类的总命中数校验",
+                "`ordinal` 与 `slice` 仍按单个目标方法生效",
+            )
+        assertThat(guide)
+            .`as`("Then: GUIDE 应说明 RedirectAllMethods 不通过 Redirect.method 收窄目标方法")
+            .contains(
+                "**@RedirectAllMethods** - 将 `@Redirect` 应用于目标类所有普通方法",
+                "`@RedirectAllMethods`。它不会用 `@Redirect.method` 筛选目标方法",
+                "会跳过构造器 `<init>` 和类初始化方法 `<clinit>`",
+                "`ordinal` 和 `slice` 仍然只在单个目标方法内生效",
+            )
+        assertThat(migration)
+            .`as`("Then: 迁移文档应把整类普通方法重定向映射到 RedirectAllMethods")
+            .contains(
+                "- `@RedirectAllMethods`",
+                "| 把同一组重定向规则应用到整类普通方法 | `@RedirectAllMethods` + `@Redirect` |",
+                "`@Redirect.method` 不筛选目标方法",
+                "跳过 `<init>` / `<clinit>`",
+                "`ordinal` / `slice` 仍按单个目标方法计算",
+            )
+        assertThat(redirectAllKDoc)
+            .`as`("Then: KDoc 应和 RedirectAllMethods 实现边界保持一致")
+            .contains(
+                "所有普通方法",
+                "[Redirect.method] 不用于筛选目标方法",
+                "仅遍历普通方法",
+                "按整个目标类的总命中数校验",
+                "[Redirect.ordinal] 与 [Redirect.slice] 仍按单个目标方法生效",
+                "目标类的所有普通方法",
+            )
+        assertThat(redirectMethodKDoc)
+            .`as`("Then: Redirect.method 字段 KDoc 应说明 RedirectAllMethods 的例外语义")
+            .contains("当所属 Mixin 类标注 [RedirectAllMethods] 时，该字段不参与目标方法筛选")
+    }
+
+    @Test
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
         // Given
@@ -982,6 +1058,23 @@ class FrameworkReliabilityTest {
             } finally {
                 TestComprehensiveModifyReceiverInvokeMixin.reset()
             }
+        }
+
+        @Test
+        @DisplayName("@RedirectAllMethods 应在真实综合方法中重定向所有匹配调用")
+        fun redirectAllMethodsInComprehensiveTestRewritesEveryMatchingOrdinaryMethodCall() {
+            // Given
+            AsmRegistry.register(TestComprehensiveRedirectAllMethodsMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: RedirectAllMethods 应同时改写 comprehensiveTest 中的静态 testB0 和实例 testA0 调用")
+                .startsWith("RedirectAll-testB0|RedirectAll-testA0|ParentMethod|")
+                .doesNotContain("StaticFinalString|DefaultConstructor|")
         }
 
         @Test
@@ -10472,25 +10565,42 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("RedirectAllMethods 应在生成夹具中省略 method 并改写匹配调用")
     fun redirectAllMethodsDoesNotRequireExplicitMethodTarget() {
+        // Given
         AsmRegistry.register(RedirectAllTrimMixin::class.java)
 
-        AsmProcessor().transform("RedirectAllTarget", redirectAllTargetBytes(), javaClass.classLoader)
+        // When
+        val transformed = AsmProcessor().transform("RedirectAllTarget", redirectAllTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectAllTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: 省略 method 时，RedirectAllMethods 仍应把 trim() 调用替换成 handler 返回的原始字符串")
+            .isEqualTo(" value ")
     }
 
     @Test
+    @DisplayName("RedirectAllMethods 应按目标类总命中数校验 allow")
     fun redirectAllMethodsEnforcesRedirectCountContractAcrossTargetClass() {
+        // Given
         AsmRegistry.register(RedirectAllAllowOneTrimMixin::class.java)
 
+        // When
         val exception =
             assertThrows(AsmTransformException::class.java) {
                 AsmProcessor().transform("RedirectAllMultiTarget", redirectAllMultiTargetBytes(), javaClass.classLoader)
             }
 
-        assertEquals(
-            true,
-            exception.cause?.message?.contains("allows at most 1 injection(s), actual 2") == true,
-        )
+        // Then
+        assertThat(exception)
+            .`as`("Then: allow 应按整个目标类的 RedirectAllMethods 总命中数校验，而不是按单方法分别校验")
+            .hasRootCauseMessage(
+                "@Redirect handler redirect allows at most 1 injection(s), actual 2 " +
+                    "in target method <all methods> of class RedirectAllMultiTarget",
+            )
     }
 
     @Test
@@ -15098,6 +15208,35 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("Test")
+    @RedirectAllMethods
+    object TestComprehensiveRedirectAllMethodsMixin {
+        @Redirect(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.testA0()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirectTestA0(instance: Any): String {
+            instance.hashCode()
+            return "RedirectAll-testA0"
+        }
+
+        @Redirect(
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.testB0()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirectTestB0(): String = "RedirectAll-testB0"
     }
 
     @AsmMixin("Test")

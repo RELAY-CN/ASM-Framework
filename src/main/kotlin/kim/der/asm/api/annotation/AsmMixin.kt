@@ -252,7 +252,7 @@ annotation class ReplaceAllMethods(
  * 与普通 `@Redirect` 的区别：
  *
  * - 普通 `@Redirect` 需要在注解中指定 `method` 参数，仅影响特定方法
- * - `@RedirectAllMethods` 会让 `@Redirect` 应用到目标类的所有方法，无需指定 `method`
+ * - `@RedirectAllMethods` 会让 `@Redirect` 应用到目标类的所有普通方法，无需指定 `method`
  *
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  *
@@ -1590,6 +1590,7 @@ annotation class Redirect(
      * 目标方法 JVM 签名。
      *
      * 为空时按 handler 名称、重定向点和签名兼容性推断唯一目标方法。
+     * 当所属 Mixin 类标注 [RedirectAllMethods] 时，该字段不参与目标方法筛选。
      */
     val method: String = "",
 
