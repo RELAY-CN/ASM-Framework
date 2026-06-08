@@ -235,7 +235,9 @@ object AsmInjectorFactory {
      * @param ordinal 匹配调用点序号；负数表示处理全部匹配调用点
      * @param slice 切片范围；当前方法调用、构造器调用、NEW 构造表达式、字段读取、字段写入、数组元素访问、数组长度、裸 ARRAYLENGTH、局部变量读取、局部变量写入、类型转换、类型判断、条件跳转、switch selector、常量加载与抛异常点重定向支持
      * INVOKE、FIELD、FIELD_ASSIGN 与 CONSTANT 边界切片
-     * @param args 调用点附加参数；数组模式支持 `array=get`、`array=set` 与 `array=length`，LOAD / STORE 支持 `index=N` 与 `var=N` 槽位过滤，ARRAY_LENGTH 不使用该参数
+     * @param args 调用点附加参数；INVOKE 支持唯一 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤；
+     * FIELD_ASSIGN 数组写入支持 `array=set`，字段/数组读取支持 `array=get`，数组长度支持 `array=length`；
+     * LOAD / STORE 支持 `index=N`、`var=N` 或 `name=localName` 局部变量过滤，ARRAY_LENGTH 不使用该参数
      * @return Redirect 注入器
      *
      * @author Dr (dr@der.kim)

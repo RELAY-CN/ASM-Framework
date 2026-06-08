@@ -989,11 +989,17 @@ class FrameworkReliabilityTest {
             .`as`("Then: AsmInjectorFactory WrapWithCondition KDoc 应同步 ARRAY_LENGTH 支持范围")
             .contains("ARRAY_LENGTH")
         assertThat(redirectFactorySection)
-            .`as`("Then: AsmInjectorFactory Redirect KDoc 应同步 ARRAY_LENGTH 不使用 target/args 与 slice 支持范围")
+            .`as`("Then: AsmInjectorFactory Redirect KDoc 应同步 ARRAY_LENGTH 不使用 target/args、slice 与 args 过滤契约")
             .contains(
                 "LOAD、STORE、SWITCH 与 ARRAY_LENGTH 不使用该参数",
                 "裸 ARRAYLENGTH",
                 "ARRAY_LENGTH 不使用该参数",
+                "INVOKE 支持唯一",
+                "`ldc=<string>`",
+                "`string=<string>`",
+                "FIELD_ASSIGN",
+                "`array=set`",
+                "`name=localName`",
             )
     }
 
@@ -2091,6 +2097,7 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("扫描诊断结果应报告坏类加载失败且不伪造注册或跳过状态")
     fun scannerReportsClassLoadingFailures() {
         val jarFile = Files.createTempFile("asm-scanner-invalid-", ".jar")
         try {
@@ -2102,9 +2109,22 @@ class FrameworkReliabilityTest {
 
             val result = AsmScanner.scanJarWithResult(jarFile.toFile(), "broken.pkg")
 
-            assertEquals(0, result.registeredClasses.size)
-            assertEquals(1, result.failures.size)
-            assertEquals("broken.pkg.Broken", result.failures.single().className)
+            assertThat(result.registeredClasses)
+                .`as`("Then: 坏 class 不能被记录为成功注册")
+                .isEmpty()
+            assertThat(result.skippedClasses)
+                .`as`("Then: 坏 class 未成功加载，不能被记录为非 Mixin 跳过")
+                .isEmpty()
+            assertThat(result.failures)
+                .`as`("Then: 坏 class 应以诊断失败返回给调用方")
+                .singleElement()
+            val failure = result.failures.single()
+            assertThat(failure.className)
+                .`as`("Then: 失败条目应保留可定位的 Java binary name")
+                .isEqualTo("broken.pkg.Broken")
+            assertThat(failure.reason)
+                .`as`("Then: 失败条目应保留 JVM/ASM 提供的错误摘要，便于调用方诊断")
+                .isNotBlank()
         } finally {
             Files.deleteIfExists(jarFile)
         }
