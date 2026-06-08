@@ -43,3 +43,4 @@ Thumbs.db
 hs_err_pid*
 crash-report-*
 .ace-tool/
+.codex-tasks/
