@@ -159,6 +159,29 @@ class FrameworkReliabilityTest {
     @DisplayName("Redirection 迁移文档场景")
     inner class RedirectionMigrationDocumentationScenarios {
         @Test
+        @DisplayName("使用指南应从资源入口指向 Redirection 迁移说明")
+        fun guideResourcesExposeRedirectionMigrationEntryWithoutLegacyRuntimeApis() {
+            // Given
+            val guide = Files.readString(Path.of("GUIDE.md"))
+            val guideResourcesSection =
+                guide
+                    .substringAfter("## 更多资源")
+
+            // Then
+            assertThat(guideResourcesSection)
+                .`as`("Then: GUIDE 更多资源应给旧 Redirection 用户直接迁移入口，而不是只让 README/API 暴露迁移文档")
+                .contains(
+                    "[REDIRECTION_MIGRATION.md](REDIRECTION_MIGRATION.md)",
+                    "旧 Redirection 方案迁移到注解式 Mixin API",
+                )
+                .doesNotContain(
+                    "RedirectionReplaceApi",
+                    "RedirectionReplaceManager",
+                    "RedirectionListener",
+                )
+        }
+
+        @Test
         @DisplayName("迁移说明应把旧替换意图映射到注解式 API")
         fun redirectionMigrationGuideMapsLegacyIntentsToAnnotationApis() {
             // Given
@@ -1278,6 +1301,30 @@ class FrameworkReliabilityTest {
                 .`as`("Then: 参数迁移应只把 interfaceMethod(\"Test\") 的调用实参改成 Migrated")
                 .contains("StaticFinalString|", "DefaultConstructor|", "InterfaceImpl-Migrated|")
                 .doesNotContain("InterfaceImpl-Test|")
+        }
+
+        @Test
+        @DisplayName("@ModifyArgs(INVOKE) 应在真实综合方法中只替换接口调用参数组")
+        fun modifyArgsInvokeInComprehensiveTestReplacesLiteralInterfaceArgumentGroup() {
+            // Given
+            TestComprehensiveModifyArgsInvokeMixin.reset()
+            AsmRegistry.register(TestComprehensiveModifyArgsInvokeMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 批量参数迁移应只把 interfaceMethod(\"Test\") 的调用实参组改成 MigratedArgs")
+                .contains("StaticFinalString|", "DefaultConstructor|", "InterfaceImpl-MigratedArgs|")
+                .doesNotContain("InterfaceImpl-Test|")
+            assertThat(TestComprehensiveModifyArgsInvokeMixin.observedArgument)
+                .`as`("Then: @ModifyArgs handler 应先看到真实 Test.class 调用点中的原始直接字符串实参")
+                .isEqualTo("Test")
+            assertThat(TestComprehensiveModifyArgsInvokeMixin.observedArgumentCount)
+                .`as`("Then: Test.interfaceMethod(String) 的 Args 容器应只包含方法参数，不包含实例 receiver")
+                .isEqualTo(1)
         }
 
         @Test
@@ -10528,6 +10575,23 @@ class FrameworkReliabilityTest {
             .isNotZero()
     }
 
+    @Test
+    @DisplayName("@Final 标记 Shadow 前缀别名字段时应修改真实目标字段")
+    fun finalShadowPrefixAliasAddsFinalToTargetField() {
+        // Given
+        AsmRegistry.register(FinalShadowPrefixAliasFieldMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        val classNode = readClass(transformed)
+        val field = classNode.fields.single { it.name == "name" }
+
+        // Then
+        assertThat(field.access and Opcodes.ACC_FINAL)
+            .`as`("Then: @Shadow(\"shadow_name\") 的前缀别名字段上标记 @Final 时，应该修改真实目标字段 name")
+            .isNotZero()
+    }
+
     @Nested
     @DisplayName("@Accessor setter 场景")
     inner class AccessorSetterScenarios {
@@ -16610,6 +16674,34 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String {
             original.length
             return "Migrated"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestComprehensiveModifyArgsInvokeMixin {
+        var observedArgument: String? = null
+        var observedArgumentCount = -1
+
+        fun reset() {
+            observedArgument = null
+            observedArgumentCount = -1
+        }
+
+        @ModifyArgs(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.interfaceMethod(Ljava/lang/String;)Ljava/lang/String;",
+                args = ["ldc=Test"],
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            observedArgument = args[0]
+            observedArgumentCount = args.size
+            args[0] = "MigratedArgs"
         }
     }
 
@@ -22983,6 +23075,13 @@ class FrameworkReliabilityTest {
     @AsmMixin("FieldTarget")
     class FinalShadowAliasFieldMixin {
         @Shadow("name")
+        @Final
+        private val aliasName: String? = null
+    }
+
+    @AsmMixin("FieldTarget")
+    class FinalShadowPrefixAliasFieldMixin {
+        @Shadow("shadow_name")
         @Final
         private val aliasName: String? = null
     }

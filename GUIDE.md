@@ -1946,5 +1946,6 @@ Kotlin `object` 实例方法本身是支持的，不要把所有 handler 都改�
 
 - [README.md](README.md) - 项目概述
 - [API.md](API.md) - 完整的 API 参考
+- [REDIRECTION_MIGRATION.md](REDIRECTION_MIGRATION.md) - 旧 Redirection 方案迁移到注解式 Mixin API 的说明
 - [测试用例](../src/test/kotlin/kim/der/asm/) - 更多示例代码
 
