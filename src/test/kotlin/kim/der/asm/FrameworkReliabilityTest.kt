@@ -772,6 +772,18 @@ class FrameworkReliabilityTest {
                 "**`target` 格式：**",
                 "**示例：**",
             )
+        val apiModifyArgSection =
+            requiredSection(
+                api,
+                "### @ModifyArg",
+                "### @ModifyArgs",
+            )
+        val apiModifyArgsSection =
+            requiredSection(
+                api,
+                "### @ModifyArgs",
+                "### @ModifyReceiver",
+            )
         val apiModifyReceiverSection =
             requiredSection(
                 api,
@@ -807,6 +819,18 @@ class FrameworkReliabilityTest {
                 api,
                 "### Slice",
                 "### 路径匹配器",
+            )
+        val modifyArgKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 修改参数注解。",
+                "annotation class ModifyArg",
+            )
+        val modifyArgsKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 修改调用参数组注解。",
+                "annotation class ModifyArgs",
             )
         val modifyReceiverKDocSection =
             requiredSection(
@@ -860,6 +884,23 @@ class FrameworkReliabilityTest {
                 "- `INVOKE_STRING`: `owner.name(desc)`",
                 "owner 必填",
             )
+        listOf(
+            "@ModifyArg API" to apiModifyArgSection,
+            "@ModifyArgs API" to apiModifyArgsSection,
+            "@ModifyArg KDoc" to modifyArgKDocSection,
+            "@ModifyArgs KDoc" to modifyArgsKDocSection,
+        ).forEach { (context, section) ->
+            assertThat(section)
+                .`as`("Then: $context 应说明 INVOKE 显式 selector 可省略 owner，但不能省略 descriptor")
+                .contains(
+                    "`owner.name(desc)`",
+                    "`owner/name(desc)`",
+                    "`name(desc)`",
+                    "显式",
+                    "缺少方法描述符",
+                    "转换阶段失败",
+                )
+        }
         assertThat(apiTargetFormatSection)
             .`as`("Then: API target 格式总表应明确 FIELD 与 FIELD_ASSIGN 共享字段 selector 格式")
             .contains(

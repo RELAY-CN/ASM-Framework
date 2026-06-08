@@ -367,6 +367,8 @@ annotation class Unique
  * INVOKE 模式下 [index] 为负数时会在调用参数中推断唯一兼容参数；[At.target] 可省略，框架会按
  * [index] 指向或推断出的调用参数类型、handler 首参、返回类型和后续目标方法参数前缀筛选兼容调用点；
  * 不兼容候选不会计入 [ordinal] 或实际命中数。
+ * 显式 [At.target] 可写 `owner.name(desc)`、`owner/name(desc)` 或 `name(desc)`；省略 owner 时只按方法名与描述符匹配，
+ * 缺少方法描述符的显式目标会在转换阶段失败。
  * INVOKE 模式可在 [At.args] 中声明唯一的 `ldc=<string>` 或 `string=<string>`，只匹配调用参数直接来自该
  * `LDC String` 的调用点；局部变量、拼接字符串、方法返回值和 receiver 来源不会命中。
  *
@@ -384,7 +386,8 @@ annotation class Unique
  * @param index 要修改的参数索引（从 0 开始）；入口模式下为目标方法参数索引，负数表示按 handler 首参和返回类型推断唯一兼容参数；
  * INVOKE 模式下为目标调用参数索引，负数同样表示按调用参数兼容性推断唯一参数
  * @param at 注入位置；默认 HEAD 改写入口参数，`INVOKE` 时用 [At.target] 匹配目标方法调用、构造器调用或
- * `invokedynamic` 调用，为空则按 handler 签名推断兼容调用点；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
+ * `invokedynamic` 调用，为空则按 handler 签名推断兼容调用点；显式目标可写 `owner.name(desc)`、`owner/name(desc)` 或
+ * `name(desc)`，但必须包含方法描述符，缺失时会在转换阶段失败；`invokedynamic` 目标按 bootstrap owner、动态调用名或 bootstrap 名，
  * 以及动态调用点描述符匹配；可用 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串实参调用点
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，当前仅在 INVOKE 模式下生效
  * @param slice 切片范围；当前 INVOKE 调用点参数修改支持用 [Slice.from] / [Slice.to] 的
@@ -472,6 +475,8 @@ annotation class ModifyArg(
  * 在目标类中推断唯一同名方法；若存在多个兼容重载，需要显式声明 [method]。
  * INVOKE 模式下 [At.target] 可省略，框架会扫描普通方法调用、构造器调用和 `invokedynamic` 调用；
  * 多个兼容候选可用 [ordinal]、[slice] 或命中数约束收窄。
+ * 显式 [At.target] 可写 `owner.name(desc)`、`owner/name(desc)` 或 `name(desc)`；省略 owner 时只按方法名与描述符匹配，
+ * 缺少方法描述符的显式目标会在转换阶段失败。
  * 可在 [At.args] 中声明唯一的 `ldc=<string>` 或 `string=<string>`，只匹配调用参数直接来自该
  * `LDC String` 的调用点；局部变量、拼接字符串、方法返回值和 receiver 来源不会命中。
  *
@@ -489,7 +494,8 @@ annotation class ModifyArg(
  *
  * @param method 目标方法签名；可省略并按 handler 名称、调用点、handler 签名和实际兼容调用点推断唯一兼容目标
  * @param at 调用点定位；当前仅支持 [InjectionPoint.INVOKE]，可匹配普通方法调用、构造器调用或 `invokedynamic` 调用，
- * [At.target] 为空时按兼容调用点推断；可用 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串实参调用点
+ * [At.target] 为空时按兼容调用点推断；显式目标可写 `owner.name(desc)`、`owner/name(desc)` 或 `name(desc)`，
+ * 但必须包含方法描述符，缺失时会在转换阶段失败；可用 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>` 过滤直接字符串实参调用点
  * @param ordinal 匹配调用点序号；`-1` 表示修改全部匹配调用点，`0` 及以上表示只修改第 N 个匹配调用点
  * @param slice 切片范围；当前 INVOKE 调用点参数组修改支持用 [Slice.from] / [Slice.to] 的
  * [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界缩小查找范围
