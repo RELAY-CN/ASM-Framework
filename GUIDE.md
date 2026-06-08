@@ -138,7 +138,7 @@ val transformedBytes = processor.transform(
 - **@RemoveField** - 移除字段
 - **@RemoveMethod** - 移除方法；目标方法不存在时转换失败
 - **@RemoveSynchronized** - 移除 synchronized；目标方法不存在时转换失败，并移除方法标志与 monitor 指令
-- **@ReplaceAllMethods** - 替换所有方法
+- **@ReplaceAllMethods** - 替换所有普通方法，跳过构造器与类初始化器
 
 详细说明请参考 [API.md](API.md)
 
@@ -1215,6 +1215,8 @@ object SafeDefaultMixin {
     fun healthCheck(): String = "ok"
 }
 ```
+
+`@ReplaceAllMethods` 只处理普通方法，不会改写构造器 `<init>` 或类初始化器 `<clinit>`；静态字段初始化和构造器访问级别会保持原样。
 
 `@Copy` 可把 Mixin 中的辅助方法复制到目标类中，供 `@Overwrite` 或其他被复制方法调用。默认情况下，
 普通复制方法会以 `public` 方法写入目标类，并保留源 ASM 方法的 `static`、`synchronized`、`strictfp` 与

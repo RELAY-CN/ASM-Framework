@@ -1086,14 +1086,14 @@ fun removeSync() {}
 
 ### @ReplaceAllMethods
 
-替换目标类中的所有方法。
+替换目标类中的所有普通方法，跳过构造器 `<init>` 与类初始化器 `<clinit>`。
 
 该注解会在方法级注解处理前运行，把目标类的方法体替换成框架默认返回或内部 `DefaultReturnValueProvider.defaultValue`
 调用。它适合为整类建立默认实现，再通过同一个 Mixin 中的 `@Overwrite` 恢复少量需要保留逻辑的方法。
 
 **参数：**
 
-- `removeSync: Boolean = false` - 是否同时移除所有方法的 synchronized
+- `removeSync: Boolean = false` - 是否同时移除所有普通方法的 synchronized
 - `remap: Boolean = false` - 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
 
 **示例：**

@@ -4158,10 +4158,9 @@ class TargetClassContext(
         val iterator = classNode.methods.listIterator()
 
         for (methodNode in iterator) {
-            // 跳过无参构造函数（如果需要可以添加）
-            if (methodNode.name == "<init>" && methodNode.desc == "()V") {
-                methodNode.access = methodNode.access or Opcodes.ACC_PUBLIC
-                methodNode.access = methodNode.access and (Opcodes.ACC_PROTECTED or Opcodes.ACC_PRIVATE).inv()
+            // @ReplaceAllMethods 只治理普通方法；构造器与类初始化器必须保留原始对象/静态初始化语义。
+            if (methodNode.name == "<init>" || methodNode.name == "<clinit>") {
+                continue
             }
 
             // 对于接口，只处理静态方法和非抽象方法
@@ -4179,7 +4178,7 @@ class TargetClassContext(
     }
 
     /**
-     * 替换单个方法
+     * 替换单个普通方法。
      */
     private fun replaceMethod(
         methodNode: MethodNode,
@@ -4201,34 +4200,15 @@ class TargetClassContext(
         val returnType = Type.getReturnType(methodNode.desc)
         val useDefaultReturn = shouldUseDefaultReturn(returnType)
 
-        // 处理构造函数：在 RETURN 前注入
-        if (methodNode.name == "<init>" && methodNode.desc.endsWith(")V")) {
-            val newInstructions = InsnList()
-            for (insnNode in methodNode.instructions) {
-                if (insnNode.opcode == Opcodes.RETURN) {
-                    if (!useDefaultReturn && returnType != Type.VOID_TYPE) {
-                        // 在 RETURN 前注入默认返回值调用
-                        val il = InsnList()
-                        injectDefaultReturnValue(methodNode, il)
-                        newInstructions.add(il)
-                    }
-                }
-                newInstructions.add(insnNode)
-            }
-            methodNode.instructions = newInstructions
-            return true
-        } else {
-            // 普通方法：完全替换方法体
-            val il = InsnList()
-            if (useDefaultReturn) {
-                loadDefaultReturnValue(returnType, il)
-            } else if (returnType != Type.VOID_TYPE) {
-                injectDefaultReturnValue(methodNode, il)
-            }
-            il.add(InstructionUtil.makeReturn(returnType))
-            methodNode.instructions = il
-            return true
+        val il = InsnList()
+        if (useDefaultReturn) {
+            loadDefaultReturnValue(returnType, il)
+        } else if (returnType != Type.VOID_TYPE) {
+            injectDefaultReturnValue(methodNode, il)
         }
+        il.add(InstructionUtil.makeReturn(returnType))
+        methodNode.instructions = il
+        return true
     }
 
     /**

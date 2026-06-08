@@ -484,6 +484,49 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应保持 ReplaceAllMethods 普通方法边界一致")
+    fun documentationContractsKeepReplaceAllMethodsOrdinaryMethodBoundaryAligned() {
+        // Given
+        val apiReplaceAllSection =
+            Files.readString(Path.of("API.md"))
+                .substringAfter("### @ReplaceAllMethods")
+                .substringBefore("### @Mutable")
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val migration = Files.readString(Path.of("REDIRECTION_MIGRATION.md"))
+        val replaceAllKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+                .substringAfter("全方法替换注解。")
+                .substringBefore("annotation class ReplaceAllMethods")
+
+        // Then
+        assertThat(apiReplaceAllSection)
+            .`as`("Then: API 应说明 ReplaceAllMethods 不处理构造器和类初始化器")
+            .contains(
+                "所有普通方法",
+                "跳过构造器 `<init>` 与类初始化器 `<clinit>`",
+                "所有普通方法的 synchronized",
+            )
+        assertThat(guide)
+            .`as`("Then: GUIDE 应把整类默认返回限定为普通方法")
+            .contains(
+                "**@ReplaceAllMethods** - 替换所有普通方法，跳过构造器与类初始化器",
+                "`@ReplaceAllMethods` 只处理普通方法",
+                "不会改写构造器 `<init>` 或类初始化器 `<clinit>`",
+                "静态字段初始化和构造器访问级别会保持原样",
+            )
+        assertThat(replaceAllKDoc)
+            .`as`("Then: KDoc 应和实现边界保持一致")
+            .contains(
+                "所有普通方法体",
+                "不会改写构造器 `<init>` 或类初始化器 `<clinit>`",
+                "普通方法的 `synchronized`",
+            )
+        assertThat(migration)
+            .`as`("Then: 迁移文档应继续避免把 ReplaceAllMethods 描述成构造器或类初始化器替换工具")
+            .contains("目标类所有普通方法")
+    }
+
+    @Test
     @DisplayName("公开文档应保持数组定位与条件包裹注入点契约一致")
     fun documentationContractsKeepAnnotationPointMappingsAligned() {
         // Given
@@ -9762,6 +9805,50 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ReplaceAllMethods 应跳过类初始化器")
+    fun replaceAllMethodsKeepsClassInitializer() {
+        // Given
+        AsmRegistry.register(ReplaceAllClassInitializerMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("ReplaceAllClassInitializerTarget", replaceAllClassInitializerTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ReplaceAllClassInitializerTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(clazz.getField("value").get(null))
+            .`as`("Then: @ReplaceAllMethods 只应替换普通方法，不应清空 <clinit> 的静态初始化副作用")
+            .isEqualTo("initialized")
+        assertThat(clazz.getMethod("business").invoke(instance))
+            .`as`("Then: 普通方法仍应被替换为 String 默认值")
+            .isEqualTo("")
+    }
+
+    @Test
+    @DisplayName("ReplaceAllMethods 应跳过构造器访问级别")
+    fun replaceAllMethodsKeepsConstructorAccess() {
+        // Given
+        AsmRegistry.register(ReplaceAllPrivateConstructorMixin::class.java)
+
+        // When
+        val transformed =
+            AsmProcessor().transform("ReplaceAllPrivateConstructorTarget", replaceAllPrivateConstructorTargetBytes(), javaClass.classLoader)
+        val constructor =
+            readClass(transformed)
+                .methods
+                .single { it.name == "<init>" && it.desc == "()V" }
+
+        // Then
+        assertThat(constructor.access and Opcodes.ACC_PRIVATE)
+            .`as`("Then: @ReplaceAllMethods 处理普通方法时不应把私有无参构造器改成 public")
+            .isNotZero()
+        assertThat(constructor.access and Opcodes.ACC_PUBLIC)
+            .`as`("Then: 构造器原始访问级别应保持不变")
+            .isZero()
+    }
+
+    @Test
     @DisplayName("RemoveMethod 应移除显式指定的目标方法")
     fun removeMethodRemovesTargetMethod() {
         // Given
@@ -9811,7 +9898,7 @@ class FrameworkReliabilityTest {
         }
 
         // Then
-        val rootCause = generateSequence(exception) { it.cause }.last()
+        val rootCause = generateSequence<Throwable>(exception) { it.cause }.last()
         assertThat(rootCause)
             .`as`("Then: @RemoveMethod 不应在目标方法漂移后静默跳过删除治理")
             .isInstanceOf(IllegalStateException::class.java)
@@ -10027,7 +10114,7 @@ class FrameworkReliabilityTest {
         }
 
         // Then
-        val rootCause = generateSequence(exception) { it.cause }.last()
+        val rootCause = generateSequence<Throwable>(exception) { it.cause }.last()
         assertThat(rootCause)
             .`as`("Then: @RemoveSynchronized 不应在同步目标漂移后静默跳过同步语义治理")
             .isInstanceOf(IllegalStateException::class.java)
@@ -20748,6 +20835,14 @@ class FrameworkReliabilityTest {
     @AsmMixin("CharReturnTarget")
     object ReplaceAllCharReturnMixin
 
+    @ReplaceAllMethods
+    @AsmMixin("ReplaceAllClassInitializerTarget")
+    object ReplaceAllClassInitializerMixin
+
+    @ReplaceAllMethods
+    @AsmMixin("ReplaceAllPrivateConstructorTarget")
+    object ReplaceAllPrivateConstructorMixin
+
     @AsmMixin("StrictTarget")
     object MissingRemoveMethodTargetMixin {
         @RemoveMethod("missing()V")
@@ -24439,6 +24534,52 @@ class FrameworkReliabilityTest {
             visitMethodInsn(Opcodes.INVOKESPECIAL, "java/util/ArrayList", "<init>", "()V", false)
             visitInsn(Opcodes.ARETURN)
             visitMaxs(2, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun replaceAllClassInitializerTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReplaceAllClassInitializerTarget", null, "java/lang/Object", null)
+        cw.visitField(Opcodes.ACC_PUBLIC or Opcodes.ACC_STATIC, "value", "Ljava/lang/String;", null, null).visitEnd()
+        addDefaultConstructor(cw)
+        cw.visitMethod(Opcodes.ACC_STATIC, "<clinit>", "()V", null, null).apply {
+            visitCode()
+            visitLdcInsn("initialized")
+            visitFieldInsn(Opcodes.PUTSTATIC, "ReplaceAllClassInitializerTarget", "value", "Ljava/lang/String;")
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 0)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "business", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("business")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitEnd()
+        return cw.toByteArray()
+    }
+
+    private fun replaceAllPrivateConstructorTargetBytes(): ByteArray {
+        val cw = ClassWriter(0)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "ReplaceAllPrivateConstructorTarget", null, "java/lang/Object", null)
+        cw.visitMethod(Opcodes.ACC_PRIVATE, "<init>", "()V", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false)
+            visitInsn(Opcodes.RETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "business", "()Ljava/lang/String;", null, null).apply {
+            visitCode()
+            visitLdcInsn("business")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
             visitEnd()
         }
         cw.visitEnd()
