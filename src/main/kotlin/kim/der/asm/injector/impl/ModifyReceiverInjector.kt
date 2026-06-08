@@ -187,8 +187,8 @@ class ModifyReceiverInjector(
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyReceiver FIELD requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyReceiver(FIELD) target: field name must not be empty")
         }
         require(at.args.isEmpty()) {
             "@ModifyReceiver FIELD does not use at.args; direct string filtering is supported only for INVOKE"
@@ -252,8 +252,8 @@ class ModifyReceiverInjector(
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyReceiver FIELD_ASSIGN requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyReceiver(FIELD_ASSIGN) target: field name must not be empty")
         }
         require(at.args.isEmpty()) {
             "@ModifyReceiver FIELD_ASSIGN does not use at.args; direct string filtering is supported only for INVOKE"

@@ -264,8 +264,8 @@ class ModifyExpressionValueInjector(
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyExpressionValue requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyExpressionValue(FIELD) target: field name must not be empty")
         }
 
         var injectionCount = 0
@@ -316,8 +316,8 @@ class ModifyExpressionValueInjector(
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyExpressionValue FIELD_ASSIGN requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyExpressionValue(FIELD_ASSIGN) target: field name must not be empty")
         }
 
         var injectionCount = 0
@@ -367,8 +367,8 @@ class ModifyExpressionValueInjector(
      */
     private fun injectArrayRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyExpressionValue requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyExpressionValue array read target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@ModifyExpressionValue array target must be an array field: ${at.target}")
@@ -414,8 +414,8 @@ class ModifyExpressionValueInjector(
      */
     private fun injectArrayLength(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyExpressionValue requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyExpressionValue array length target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@ModifyExpressionValue array target must be an array field: ${at.target}")
@@ -509,8 +509,8 @@ class ModifyExpressionValueInjector(
      */
     private fun injectArrayWrite(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@ModifyExpressionValue array write requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @ModifyExpressionValue array write target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@ModifyExpressionValue array write target must be an array field: ${at.target}")

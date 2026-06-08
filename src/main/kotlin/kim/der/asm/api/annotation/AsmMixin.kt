@@ -582,6 +582,8 @@ annotation class ModifyArgs(
  *   静态字段和 handler 不兼容的字段读取不计入 [ordinal] 或命中数；携带 [At.args] 会在转换阶段失败
  * - [At.value] 为 [InjectionPoint.FIELD_ASSIGN] 时可省略 [At.target]，按 handler 首参与返回类型筛选兼容的实例字段写入 receiver；
  *   静态字段和 handler 不兼容的字段写入不计入 [ordinal] 或命中数；携带 [At.args] 会在转换阶段失败
+ * - 显式 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] target 可写 `owner.field:desc`、`field:desc` 或 `field`，
+ *   字段名必填；只有省略整个 [At.target] 才进入兼容候选推断
  * - [InjectionPoint.INVOKE]、[InjectionPoint.FIELD] 与 [InjectionPoint.FIELD_ASSIGN] 模式可使用 [slice]
  *   把候选 receiver 改写限制在一段 [InjectionPoint.INVOKE]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN] 或 [InjectionPoint.CONSTANT] 边界之间，边界本身不参与匹配
  * - [At.value] 为 [InjectionPoint.FIELD] 时匹配实例字段读取，为 [InjectionPoint.FIELD_ASSIGN] 时匹配实例字段写入
@@ -684,6 +686,8 @@ annotation class ModifyReceiver(
  * 字段读取，不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.FIELD_ASSIGN] 省略 [At.target] 时会按 handler 字段 owner 参数、待写入值、[Operation] 位置与
  * `Unit` 返回类型筛选兼容的字段写入，不兼容候选不计入 [ordinal] 或命中数。
+ * 显式 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] target 可写 `owner.field:desc`、`field:desc` 或 `field`，
+ * 字段名必填；只有省略整个 [At.target] 才进入兼容候选推断。
  * 构造器调用可通过 [InjectionPoint.INVOKE] 与 `<init>` 目标指定，也可通过 [InjectionPoint.NEW]
  * 与类型目标指定，当前支持常见 `NEW/DUP/args/<init>` 形态。
  * 类型转换通过 [InjectionPoint.CAST] 与类型 internal name 或 binary name 指定；省略 [At.target] 时会按
@@ -910,7 +914,7 @@ annotation class WrapMethod(
  * 省略 [At.target] 时会按 handler 首参和 `Boolean` 返回类型筛选兼容调用返回值，`void` 或不兼容候选不计入 [ordinal] 或命中数。
  * [InjectionPoint.INVOKE_ASSIGN] 可复用同样的 [At.args] 直接字符串实参过滤，过滤后再计算 [ordinal] 与命中数。
  * [InjectionPoint.FIELD] 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取，字段目标格式支持
- * `owner.field:desc`、`field:desc` 与 `field`。handler 首参接收读取出的字段值，不接收 receiver；
+ * `owner.field:desc`、`field:desc` 与 `field`，字段名必填。handler 首参接收读取出的字段值，不接收 receiver；
  * 返回 `true` 时保留原字段值，返回 `false` 时用字段类型默认值替换本次读取结果。省略 [At.target] 时会按 handler
  * 首参和 `Boolean` 返回类型筛选兼容的字段读取，不兼容候选不计入 [ordinal] 或命中数。
  * 数组元素读取使用 [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定，
@@ -921,9 +925,10 @@ annotation class WrapMethod(
  * [InjectionPoint.ARRAY_LENGTH] 直接匹配任意裸 `ARRAYLENGTH` 产生的 `Int` 长度结果，不使用 [At.target] 或 [At.args]；
  * handler 首参同样接收 `Int` 长度值，返回 `false` 时用 `0` 替换本次数组长度结果。
  * [InjectionPoint.FIELD_ASSIGN] 模式匹配
- * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。
+ * `PUTFIELD` / `PUTSTATIC` 字段写入，字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`，字段名必填。
  * 省略 [At.target] 时会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容的字段写入，
  * 不兼容候选不计入 [ordinal] 或命中数。
+ * 显式字段 target 字段名必填；只有省略整个 [At.target] 才进入兼容候选推断。
  * 数组元素写入使用 [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定，
  * 当前匹配由最近的目标数组字段读取产生数组引用的 `xASTORE` 指令。
  * [InjectionPoint.LOAD] 模式匹配局部变量读取，不使用 [At.target]；可通过 [At.args] 中的 `index=N`、`var=N`
@@ -1086,8 +1091,9 @@ annotation class WrapWithCondition(
  *   以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`
  * - [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 可通过 [At.args] 中唯一的 `ldc=<string>` 或
  *   `string=<string>` 过滤调用参数直接来自该 `LDC String` 的候选，过滤后再计算 [ordinal] 与命中数
- * - 字段读取目标可指定字段签名；省略时按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`
- * - 字段写入目标通过 [InjectionPoint.FIELD_ASSIGN] 指定；handler 接收 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，返回的新值交给原字段写入继续执行
+ * - 字段读取目标可指定 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；省略时按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC`
+ * - 字段写入目标通过 [InjectionPoint.FIELD_ASSIGN] 指定，显式 target 同样必须包含字段名；handler 接收 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，返回的新值交给原字段写入继续执行
+ * - 显式字段 target 字段名必填；只有省略整个 [At.target] 才进入兼容候选推断
  * - 数组元素读取目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=get` 指定
  * - 数组元素写入值目标通过 [At.value] = [InjectionPoint.FIELD_ASSIGN]、数组字段 [At.target] 与 [At.args] 中的 `array=set` 指定；handler 接收 `xASTORE` 消费前的待写入元素值，不接收数组引用或索引，返回的新值交给原数组写入继续执行
  * - 数组长度目标通过 [At.value] = [InjectionPoint.FIELD]、数组字段 [At.target] 与 [At.args] 中的 `array=length` 指定
@@ -1520,10 +1526,11 @@ annotation class ModifyConstant(
  * [InjectionPoint.INVOKE] 可通过 [At.args] 中唯一的 `ldc=<string>` 或 `string=<string>`
  * 过滤调用参数直接来自该 `LDC String` 的候选，过滤后再计算 [ordinal] 与命中数。
  * 字段读取重定向通过 [At.value] 指定 [InjectionPoint.FIELD]，并通过 [At.target] 指定
- * `owner.field:desc`、`field:desc` 或 `field`；字段写入重定向通过 [At.value] 指定
+ * `owner.field:desc`、`field:desc` 或 `field`，字段名必填；字段写入重定向通过 [At.value] 指定
  * [InjectionPoint.FIELD_ASSIGN]，目标格式相同。数组元素读取与数组长度重定向通过 [InjectionPoint.FIELD] 与
  * `array=get` / `array=length` 指定，数组元素写入重定向通过 [InjectionPoint.FIELD_ASSIGN] 与 `array=set`
  * 指定；[At.target] 指向产生数组引用的字段。[InjectionPoint.ARRAY_LENGTH] 可直接重定向任意裸 `ARRAYLENGTH`，不使用 [At.target] 或 [At.args]。
+ * 显式字段 target 字段名必填；只有省略整个 [At.target] 才进入兼容候选推断。
  * 局部变量读取重定向通过 [At.value] 指定 [InjectionPoint.LOAD]，不使用 [At.target]；可通过 [At.args] 中的
  * `index=N`、`var=N` 或 `name=localName` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。
  * handler 返回值只替换这一次 `xLOAD` 读取结果，不写回原槽位。

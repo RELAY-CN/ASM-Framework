@@ -516,6 +516,8 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 `@ModifyReceiver` handler 的第一个参数必须接收原 receiver；对象或数组 receiver 可用原 receiver 类型的父类、接口、`Any` 或 `Object` 接收，并返回兼容的新 receiver。省略 `method` 时，框架会在目标类中查找与 handler 同名的方法，并用 receiver 操作点、实际可兼容候选、handler 首参、返回类型和后续目标方法参数前缀筛出唯一兼容目标；`At.target` 为空的 `INVOKE`、`FIELD` 或 `FIELD_ASSIGN` 同样会按候选兼容性参与方法推断。多个兼容重载会在转换阶段失败，需显式写出 `method`。后续参数可按目标方法声明顺序接收目标方法参数前缀。返回值对基础类型仍需精确匹配，对象或数组类型可返回可赋值给原 receiver 类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回 receiver 类型。`INVOKE` 模式只支持实例方法调用，不支持 `INVOKESTATIC` 或构造器调用；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例调用 receiver，静态调用、构造器调用和 handler 不兼容的实例调用不计入 `ordinal` 或命中数；原调用参数会按原顺序恢复并继续传给目标调用。`INVOKE` 可在 `at.args` 中声明唯一的 `ldc=<string>` 或 `string=<string>` 直接字符串实参过滤；该过滤只检查调用参数直接 `LDC String` 来源，不匹配 receiver、局部变量、拼接字符串、方法返回值或 bootstrap 常量，过滤后再计算 `ordinal` 与命中数。`FIELD` 模式只支持 `GETFIELD`；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例字段读取 receiver，`GETSTATIC` 和 handler 不兼容的字段读取不计入 `ordinal` 或命中数；字段读取不会把字段值传给 handler，字段读取模式携带 `at.args` 会在转换阶段失败。`FIELD_ASSIGN` 模式只支持 `PUTFIELD`；省略 `At.target` 时，框架会按 handler 首参与返回类型筛选兼容的实例字段写入 receiver，`PUTSTATIC` 和 handler 不兼容的字段写入不计入 `ordinal` 或命中数；字段写入会保留原待写入值并写入新的 receiver，字段写入模式携带 `at.args` 会在转换阶段失败。`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 模式均可用 `slice.from` / `slice.to` 把候选 receiver 改写限制在一段 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界之间，边界本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
+显式 `FIELD` / `FIELD_ASSIGN` 字段目标可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入兼容候选推断。
+
 `@ModifyReceiver` 会统计实际写入 receiver 修改逻辑的操作点数量。未设置 `ordinal` 时，`INVOKE`、`FIELD` 与 `FIELD_ASSIGN` 会按实际改写的 receiver 数量计数；省略 `INVOKE` 调用目标、`FIELD` 字段目标或 `FIELD_ASSIGN` 字段目标时，不兼容候选不计入数量；设置 `ordinal` 时最多命中对应序号的 1 个 receiver。显式设置 `require` / `allow` / 非默认 `expect` 时按实际 receiver 修改数量校验契约，违反 `require` 或 `allow` 会在转换阶段失败，`expect` 不一致只输出警告。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
@@ -544,6 +546,8 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 `FIELD` 模式匹配 `GETFIELD` / `GETSTATIC` 字段读取。`GETFIELD` handler 先接收字段 owner，再接收 `Operation<R>`；`GETSTATIC` handler 直接接收 `Operation<R>`。后续参数可按目标方法声明顺序接收目标方法参数前缀，handler 返回类型必须兼容字段类型。省略 `At.target` 时，框架会按 handler 字段 owner 参数、`Operation` 位置与返回类型筛选兼容的字段读取，不兼容字段读取不计入 `ordinal` 或命中数。可用 `slice.from` / `slice.to` 把候选字段读取限制在一段 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界之间，边界本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 `FIELD_ASSIGN` 模式匹配 `PUTFIELD` / `PUTSTATIC` 字段写入。`PUTFIELD` handler 先接收字段 owner，再接收待写入值与 `Operation<Unit>`；`PUTSTATIC` handler 接收待写入值与 `Operation<Unit>`。handler 必须返回 `Unit` / `void`，后续参数可按目标方法声明顺序接收目标方法参数前缀。省略 `At.target` 时，框架会按 handler 字段 owner 参数、待写入值、`Operation` 位置与返回类型筛选兼容的字段写入，不兼容字段写入不计入 `ordinal` 或命中数。可用 `slice.from` / `slice.to` 把候选字段写入限制在一段 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界之间，边界本身不参与候选匹配，`ordinal` 会在切片内重新计数。
+
+显式 `FIELD` / `FIELD_ASSIGN` 字段目标可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入兼容候选推断。
 
 数组元素读取使用 `FIELD + at.args = ["array=get"]`，`At.target` 指向产生数组引用的数组字段。
 handler 先接收数组引用、`Int` 索引与 `Operation<R>`，返回类型必须兼容数组元素类型。
@@ -664,6 +668,8 @@ handler 先接收已经读取出的字段值，不接收 `GETFIELD` receiver；�
 
 `FIELD_ASSIGN` 模式默认匹配 `PUTFIELD` / `PUTSTATIC`。字段目标格式支持 `owner.field:desc`、`field:desc` 与 `field`。实例字段写入 handler 先接收字段 owner，再接收待写入值；静态字段写入 handler 接收待写入值；后续参数同样可按目标方法声明顺序接收目标方法参数前缀。省略 `At.target` 时，框架会按 handler 字段 owner 参数、待写入值和 boolean 返回类型筛选兼容的字段写入，不兼容字段写入不计入 `ordinal` 或命中数。
 
+显式 `FIELD` / `FIELD_ASSIGN` 字段目标可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入兼容候选推断。
+
 字段写入、数组元素读取、数组元素写入和数组长度读取同样可用 `slice.from` / `slice.to` 把候选访问限制在一段 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界之间，边界本身不参与候选匹配，`ordinal` 会在切片内重新计数。
 
 数组元素读取使用 `FIELD + at.args = ["array=get"]`，`At.target` 指向产生数组引用的数组字段。
@@ -728,6 +734,8 @@ handler 先接收已经读取出的元素值，不接收数组引用或索引，
 `@ModifyExpressionValue` handler 的第一个参数必须接收匹配表达式的原始值；对象或数组表达式可用原值类型的父类、接口、`Any` 或 `Object`
 接收。primitive 表达式的返回类型必须与表达式类型一致；引用类型表达式可返回表达式类型的子类型，也可用 `Any` / `Object` 作为泛型引用返回类型，框架会在 handler 调用后转换回表达式类型；`THROW` 模式可返回 `Throwable` 或具体异常子类。handler 后续参数可按目标方法声明顺序接收目标方法参数前缀。
 该注解不会替换原调用、字段读取、字段写入、数组读取、数组写入、数组长度、构造器调用、类型转换、类型判断、局部变量读取、局部变量写入、条件跳转、switch、常量加载或抛异常指令，也不会接收原调用参数；`INVOKE` / `INVOKE_ASSIGN` 可省略 `at.target`，框架会按 handler 首参与返回类型筛选兼容的非 `void` 调用返回；`invokedynamic` 调用可通过 bootstrap owner、动态调用名或 bootstrap 名，以及动态调用点描述符匹配，例如 `java/lang/invoke/StringConcatFactory.makeConcatWithConstants(Ljava/lang/String;)Ljava/lang/String;`。`at.args` 可声明唯一的 `ldc=<string>` 或 `string=<string>`，只匹配调用参数直接来自该 `LDC String` 的 `INVOKE` / `INVOKE_ASSIGN` 候选；receiver、局部变量、拼接字符串、方法返回值和 bootstrap 常量来源不会命中，过滤后再计算 `ordinal` 与命中数。字段读取模式不会把 `GETFIELD` 的 receiver 传给 handler；若需要改写 receiver 应使用 `@ModifyReceiver`。省略字段目标时，框架会按 handler 首参与返回类型筛选兼容的 `GETFIELD` / `GETSTATIC` 字段读取值。字段写入模式通过 `FIELD_ASSIGN` 指定，handler 接收 `PUTFIELD` / `PUTSTATIC` 消费前的待写入值，返回的新值交给原字段写入继续执行；省略字段目标时按 handler 首参与返回类型筛选兼容的字段写入候选。数组元素读取使用 `at.args = ["array=get"]`，handler 接收已经读取出的元素值，不接收数组引用或索引。数组元素写入值使用 `FIELD_ASSIGN + at.args = ["array=set"]`，`At.target` 指向产生数组引用的数组字段，handler 接收 `xASTORE` 消费前的待写入元素值，不接收数组引用或索引，返回的新值交给原数组写入继续执行。字段数组长度使用 `FIELD + at.args = ["array=length"]`，handler 接收 `Int` 长度值，不接收数组引用。非字段来源的数组长度可使用 `At(value = InjectionPoint.ARRAY_LENGTH)` 直接匹配任意裸 `ARRAYLENGTH` 指令，handler 同样接收 `Int` 长度值，且不使用 `At.target`。`NEW` 模式会在匹配构造器调用完成后接收已初始化对象；省略 `at.target` 时按 handler 首参与返回类型筛选兼容 `NEW`。`CAST` 模式会在匹配 `CHECKCAST` 完成后接收转换后的对象；省略 `at.target` 时按 handler 首参与返回类型筛选兼容 `CHECKCAST`。`CONSTANT` 模式会在常量加载后接收常量表达式值，`At.target` 为常量文本；省略 `at.target` 时按 handler 首参与返回类型筛选兼容常量。`LOAD` 模式不使用 `At.target`，可用 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤；handler 接收 `xLOAD` 读取出的栈顶表达式值，返回值只替换这一次读取结果，不写回原槽位。`STORE` 模式不使用 `At.target`，可用同样的槽位或名称过滤；handler 接收 `xSTORE` 消费前的待写入栈顶值，返回值交给原 `xSTORE` 继续写入槽位。名称过滤依赖目标 class 保留调试变量表，缺失时不会命中，应改用槽位或 `ordinal`。不兼容的调用返回、字段读取、字段写入、数组写入、`NEW`、`CHECKCAST`、`LOAD`、`STORE` 或常量候选不计入 `ordinal` 或命中数。`INSTANCEOF` 模式会在匹配类型判断后接收 `Boolean` 结果，`At.target` 为类型 internal name 或 binary name。`JUMP` 模式会把匹配条件跳转的原始分支结果作为 `Boolean` 传给 handler，并按 handler 返回的 `Boolean` 决定是否跳到原标签；`At.target` 可写条件跳转操作码名或数字，`GOTO` 与 `JSR` 不支持表达式改写。`SWITCH` 模式不支持 `At.target`，会在 `tableswitch` 或 `lookupswitch` 消费 selector 前接收原始 `Int` selector，并把 handler 返回的 `Int` 交给原 switch 指令继续分派。`THROW` 模式会在 `ATHROW` 前接收即将抛出的 `Throwable`，也能继续追加目标方法参数；指定 `At.target` 时只匹配 `ATHROW` 前一条真实指令为同类型 `<init>` 的直接构造异常，不追踪局部变量或方法返回值来源。省略 `method` 时，handler 名称必须与目标方法名一致，并且只能匹配到一个包含兼容表达式候选的同名目标方法；存在多个兼容重载时需要显式写出目标方法签名。`INVOKE` / `INVOKE_ASSIGN` 调用返回、字段读取、字段写入值、数组元素读取、数组元素写入值、字段数组长度、裸 `ARRAYLENGTH`、`NEW`、`CAST`、`INSTANCEOF`、`LOAD`、`STORE`、`JUMP`、`SWITCH`、`CONSTANT` 与 `THROW` 表达式可用 `slice.from` / `slice.to` 限制在一段 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界之间，边界本身不参与候选匹配，`THROW` 只会改写边界内的 `ATHROW` 候选，`ordinal` 会在切片内重新计数。若需要替换调用本身应使用 `@Redirect`，若需要改写调用参数应使用 `@ModifyArg` 或 `@ModifyArgs`；若需要替换实例方法调用或实例字段访问 receiver，应使用 `@ModifyReceiver`。
+
+显式 `FIELD` / `FIELD_ASSIGN` 字段目标可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入兼容候选推断。
 
 `@ModifyExpressionValue` 会按实际改写的表达式值数量计数。未设置 `ordinal` 时命中全部匹配表达式；
 设置 `ordinal` 时最多命中对应序号的 1 个表达式。显式设置 `require` / `allow` / 非默认 `expect` 时按实际表达式值修改数量校验契约，
@@ -828,6 +836,7 @@ handler 先接收已经读取出的元素值，不接收数组引用或索引，
 会替换匹配的 `PUTFIELD` / `PUTSTATIC` 指令。数组元素访问与字段来源数组长度重定向使用 `at.value = InjectionPoint.FIELD` 匹配产生数组引用的字段，
 并通过 `at.args = ["array=get"]` 或 `at.args = ["array=length"]` 区分数组读取与长度读取；数组元素写入使用
 `at.value = InjectionPoint.FIELD_ASSIGN` 与 `at.args = ["array=set"]`。
+显式 `FIELD` / `FIELD_ASSIGN` 字段目标可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入兼容候选推断。
 非字段来源的裸 `ARRAYLENGTH` 使用 `at.value = InjectionPoint.ARRAY_LENGTH`，不使用 `At.target` 或 `At.args`；字段来源数组长度继续使用 `FIELD + at.args = ["array=length"]`。
 handler 首参按 `Any` / `Object` 接收被 `ARRAYLENGTH` 消费的数组引用，并返回替代长度 `Int`。
 局部变量读取重定向使用 `at.value = InjectionPoint.LOAD` 匹配 `xLOAD` 读取表达式，不使用 `target` 或 `At.target`；可通过 `at.args = ["index=N"]`、`["var=N"]` 或 `["name=localName"]` 按 JVM 局部变量槽位或 LocalVariableTable 变量名过滤。handler 接收原读取值并返回替换值，返回值只替换这一次读取结果，不写回局部变量槽位。

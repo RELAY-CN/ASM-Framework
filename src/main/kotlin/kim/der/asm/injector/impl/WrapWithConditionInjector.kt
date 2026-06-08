@@ -410,8 +410,8 @@ class WrapWithConditionInjector(
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapWithCondition FIELD requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapWithCondition(FIELD) target: field name must not be empty")
         }
 
         var injectionCount = 0
@@ -475,8 +475,8 @@ class WrapWithConditionInjector(
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapWithCondition FIELD_ASSIGN requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapWithCondition(FIELD_ASSIGN) target: field name must not be empty")
         }
 
         var injectionCount = 0
@@ -540,8 +540,8 @@ class WrapWithConditionInjector(
      */
     private fun injectArrayRead(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapWithCondition array read requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapWithCondition array read target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@WrapWithCondition array read target must be an array field: ${at.target}")
@@ -587,8 +587,8 @@ class WrapWithConditionInjector(
      */
     private fun injectArrayLength(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapWithCondition array length requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapWithCondition array length target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@WrapWithCondition array length target must be an array field: ${at.target}")
@@ -682,8 +682,8 @@ class WrapWithConditionInjector(
      */
     private fun injectArrayAssign(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapWithCondition array write requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapWithCondition array write target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@WrapWithCondition array write target must be an array field: ${at.target}")

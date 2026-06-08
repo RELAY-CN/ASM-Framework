@@ -358,8 +358,8 @@ class WrapOperationInjector(
     private fun injectFieldRead(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapOperation FIELD requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapOperation(FIELD) target: field name must not be empty")
         }
 
         var injectionCount = 0
@@ -423,8 +423,8 @@ class WrapOperationInjector(
     private fun injectFieldAssign(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val fieldTarget = parseFieldTarget(at.target)
-        if (!inferTarget && fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapOperation FIELD_ASSIGN requires at.target field signature")
+        if (!inferTarget && fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapOperation(FIELD_ASSIGN) target: field name must not be empty")
         }
 
         var injectionCount = 0
@@ -491,8 +491,8 @@ class WrapOperationInjector(
         mode: ArrayAccessMode,
     ): Int {
         val fieldTarget = parseFieldTarget(at.target)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("@WrapOperation array access requires at.target array field signature")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @WrapOperation array access target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("@WrapOperation array access target must be an array field: ${at.target}")

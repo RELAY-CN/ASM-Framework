@@ -527,8 +527,8 @@ class RedirectInjector(
         mode: ArrayAccessMode,
     ): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("Invalid target array field signature: $redirectTarget")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @Redirect array access target: field name must not be empty")
         }
         if (fieldTarget.desc != null && Type.getType(fieldTarget.desc).sort != Type.ARRAY) {
             throw IllegalArgumentException("Redirect array access target must be an array field: $redirectTarget")
@@ -1019,8 +1019,8 @@ class RedirectInjector(
      */
     private fun injectFieldReadCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("Invalid target field signature: $redirectTarget")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @Redirect(FIELD) target: field name must not be empty")
         }
 
         val instructions = target.instructions
@@ -1060,8 +1060,8 @@ class RedirectInjector(
      */
     private fun injectFieldAssignCount(target: MethodNode): Int {
         val fieldTarget = parseFieldTarget(redirectTarget)
-        if (fieldTarget.name == null) {
-            throw IllegalArgumentException("Invalid target field signature: $redirectTarget")
+        if (fieldTarget.name.isNullOrEmpty()) {
+            throw IllegalArgumentException("Invalid @Redirect(FIELD_ASSIGN) target: field name must not be empty")
         }
 
         val instructions = target.instructions

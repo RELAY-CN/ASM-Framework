@@ -761,19 +761,58 @@ class FrameworkReliabilityTest {
     fun documentationContractsKeepSelectorTargetFormatsAligned() {
         // Given
         val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val migration = Files.readString(Path.of("REDIRECTION_MIGRATION.md"))
         val asmMixinKDoc =
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val explicitFieldTargetRequirement = "字段名必填"
         val apiTargetFormatSection =
             requiredSection(
                 api,
                 "**`target` 格式：**",
                 "**示例：**",
             )
+        val apiModifyReceiverSection =
+            requiredSection(
+                api,
+                "### @ModifyReceiver",
+                "### @WrapOperation",
+            )
+        val apiWrapOperationSection =
+            requiredSection(
+                api,
+                "### @WrapOperation",
+                "### @WrapMethod",
+            )
+        val apiWrapWithConditionSection =
+            requiredSection(
+                api,
+                "### @WrapWithCondition",
+                "### @ModifyExpressionValue",
+            )
+        val apiModifyExpressionValueSection =
+            requiredSection(
+                api,
+                "### @ModifyExpressionValue",
+                "### @ModifyVariable",
+            )
+        val apiRedirectSection =
+            requiredSection(
+                api,
+                "### @Redirect",
+                "### @RedirectAllMethods",
+            )
         val apiSliceSection =
             requiredSection(
                 api,
                 "### Slice",
                 "### 路径匹配器",
+            )
+        val modifyReceiverKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 修改调用 receiver 注解。",
+                "annotation class ModifyReceiver",
             )
         val redirectKDocSection =
             requiredSection(
@@ -786,6 +825,30 @@ class FrameworkReliabilityTest {
                 asmMixinKDoc,
                 "* 包裹原始操作注解。",
                 "annotation class WrapOperation",
+            )
+        val wrapWithConditionKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 条件包裹注解。",
+                "annotation class WrapWithCondition",
+            )
+        val modifyExpressionValueKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 修改表达式值注解。",
+                "annotation class ModifyExpressionValue",
+            )
+        val guideFieldSelectorSection =
+            requiredSection(
+                guide,
+                "`@WrapWithCondition` 可用于按条件跳过普通调用",
+                "对象构造模式使用",
+            )
+        val migrationFieldSelectorSection =
+            requiredSection(
+                migration,
+                "字段读取这类“原逻辑仍然执行",
+                "数组元素读取和字段来源数组长度读取",
             )
 
         // Then
@@ -800,9 +863,27 @@ class FrameworkReliabilityTest {
         assertThat(apiTargetFormatSection)
             .`as`("Then: API target 格式总表应明确 FIELD 与 FIELD_ASSIGN 共享字段 selector 格式")
             .contains(
-                "- `FIELD`: `owner.field:desc`、`field:desc` 或 `field`",
+                "- `FIELD`: `owner.field:desc`、`field:desc` 或 `field`，字段名必填",
                 "- `FIELD_ASSIGN`: 与 `FIELD` 相同",
             )
+        listOf(
+            "@ModifyReceiver API" to apiModifyReceiverSection,
+            "@WrapOperation API" to apiWrapOperationSection,
+            "@WrapWithCondition API" to apiWrapWithConditionSection,
+            "@ModifyExpressionValue API" to apiModifyExpressionValueSection,
+            "@Redirect API" to apiRedirectSection,
+            "@ModifyReceiver KDoc" to modifyReceiverKDocSection,
+            "@WrapOperation KDoc" to wrapOperationKDocSection,
+            "@WrapWithCondition KDoc" to wrapWithConditionKDocSection,
+            "@ModifyExpressionValue KDoc" to modifyExpressionValueKDocSection,
+            "@Redirect KDoc" to redirectKDocSection,
+            "GUIDE" to guideFieldSelectorSection,
+            "REDIRECTION_MIGRATION" to migrationFieldSelectorSection,
+        ).forEach { (context, section) ->
+            assertThat(section)
+                .`as`("Then: $context 应说明显式字段 selector 不能省略字段名，只能通过空 target 进入推断")
+                .contains(explicitFieldTargetRequirement, "省略整个")
+        }
         assertThat(apiSliceSection)
             .`as`("Then: Slice 文档应钉住字段边界不能只写 descriptor，避免 descriptor-only 宽匹配")
             .contains(
@@ -13271,6 +13352,172 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("字段 selector 只写 descriptor 时各字段注入器应快速失败")
+    fun fieldSelectorRejectsDescriptorOnlyTargetAcrossFieldInjectors() {
+        // Given
+        data class FieldSelectorCase(
+            val context: String,
+            val mixin: Class<*>,
+            val expectedMessage: String,
+        )
+
+        val cases =
+            listOf(
+                FieldSelectorCase(
+                    "@Redirect(FIELD)",
+                    RedirectFieldReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @Redirect(FIELD) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@Redirect(FIELD_ASSIGN)",
+                    RedirectFieldAssignDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @Redirect(FIELD_ASSIGN) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@WrapOperation(FIELD)",
+                    WrapOperationFieldReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapOperation(FIELD) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@WrapOperation(FIELD_ASSIGN)",
+                    WrapOperationFieldAssignDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapOperation(FIELD_ASSIGN) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@WrapWithCondition(FIELD)",
+                    WrapConditionFieldReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapWithCondition(FIELD) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@WrapWithCondition(FIELD_ASSIGN)",
+                    WrapConditionFieldAssignDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapWithCondition(FIELD_ASSIGN) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@ModifyExpressionValue(FIELD)",
+                    ModifyExpressionValueFieldReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyExpressionValue(FIELD) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@ModifyExpressionValue(FIELD_ASSIGN)",
+                    ModifyExpressionValueFieldAssignDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyExpressionValue(FIELD_ASSIGN) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@ModifyReceiver(FIELD)",
+                    ModifyReceiverFieldReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyReceiver(FIELD) target: field name must not be empty",
+                ),
+                FieldSelectorCase(
+                    "@ModifyReceiver(FIELD_ASSIGN)",
+                    ModifyReceiverFieldAssignDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyReceiver(FIELD_ASSIGN) target: field name must not be empty",
+                ),
+            )
+
+        cases.forEach { case ->
+            AsmRegistry.clear()
+            AsmRegistry.register(case.mixin)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: ${case.context} 显式 target 不能只靠 descriptor 宽匹配字段")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(case.expectedMessage)
+        }
+    }
+
+    @Test
+    @DisplayName("数组字段 selector 只写 descriptor 时各字段来源数组注入器应快速失败")
+    fun arrayFieldSelectorRejectsDescriptorOnlyTargetAcrossArrayFieldInjectors() {
+        // Given
+        data class ArrayFieldSelectorCase(
+            val context: String,
+            val mixin: Class<*>,
+            val expectedMessage: String,
+        )
+
+        val cases =
+            listOf(
+                ArrayFieldSelectorCase(
+                    "@Redirect(FIELD + array=get)",
+                    RedirectArrayReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @Redirect array access target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@Redirect(FIELD_ASSIGN + array=set)",
+                    RedirectArrayWriteDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @Redirect array access target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@Redirect(FIELD + array=length)",
+                    RedirectArrayLengthDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @Redirect array access target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@WrapOperation(FIELD + array=get)",
+                    WrapOperationArrayReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapOperation array access target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@WrapOperation(FIELD + array=length)",
+                    WrapOperationArrayLengthDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapOperation array access target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@WrapOperation(FIELD_ASSIGN + array=set)",
+                    WrapOperationArrayWriteDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapOperation array access target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@WrapWithCondition(FIELD + array=get)",
+                    WrapConditionArrayReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapWithCondition array read target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@WrapWithCondition(FIELD + array=length)",
+                    WrapConditionArrayLengthDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapWithCondition array length target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@WrapWithCondition(FIELD_ASSIGN + array=set)",
+                    WrapConditionArrayWriteDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @WrapWithCondition array write target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@ModifyExpressionValue(FIELD + array=get)",
+                    ModifyExpressionValueArrayReadDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyExpressionValue array read target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@ModifyExpressionValue(FIELD + array=length)",
+                    ModifyExpressionValueArrayLengthDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyExpressionValue array length target: field name must not be empty",
+                ),
+                ArrayFieldSelectorCase(
+                    "@ModifyExpressionValue(FIELD_ASSIGN + array=set)",
+                    ModifyExpressionValueArrayWriteDescriptorOnlyTargetMixin::class.java,
+                    "Invalid @ModifyExpressionValue array write target: field name must not be empty",
+                ),
+            )
+
+        cases.forEach { case ->
+            AsmRegistry.clear()
+            AsmRegistry.register(case.mixin)
+
+            // When / Then
+            assertThatThrownBy {
+                AsmProcessor().transform("ArrayAccessTarget", arrayAccessTargetBytes(), javaClass.classLoader)
+            }
+                .`as`("Then: ${case.context} 显式数组字段 target 不能只靠 descriptor 宽匹配字段")
+                .isInstanceOf(AsmTransformException::class.java)
+                .hasRootCauseMessage(case.expectedMessage)
+        }
+    }
+
+    @Test
     fun newInjectInsertsHandlerBeforeMatchedNewInstruction() {
         AsmRegistry.register(NewInstructionInjectMixin::class.java)
 
@@ -16245,6 +16492,17 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldReadDescriptorOnlyTargetMixin {
+        @WrapWithCondition(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean = value.isNotEmpty()
+    }
+
+    @AsmMixin("FieldPointTarget")
     object WrapConditionFieldReadAllowMixin {
         @WrapWithCondition(
             method = "readName()Ljava/lang/String;",
@@ -16328,6 +16586,23 @@ class FrameworkReliabilityTest {
         ): Boolean {
             target.hashCode()
             return value == "allowed"
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapConditionFieldAssignDescriptorOnlyTargetMixin {
+        @WrapWithCondition(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            target: Any,
+            value: String,
+        ): Boolean {
+            target.hashCode()
+            return value.isNotEmpty()
         }
     }
 
@@ -16429,6 +16704,25 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayWriteDescriptorOnlyTargetMixin {
+        @WrapWithCondition(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = ":[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldWrite(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ): Boolean = array[index].isNotEmpty() || value.isNotEmpty()
+    }
+
+    @AsmMixin("ArrayAccessTarget")
     object WrapConditionArrayWriteAllowMixin {
         @WrapWithCondition(
             method = "writeName(ILjava/lang/String;)V",
@@ -16486,6 +16780,21 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayReadDescriptorOnlyTargetMixin {
+        @WrapWithCondition(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldRead(value: String): Boolean = value.isNotEmpty()
+    }
+
+    @AsmMixin("ArrayAccessTarget")
     object WrapConditionArrayReadAllowMixin {
         @WrapWithCondition(
             method = "readName(I)Ljava/lang/String;",
@@ -16531,6 +16840,21 @@ class FrameworkReliabilityTest {
             length.toString()
             return false
         }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapConditionArrayLengthDescriptorOnlyTargetMixin {
+        @WrapWithCondition(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun shouldRead(length: Int): Boolean = length > 0
     }
 
     @AsmMixin("ArrayParamTarget")
@@ -17538,6 +17862,17 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "$original-field"
     }
 
+    @AsmMixin("FieldPointTarget")
+    object ModifyExpressionValueFieldReadDescriptorOnlyTargetMixin {
+        @ModifyExpressionValue(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-field"
+    }
+
     @AsmMixin("MixedFieldExpressionValueTarget")
     object ModifyExpressionValueInferredFieldReadMixin {
         @ModifyExpressionValue(
@@ -17577,6 +17912,17 @@ class FrameworkReliabilityTest {
             at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
             require = 1,
             allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = "$original-assigned"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyExpressionValueFieldAssignDescriptorOnlyTargetMixin {
+        @ModifyExpressionValue(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            require = 1,
         )
         @JvmStatic
         fun modify(original: String): String = "$original-assigned"
@@ -17655,6 +18001,21 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String = "$original-array"
     }
 
+    @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayReadDescriptorOnlyTargetMixin {
+        @ModifyExpressionValue(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
     @AsmMixin("PrimitiveArrayAccessTarget")
     object ModifyExpressionValuePrimitiveArrayReadMixin {
         @ModifyExpressionValue(
@@ -17704,6 +18065,21 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Int): Int = original + 3
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayLengthDescriptorOnlyTargetMixin {
+        @ModifyExpressionValue(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: Int): Int = original
     }
 
     @AsmMixin("LocalArrayLengthTarget")
@@ -18041,6 +18417,21 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "$original-array-write"
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object ModifyExpressionValueArrayWriteDescriptorOnlyTargetMixin {
+        @ModifyExpressionValue(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = ":[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
     }
 
     @AsmMixin("PrimitiveArrayAccessTarget")
@@ -19576,6 +19967,17 @@ class FrameworkReliabilityTest {
         fun modify(original: Any): Any = replacement ?: original
     }
 
+    @AsmMixin("FieldPointTarget")
+    object ModifyReceiverFieldReadDescriptorOnlyTargetMixin {
+        @ModifyReceiver(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
+    }
+
     @AsmMixin("Test")
     object ModifyReceiverInferredTestFieldReadMixin {
         var replacement: Any? = null
@@ -19646,6 +20048,17 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object ModifyReceiverFieldAssignDescriptorOnlyTargetMixin {
+        @ModifyReceiver(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: Any): Any = original
     }
 
     @AsmMixin("Test")
@@ -20616,6 +21029,20 @@ class FrameworkReliabilityTest {
         ): String = "wrapped-desc-${operation.call(target)}"
     }
 
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldReadDescriptorOnlyTargetMixin {
+        @WrapOperation(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String = operation.call(target)
+    }
+
     @AsmMixin("MixedFieldExpressionValueTarget")
     object WrapOperationInferredFieldReadMixin {
         @WrapOperation(
@@ -20727,6 +21154,23 @@ class FrameworkReliabilityTest {
             operation: Operation<Unit>,
         ) {
             operation.call(target, "wrapped-desc-$value")
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldAssignDescriptorOnlyTargetMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(target, value)
         }
     }
 
@@ -20872,6 +21316,25 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayReadDescriptorOnlyTargetMixin {
+        @WrapOperation(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            operation: Operation<String>,
+        ): String = operation.call(array, index)
+    }
+
+    @AsmMixin("ArrayAccessTarget")
     object WrapOperationArrayReadObjectReturnMixin {
         @WrapOperation(
             method = "readName(I)Ljava/lang/String;",
@@ -20922,6 +21385,24 @@ class FrameworkReliabilityTest {
             array: Array<String>,
             operation: Operation<Int>,
         ): Int = operation.call(array) + 5
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayLengthDescriptorOnlyTargetMixin {
+        @WrapOperation(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            operation: Operation<Int>,
+        ): Int = operation.call(array)
     }
 
     @AsmMixin("ArrayAccessTarget")
@@ -20977,6 +21458,28 @@ class FrameworkReliabilityTest {
             operation: Operation<Unit>,
         ) {
             operation.call(array, index, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object WrapOperationArrayWriteDescriptorOnlyTargetMixin {
+        @WrapOperation(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = ":[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            array: Array<String>,
+            index: Int,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(array, index, value)
         }
     }
 
@@ -23213,6 +23716,20 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("FieldPointTarget")
+    object RedirectFieldReadDescriptorOnlyTargetMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(target: Any): String {
+            target.hashCode()
+            return "redirect-field"
+        }
+    }
+
     @AsmMixin("StaticFieldPointTarget")
     object StaticFieldReadRedirectMixin {
         @Redirect(
@@ -23277,6 +23794,23 @@ class FrameworkReliabilityTest {
         ) {
             target.hashCode()
             lastValue = value
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object RedirectFieldAssignDescriptorOnlyTargetMixin {
+        @Redirect(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = ":Ljava/lang/String;"),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            value.length
         }
     }
 
@@ -23408,6 +23942,24 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("ArrayAccessTarget")
+    object RedirectArrayReadDescriptorOnlyTargetMixin {
+        @Redirect(
+            method = "readName(I)Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=get"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+        ): String = array[index]
+    }
+
+    @AsmMixin("ArrayAccessTarget")
     object ArrayReadObjectReturnRedirectMixin {
         @Redirect(
             method = "readName(I)Ljava/lang/String;",
@@ -23458,6 +24010,27 @@ class FrameworkReliabilityTest {
             value: String,
         ) {
             array[index] = "written-$value"
+        }
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object RedirectArrayWriteDescriptorOnlyTargetMixin {
+        @Redirect(
+            method = "writeName(ILjava/lang/String;)V",
+            at = At(
+                value = InjectionPoint.FIELD_ASSIGN,
+                target = ":[Ljava/lang/String;",
+                args = ["array=set"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            array: Array<String>,
+            index: Int,
+            value: String,
+        ) {
+            array[index] = value
         }
     }
 
@@ -23554,6 +24127,21 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(array: Array<String>): Int = array.size + 5
+    }
+
+    @AsmMixin("ArrayAccessTarget")
+    object RedirectArrayLengthDescriptorOnlyTargetMixin {
+        @Redirect(
+            method = "nameCount()I",
+            at = At(
+                value = InjectionPoint.FIELD,
+                target = ":[Ljava/lang/String;",
+                args = ["array=length"],
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun redirect(array: Array<String>): Int = array.size
     }
 
     @AsmMixin("ArrayAccessTarget")

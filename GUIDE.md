@@ -452,6 +452,7 @@ object ValidationMixin {
     fun rewriteNameWriteReceiver(player: Any, name: String, source: String): Any =
         selectWritablePlayer(player, name, source)
 
+    // FIELD / FIELD_ASSIGN 的显式 target 可写 owner.field:desc、field:desc 或 field，字段名必填。
     @WrapOperation(
         at = At(
             value = InjectionPoint.INVOKE,
@@ -1487,6 +1488,7 @@ object ConditionalMixin {
 读取出的字段值，不接收 receiver，返回 `false` 时用字段类型默认值替换本次读取结果，不兼容字段读取不会参与 `ordinal` 或命中数。字段写入模式使用
 `At(value = InjectionPoint.FIELD_ASSIGN, target = "...")` 精确匹配字段，也可省略字段目标按 handler 签名筛选兼容写入；`PUTFIELD` handler 参数为字段 owner 与待写入值，
 `PUTSTATIC` handler 参数只包含待写入值，后续仍可追加目标方法参数前缀。数组元素读取使用
+显式字段 selector 可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入按 handler 签名筛选的字段候选推断。
 `At(value = InjectionPoint.FIELD, target = "...", args = ["array=get"])`，handler 参数为已经读取出的元素值，
 不接收数组引用或索引，返回 `false` 时用元素类型默认值替换本次读取结果。数组长度读取使用
 `At(value = InjectionPoint.FIELD, target = "...", args = ["array=length"])`，handler 参数为 `Int` 长度值，

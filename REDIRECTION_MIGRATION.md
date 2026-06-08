@@ -92,6 +92,7 @@
 字段读取这类“原逻辑仍然执行，但某些情况下不要使用原字段值”的监听/替换意图，优先迁移为
 `@WrapWithCondition(at = At(value = InjectionPoint.FIELD, target = "..."))`。handler 首参接收已经读取出的字段值，
 返回 `true` 时保留该值，返回 `false` 时框架压入字段类型默认值；该模式不把 `GETFIELD` receiver 传给 handler。
+显式字段 selector 可写 `owner.field:desc`、`field:desc` 或 `field`，字段名必填；只有省略整个 `At.target` 才进入按 handler 签名筛选的字段候选推断。
 数组元素读取和字段来源数组长度读取可分别使用 `FIELD + args = ["array=get"]` 与 `FIELD + args = ["array=length"]`；
 handler 只接收已经读取出的元素值或 `Int` 长度，不接收数组引用或索引。若旧逻辑不限定数组来自字段读取，
 可使用 `At(value = InjectionPoint.ARRAY_LENGTH)` 直接匹配裸 `ARRAYLENGTH`，不使用 `At.target` 或 `At.args`；
