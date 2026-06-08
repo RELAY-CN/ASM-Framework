@@ -3114,6 +3114,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("ModifyArg INVOKE 应接受 name(desc) ownerless selector")
+    fun modifyArgInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(ModifyArgNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("InvokeModifyArgTarget", invokeModifyArgTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("InvokeModifyArgTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中 concat 调用参数")
+            .isEqualTo("prefix-ownerless")
+    }
+
+    @Test
     fun modifyArgAtInvokeInfersCallTargetByHandlerSignature() {
         AsmRegistry.register(InferredInvokeModifyArgMixin::class.java)
 
@@ -3431,6 +3449,24 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("value").invoke(instance)
 
         assertEquals("hello changed", result)
+    }
+
+    @Test
+    @DisplayName("ModifyArgs INVOKE 应接受 name(desc) ownerless selector")
+    fun modifyArgsInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(ModifyArgsNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("ModifyArgsTarget", modifyArgsTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("ModifyArgsTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("value").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中 replace 调用参数组")
+            .isEqualTo("hello ownerless")
     }
 
     @Test
@@ -13668,6 +13704,20 @@ class FrameworkReliabilityTest {
                     "@ModifyExpressionValue requires at.target method signature",
                 ),
                 InvokeSelectorCase(
+                    "@ModifyArg(INVOKE)",
+                    ModifyArgMissingDescriptorTargetMixin::class.java,
+                    "InvokeModifyArgTarget",
+                    invokeModifyArgTargetBytes(),
+                    "@ModifyArg INVOKE requires at.target method signature",
+                ),
+                InvokeSelectorCase(
+                    "@ModifyArgs(INVOKE)",
+                    ModifyArgsMissingDescriptorTargetMixin::class.java,
+                    "ModifyArgsTarget",
+                    modifyArgsTargetBytes(),
+                    "@ModifyArgs INVOKE requires at.target method signature",
+                ),
+                InvokeSelectorCase(
                     "@ModifyReceiver(INVOKE)",
                     ModifyReceiverMissingDescriptorTargetMixin::class.java,
                     "ModifyReceiverTarget",
@@ -15218,6 +15268,40 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("InvokeModifyArgTarget")
+    object ModifyArgNameDescriptorTargetMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "concat(Ljava/lang/String;)Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            original.length
+            return "ownerless"
+        }
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
+    object ModifyArgMissingDescriptorTargetMixin {
+        @ModifyArg(
+            method = "value()Ljava/lang/String;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.concat",
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String = original
+    }
+
+    @AsmMixin("InvokeModifyArgTarget")
     object InferredInvokeModifyArgMixin {
         @ModifyArg(
             method = "value()Ljava/lang/String;",
@@ -15548,6 +15632,40 @@ class FrameworkReliabilityTest {
         fun modify(args: Args) {
             args.set(0, "raw")
             args.set(1, "changed")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsNameDescriptorTargetMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "replace(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.set(0, "raw")
+            args.set(1, "ownerless")
+        }
+    }
+
+    @AsmMixin("ModifyArgsTarget")
+    object ModifyArgsMissingDescriptorTargetMixin {
+        @ModifyArgs(
+            method = "value()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.replace",
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            args.get<CharSequence>(0)
         }
     }
 

@@ -103,7 +103,7 @@ class ModifyArgInjector(
     private fun modifyCallArgumentCount(target: MethodNode): Int {
         val inferTarget = at.target.isEmpty()
         val (targetOwner, targetName, targetDesc) = parseTargetMethod(at.target)
-        if (!inferTarget && targetName == null) {
+        if (!inferTarget && (targetName == null || targetDesc == null)) {
             throw IllegalArgumentException("@ModifyArg INVOKE requires at.target method signature")
         }
         val stringLiteral = DirectStringArgumentMatcher.parseOptionalFilter(at.args, "@ModifyArg(INVOKE)")
