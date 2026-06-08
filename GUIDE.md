@@ -1788,9 +1788,15 @@ try {
 - `"method(Ljava/lang/String;)V"` - String 参数，返回 void
 - `"method(Ljava/lang/String;I)Ljava/lang/String;"` - String 和 int 参数，返回 String
 
-### 6. 静态方法处理
+### 6. 静态目标与 handler 静态性
 
-覆盖或注入静态方法时必须使用 `@JvmStatic`：
+生成或覆盖静态目标成员、Accessor/Invoker 静态性匹配、构造器 Invoker 等需要静态入口的场景，
+handler 必须是 Java 静态方法或 Kotlin `@JvmStatic` 方法。普通 `@AsmInject`、`@Redirect`、`@WrapOperation`、
+`@WrapWithCondition`、`@ModifyArg`、`@ModifyArgs`、`@ModifyReceiver`、`@ModifyExpressionValue`、
+`@ModifyVariable`、`@ModifyReturnValue` 等 handler 也可以使用 Kotlin `object` 实例方法，框架会通过
+`INSTANCE` 调用。
+
+覆盖静态方法时可以这样声明：
 
 ```kotlin
 @Overwrite(method = "staticMethod()V")
@@ -1901,15 +1907,18 @@ A: 目前不支持，建议在注入方法中使用同步代码。
 - 确保字段类型与目标类匹配
 - 若 ASM 字段名与目标字段名不同，使用 `@Shadow("目标字段名")` 或 `shadow_` 前缀声明目标名
 
-### 静态方法注入失败
+### 静态目标处理失败
 
-添加 `@JvmStatic` 注解：
+如果是在 `@Overwrite`、静态 Accessor/Invoker 或构造器 Invoker 中生成静态入口，添加 `@JvmStatic`：
 
 ```kotlin
 @Overwrite(method = "staticMethod()V")
 @JvmStatic
 fun staticMethod() { }
 ```
+
+如果是普通注入、Redirect、Wrap 或 Modify handler，先检查 handler 参数、返回类型、`method` 与 `At` 目标；
+Kotlin `object` 实例方法本身是支持的，不要把所有 handler 都改成 `@JvmStatic`。
 
 ### 转换后的类无法加载
 

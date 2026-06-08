@@ -1975,6 +1975,56 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应把 @JvmStatic 要求限定在真实静态入口场景")
+    fun documentationContractsKeepJvmStaticGuidanceScopedToStaticEntryPoints() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val apiNotesSection =
+            api
+                .substringAfter("## 注意事项")
+                .substringBefore("## 示例项目")
+        val guideStaticSection =
+            guide
+                .substringAfter("### 6. 静态目标与 handler 静态性")
+                .substringBefore("### 7. Shadow 字段使用")
+        val guideTroubleshootingSection =
+            guide
+                .substringAfter("### 静态目标处理失败")
+                .substringBefore("### 转换后的类无法加载")
+
+        // Then
+        assertThat(apiNotesSection)
+            .`as`("Then: API 注意事项不应把所有 handler 泛化成必须 @JvmStatic")
+            .contains(
+                "静态性只在目标成员需要时强制",
+                "生成或覆盖静态目标成员、Accessor/Invoker 静态性匹配、构造器 Invoker",
+                "普通注入、Redirect、Wrap、Modify handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 实例方法",
+            )
+            .doesNotContain("覆盖或注入静态方法时必须使用")
+        assertThat(guideStaticSection)
+            .`as`("Then: GUIDE 静态性小节应区分静态入口和普通 object handler")
+            .contains(
+                "handler 必须是 Java 静态方法或 Kotlin `@JvmStatic` 方法",
+                "也可以使用 Kotlin `object` 实例方法",
+                "框架会通过",
+                "`INSTANCE` 调用",
+            )
+            .doesNotContain("覆盖或注入静态方法时必须使用")
+        assertThat(guide)
+            .`as`("Then: GUIDE 标题应避免继续暗示普通 handler 注入都必须静态")
+            .contains("### 6. 静态目标与 handler 静态性", "### 静态目标处理失败")
+            .doesNotContain("### 静态方法注入失败")
+        assertThat(guideTroubleshootingSection)
+            .`as`("Then: 故障排除应先区分场景，再建议是否添加 @JvmStatic")
+            .contains(
+                "`@Overwrite`、静态 Accessor/Invoker 或构造器 Invoker",
+                "Kotlin `object` 实例方法本身是支持的",
+                "不要把所有 handler 都改成 `@JvmStatic`",
+            )
+    }
+
+    @Test
     @DisplayName("公开文档应保持 Copy 访问标志契约一致")
     fun documentationContractsKeepCopyAccessFlagsAligned() {
         // Given

@@ -1677,7 +1677,7 @@ priority 相同时保持注册顺序。
 ## 注意事项
 
 1. **方法签名必须精确匹配**：包括参数类型和返回类型
-2. **静态方法需要 @JvmStatic**：覆盖或注入静态方法时必须使用
+2. **静态性只在目标成员需要时强制**：生成或覆盖静态目标成员、Accessor/Invoker 静态性匹配、构造器 Invoker 等需要静态入口的场景必须使用静态方法或 `@JvmStatic`；普通注入、Redirect、Wrap、Modify handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 实例方法
 3. **Shadow 字段必须是可空类型**：并初始化为 `null`
 4. **Shadow 成员必须在 class 中**：不能在 object 中声明
 5. **类型使用内部名称**：类名使用 `/` 分隔，如 `com/example/Class`
