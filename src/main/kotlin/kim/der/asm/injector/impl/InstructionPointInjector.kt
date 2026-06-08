@@ -437,6 +437,9 @@ class InstructionPointInjector(
             }
             InjectionPoint.FIELD -> {
                 val fieldTarget = parseFieldTarget(target)
+                if (target.isNotEmpty() && fieldTarget.name.isNullOrEmpty()) {
+                    throw IllegalArgumentException("Invalid @AsmInject(FIELD) target: field name must not be empty")
+                }
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is FieldInsnNode &&
                         insn.opcode in FIELD_READ_OPS &&
@@ -444,6 +447,9 @@ class InstructionPointInjector(
             }
             InjectionPoint.FIELD_ASSIGN -> {
                 val fieldTarget = parseFieldTarget(target)
+                if (target.isNotEmpty() && fieldTarget.name.isNullOrEmpty()) {
+                    throw IllegalArgumentException("Invalid @AsmInject(FIELD_ASSIGN) target: field name must not be empty")
+                }
                 fun(insn: AbstractInsnNode): Boolean =
                     insn is FieldInsnNode &&
                         insn.opcode in FIELD_WRITE_OPS &&

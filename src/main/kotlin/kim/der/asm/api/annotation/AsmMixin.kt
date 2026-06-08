@@ -1513,7 +1513,7 @@ annotation class ModifyConstant(
  * 当前实现会在字节码中查找匹配的调用指令、动态调用指令、构造器调用指令、字段访问指令、数组元素访问指令、数组长度指令或
  * 局部变量读写指令、类型转换/类型判断/条件跳转/switch/常量/抛异常指令，并用重定向处理器调用替换或改写原指令消费的值。
  *
- * [InjectionPoint.INVOKE] 可匹配普通方法调用、构造器调用或 `invokedynamic` 调用。
+ * [InjectionPoint.INVOKE] 可匹配普通方法调用、构造器调用或 `invokedynamic` 调用；方法调用目标 owner 可使用 JVM internal name 或 Java binary name。
  * `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * [At.target] 为空时会按 handler 栈参数、返回类型与可选目标方法参数前缀筛选兼容的普通方法调用、构造器调用或 `invokedynamic` 调用，
  * 不兼容候选不计入 [ordinal] 或命中数。

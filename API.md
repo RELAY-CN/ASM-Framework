@@ -1525,9 +1525,9 @@ handler 替换匹配方法调用或构造器创建表达式”，把 `FIELD` 解
 
 **`target` 格式：**
 
-- `INVOKE`: `owner.name(desc)` 或 `name(desc)`，例如 `java/lang/String.trim()Ljava/lang/String;`
+- `INVOKE`: `owner.name(desc)` 或 `name(desc)`，owner 可使用 JVM internal name 或 Java binary name，例如 `java/lang/String.trim()Ljava/lang/String;` 或 `java.lang.String.trim()Ljava/lang/String;`
 - `INVOKE_STRING`: `owner.name(desc)`，并通过唯一一个 `args = ["ldc=value"]` 或 `["string=value"]` 匹配调用实参中的直接字符串常量；只支持普通方法调用，owner 必填
-- `FIELD`: `owner.field:desc`、`field:desc` 或 `field`，例如 `com/example/Target.name:Ljava/lang/String;`
+- `FIELD`: `owner.field:desc`、`field:desc` 或 `field`，字段名必填，例如 `com/example/Target.name:Ljava/lang/String;`
 - `FIELD_ASSIGN`: 与 `FIELD` 相同，但只匹配 `PUTFIELD` / `PUTSTATIC`
 - `NEW`: 类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`
 - `CAST`: 类型 internal name 或 binary name，例如 `java/lang/String` 或 `java.lang.String`

@@ -238,7 +238,7 @@ enum class InjectionPoint {
  *
  * 注意：
  *
- * - INVOKE 目标要求包含方法、构造器或 `invokedynamic` 调用点描述符；owner 可省略，省略时只按方法名与描述符匹配。
+ * - INVOKE 目标要求包含方法、构造器或 `invokedynamic` 调用点描述符；owner 可使用 JVM internal name 或 Java binary name，也可省略，省略时只按方法名与描述符匹配。
  *   `invokedynamic` 目标会按 bootstrap owner、动态调用名或 bootstrap 方法名，以及动态调用点描述符匹配。
  * - INVOKE_STRING 目标要求包含 owner 的普通方法调用描述符 `owner.name(desc)`，并通过 [args] 中的 `ldc=<string>` 或 `string=<string>`
  *   指定直接字符串常量实参。它只观察调用点，不接收或替换该字符串，不匹配局部变量、拼接字符串、`invokedynamic` 或方法返回值。
@@ -246,7 +246,7 @@ enum class InjectionPoint {
  *   [ModifyExpressionValue] 的调用路径，也可通过 [args] 中唯一的 `ldc=<string>` 或 `string=<string>`
  *   只匹配调用参数直接来自该 `LDC String` 的调用点；该过滤会先于 `ordinal` 与命中数契约生效。
  * - `ldc=` / `string=` 前缀后的文本按业务字面量精确保留，前后空格也参与匹配。
- * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。
+ * - FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，字段名必填，owner 与 desc 均可省略。
  * - NEW 目标为类型 internal name 或 binary name，例如 `java/lang/StringBuilder` 或 `java.lang.StringBuilder`。
  * - NEW 支持 Slice 缩小候选范围，不支持 AFTER 与 by；REPLACE 仍按匹配前观察插入处理。AFTER 或 by 偏移可能在未初始化对象仍位于栈顶时插入调用，
  *   当前实现会拒绝该配置。

@@ -736,6 +736,7 @@ class FrameworkReliabilityTest {
         assertThat(apiAtTargetFormatSection)
             .`as`("Then: API 的 At target 格式总表应区分普通 JUMP 观察点与条件跳转表达式改写，并说明 ARRAY_LENGTH 不消费 args")
             .contains(
+                "`FIELD`: `owner.field:desc`、`field:desc` 或 `field`，字段名必填",
                 "普通 `@AsmInject(JUMP)` 省略时匹配所有跳转",
                 "`@Redirect(JUMP)`、`@ModifyExpressionValue(JUMP)`、`@WrapOperation(JUMP)` 与 `@WrapWithCondition(JUMP)` 省略时只匹配切片内全部条件跳转",
                 "`ARRAY_LENGTH`: 不使用 `target` 或 `args`",
@@ -752,6 +753,74 @@ class FrameworkReliabilityTest {
                 "`At(value = InjectionPoint.ARRAY_LENGTH)`",
                 "不使用 `At.target` 或 `At.args`",
                 "`FIELD + args = [\"array=length\"]`",
+            )
+    }
+
+    @Test
+    @DisplayName("公开 API 应保持 selector target 格式总表一致")
+    fun documentationContractsKeepSelectorTargetFormatsAligned() {
+        // Given
+        val api = Files.readString(Path.of("API.md"))
+        val asmMixinKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmMixin.kt"))
+        val apiTargetFormatSection =
+            requiredSection(
+                api,
+                "**`target` 格式：**",
+                "**示例：**",
+            )
+        val apiSliceSection =
+            requiredSection(
+                api,
+                "### Slice",
+                "### 路径匹配器",
+            )
+        val redirectKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 重定向方法调用、",
+                "annotation class Redirect",
+            )
+        val wrapOperationKDocSection =
+            requiredSection(
+                asmMixinKDoc,
+                "* 包裹原始操作注解。",
+                "annotation class WrapOperation",
+            )
+
+        // Then
+        assertThat(apiTargetFormatSection)
+            .`as`("Then: API target 格式总表应明确 INVOKE 可省略 owner，但 descriptor 仍是显式调用签名的一部分")
+            .contains(
+                "- `INVOKE`: `owner.name(desc)` 或 `name(desc)`",
+                "owner 可使用 JVM internal name 或 Java binary name",
+                "- `INVOKE_STRING`: `owner.name(desc)`",
+                "owner 必填",
+            )
+        assertThat(apiTargetFormatSection)
+            .`as`("Then: API target 格式总表应明确 FIELD 与 FIELD_ASSIGN 共享字段 selector 格式")
+            .contains(
+                "- `FIELD`: `owner.field:desc`、`field:desc` 或 `field`",
+                "- `FIELD_ASSIGN`: 与 `FIELD` 相同",
+            )
+        assertThat(apiSliceSection)
+            .`as`("Then: Slice 文档应钉住字段边界不能只写 descriptor，避免 descriptor-only 宽匹配")
+            .contains(
+                "声明 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界时必须提供非空 `At.target`",
+                "字段边界还必须包含字段名",
+            )
+        assertThat(redirectKDocSection)
+            .`as`("Then: Redirect KDoc 应同步方法和字段 selector 格式，保持公开注解说明与 API 表一致")
+            .contains(
+                "方法调用目标 owner 可使用 JVM internal name 或 Java binary name",
+                "`owner.field:desc`、`field:desc` 或 `field`",
+            )
+        assertThat(wrapOperationKDocSection)
+            .`as`("Then: WrapOperation KDoc 应说明 INVOKE 省略 target 是推断模式，而显式 FIELD/FIELD_ASSIGN 仍按字段 selector 过滤")
+            .contains(
+                "[InjectionPoint.INVOKE] 省略 [At.target]",
+                "[InjectionPoint.FIELD] 省略 [At.target]",
+                "[InjectionPoint.FIELD_ASSIGN] 省略 [At.target]",
             )
     }
 
@@ -6693,6 +6762,57 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("WrapOperation INVOKE 应接受 owner.name(desc) selector")
+    fun wrapOperationInvokeSelectorParsesOwnerNameDescriptorContract() {
+        // Given
+        AsmRegistry.register(WrapOperationOwnerNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: owner.name(desc) 应精确命中 String.trim 调用并包裹原始返回值")
+            .isEqualTo("wrap-owner-value")
+    }
+
+    @Test
+    @DisplayName("WrapOperation INVOKE 应接受 name(desc) ownerless selector")
+    fun wrapOperationInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(WrapOperationNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中唯一兼容 trim 调用")
+            .isEqualTo("wrap-ownerless-value")
+    }
+
+    @Test
+    @DisplayName("WrapOperation INVOKE 显式 selector 缺 descriptor 应快速失败")
+    fun wrapOperationInvokeSelectorRejectsMissingDescriptor() {
+        // Given
+        AsmRegistry.register(WrapOperationMissingDescriptorTargetMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 显式 WrapOperation INVOKE selector 缺 descriptor 时应暴露配置错误，而不是按名称宽匹配")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("@WrapOperation INVOKE requires at.target method signature")
+    }
+
+    @Test
     fun wrapOperationSupportsKotlinInvokeSyntax() {
         AsmRegistry.register(WrapOperationInvokeSyntaxMixin::class.java)
 
@@ -7688,6 +7808,25 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("WrapOperation FIELD 应接受 field:desc selector")
+    fun wrapOperationFieldSelectorAcceptsNameAndDescriptorTarget() {
+        // Given
+        AsmRegistry.register(WrapOperationFieldReadNameAndDescriptorMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: field:desc 应在不绑定 owner 的情况下精确命中字段读取")
+            .isEqualTo("wrapped-desc-raw")
+    }
+
+    @Test
     fun wrapOperationAtFieldInfersTargetByCompatibleOperationType() {
         AsmRegistry.register(WrapOperationInferredFieldReadMixin::class.java)
 
@@ -7795,6 +7934,25 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("readName").invoke(instance)
 
         assertEquals("wrapped-raw", result)
+    }
+
+    @Test
+    @DisplayName("WrapOperation FIELD_ASSIGN 应接受 field:desc selector")
+    fun wrapOperationFieldAssignSelectorAcceptsNameAndDescriptorTarget() {
+        // Given
+        AsmRegistry.register(WrapOperationFieldAssignNameAndDescriptorMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "raw")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: field:desc 应在不绑定 owner 的情况下精确命中字段写入")
+            .isEqualTo("wrapped-desc-raw")
     }
 
     @Test
@@ -9297,6 +9455,37 @@ class FrameworkReliabilityTest {
                 .hasRootCauseMessage(
                     "Invalid @ModifyConstant slice boundary FIELD_ASSIGN target: field name must not be empty",
                 )
+        }
+
+        @Test
+        @DisplayName("字段 Slice 边界只写 descriptor 时应在 Redirect 与 WrapOperation 中快速失败")
+        fun sliceFieldBoundarySelectorRejectsDescriptorOnlyTargetAcrossRedirectAndWrapOperation() {
+            // Given
+            data class BoundaryCase(
+                val context: String,
+                val mixin: Class<*>,
+            )
+
+            val cases =
+                listOf(
+                    BoundaryCase("@Redirect", RedirectFieldSliceDescriptorOnlyBoundaryMixin::class.java),
+                    BoundaryCase("@WrapOperation", WrapOperationFieldSliceDescriptorOnlyBoundaryMixin::class.java),
+                )
+
+            cases.forEach { case ->
+                AsmRegistry.clear()
+                AsmRegistry.register(case.mixin)
+
+                // When / Then
+                assertThatThrownBy {
+                    AsmProcessor().transform("SliceFieldReadTarget", sliceFieldReadTargetBytes(), javaClass.classLoader)
+                }
+                    .`as`("Then: ${case.context} 的 FIELD slice 边界不能只靠 descriptor 宽匹配")
+                    .isInstanceOf(AsmTransformException::class.java)
+                    .hasRootCauseMessage(
+                        "Invalid ${case.context} slice boundary FIELD target: field name must not be empty",
+                    )
+            }
         }
     }
 
@@ -12024,6 +12213,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("AsmInject FIELD 目标缺少字段名时应快速失败")
+    fun fieldInjectWithoutFieldNameFailsFast() {
+        AsmRegistry.register(FieldReadWithoutNameInjectMixin::class.java)
+
+        assertThatThrownBy {
+            AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: FIELD 观察点显式 target 不能只靠 owner 或 descriptor 宽匹配")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("Invalid @AsmInject(FIELD) target: field name must not be empty")
+    }
+
+    @Test
     fun fieldInjectDropsUnusedHandlerReturnValue() {
         AsmRegistry.register(FieldReadReturningHandlerMixin::class.java)
 
@@ -12061,6 +12263,77 @@ class FrameworkReliabilityTest {
         val result = clazz.getMethod("call").invoke(instance)
 
         assertEquals("object- value ", result)
+    }
+
+    @Test
+    @DisplayName("Redirect INVOKE 应接受 owner.name(desc) selector")
+    fun redirectInvokeSelectorParsesOwnerNameDescriptorContract() {
+        // Given
+        AsmRegistry.register(RedirectOwnerNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: owner.name(desc) 应精确命中 String.trim 调用并替换返回值")
+            .isEqualTo("redirect-owner-value")
+    }
+
+    @Test
+    @DisplayName("Redirect INVOKE 应接受 Java binary owner selector")
+    fun redirectInvokeSelectorParsesBinaryOwnerNameDescriptorContract() {
+        // Given
+        AsmRegistry.register(RedirectBinaryOwnerNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: Java binary owner 应与 JVM internal owner 走同一 selector 解析路径")
+            .isEqualTo("redirect-binary-owner-value")
+    }
+
+    @Test
+    @DisplayName("Redirect INVOKE 应接受 name(desc) ownerless selector")
+    fun redirectInvokeSelectorParsesNameDescriptorWithoutOwnerContract() {
+        // Given
+        AsmRegistry.register(RedirectNameDescriptorTargetMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("RedirectTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("call").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: name(desc) 应在不绑定 owner 的情况下命中唯一兼容 trim 调用")
+            .isEqualTo("redirect-ownerless-value")
+    }
+
+    @Test
+    @DisplayName("Redirect INVOKE 显式 selector 缺 descriptor 应快速失败")
+    fun redirectInvokeSelectorRejectsMissingDescriptor() {
+        // Given
+        AsmRegistry.register(RedirectMissingDescriptorTargetMixin::class.java)
+
+        // When / Then
+        assertThatThrownBy {
+            AsmProcessor().transform("RedirectTarget", redirectTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: 显式 Redirect INVOKE selector 缺 descriptor 时应暴露配置错误，而不是按名称宽匹配")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage(
+                "Invalid target method signature: java/lang/String.trim (parsed: owner=null, name=java/lang/String.trim, desc=null)",
+            )
     }
 
     @Test
@@ -12399,6 +12672,24 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("Redirect FIELD 应接受 field:desc selector")
+    fun redirectFieldSelectorAcceptsNameAndDescriptorTarget() {
+        // Given
+        AsmRegistry.register(FieldReadNameAndDescriptorRedirectMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: field:desc 应在不绑定 owner 的情况下精确命中字段读取")
+            .isEqualTo("redirect-field-desc")
+    }
+
+    @Test
     fun redirectStaticFieldReadReplacesGetStaticValue() {
         AsmRegistry.register(StaticFieldReadRedirectMixin::class.java)
 
@@ -12456,6 +12747,29 @@ class FrameworkReliabilityTest {
 
         assertEquals(null, result)
         assertEquals("original", FieldAssignRedirectMixin.lastValue)
+    }
+
+    @Test
+    @DisplayName("Redirect FIELD_ASSIGN 应接受 field:desc selector")
+    fun redirectFieldAssignSelectorAcceptsNameAndDescriptorTarget() {
+        // Given
+        FieldAssignNameAndDescriptorRedirectMixin.lastValue = null
+        AsmRegistry.register(FieldAssignNameAndDescriptorRedirectMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        val clazz = loadClass("FieldPointTarget", transformed)
+        val instance = clazz.getDeclaredConstructor().newInstance()
+        clazz.getMethod("writeName", String::class.java).invoke(instance, "original")
+        val result = clazz.getMethod("readName").invoke(instance)
+
+        // Then
+        assertThat(result)
+            .`as`("Then: Redirect FIELD_ASSIGN 命中 field:desc 后不应继续执行原字段写入")
+            .isNull()
+        assertThat(FieldAssignNameAndDescriptorRedirectMixin.lastValue)
+            .`as`("Then: handler 应接收到原字段写入值，证明 field:desc 命中了写入指令")
+            .isEqualTo("original")
     }
 
     @Test
@@ -12944,6 +13258,19 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("AsmInject FIELD_ASSIGN 目标缺少字段名时应快速失败")
+    fun fieldAssignInjectWithoutFieldNameFailsFast() {
+        AsmRegistry.register(FieldAssignWithoutNameInjectMixin::class.java)
+
+        assertThatThrownBy {
+            AsmProcessor().transform("FieldPointTarget", fieldPointTargetBytes(), javaClass.classLoader)
+        }
+            .`as`("Then: FIELD_ASSIGN 观察点显式 target 不能只靠 owner 或 descriptor 宽匹配")
+            .isInstanceOf(AsmTransformException::class.java)
+            .hasRootCauseMessage("Invalid @AsmInject(FIELD_ASSIGN) target: field name must not be empty")
+    }
+
+    @Test
     fun newInjectInsertsHandlerBeforeMatchedNewInstruction() {
         AsmRegistry.register(NewInstructionInjectMixin::class.java)
 
@@ -13424,6 +13751,73 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(value: String): Any = "object-${value.trim()}"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object RedirectOwnerNameDescriptorTargetMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(value: String): String {
+            value.length
+            return "redirect-owner-value"
+        }
+    }
+
+    @AsmMixin("RedirectTarget")
+    object RedirectBinaryOwnerNameDescriptorTargetMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java.lang.String.trim()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(value: String): String {
+            value.length
+            return "redirect-binary-owner-value"
+        }
+    }
+
+    @AsmMixin("RedirectTarget")
+    object RedirectNameDescriptorTargetMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "trim()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(value: String): String {
+            value.length
+            return "redirect-ownerless-value"
+        }
+    }
+
+    @AsmMixin("RedirectTarget")
+    object RedirectMissingDescriptorTargetMixin {
+        @Redirect(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim",
+            ),
+        )
+        @JvmStatic
+        fun redirect(value: String): String = value
     }
 
     @AsmMixin("RedirectTarget")
@@ -19326,6 +19720,58 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("RedirectTarget")
+    object WrapOperationOwnerNameDescriptorTargetMixin {
+        @WrapOperation(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<String>,
+        ): String = "wrap-owner-${operation.call(value)}"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object WrapOperationNameDescriptorTargetMixin {
+        @WrapOperation(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "trim()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<String>,
+        ): String = "wrap-ownerless-${operation.call(value)}"
+    }
+
+    @AsmMixin("RedirectTarget")
+    object WrapOperationMissingDescriptorTargetMixin {
+        @WrapOperation(
+            method = "call()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/String.trim",
+            ),
+        )
+        @JvmStatic
+        fun wrap(
+            value: String,
+            operation: Operation<String>,
+        ): String = operation.call(value)
+    }
+
     @AsmMixin("ModifyReceiverTarget")
     object WrapOperationInvokeSyntaxMixin {
         @WrapOperation(
@@ -19950,6 +20396,23 @@ class FrameworkReliabilityTest {
         }
     }
 
+    @AsmMixin("SliceFieldReadTarget")
+    object WrapOperationFieldSliceDescriptorOnlyBoundaryMixin {
+        @WrapOperation(
+            method = "readSelected()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "SliceFieldReadTarget.name:Ljava/lang/String;"),
+            slice = Slice(
+                from = At(value = InjectionPoint.FIELD, target = ":Ljava/lang/String;"),
+            ),
+            require = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String = operation.call(target)
+    }
+
     @AsmMixin("SliceFieldAssignTarget")
     object WrapOperationFieldAssignSliceMixin {
         @WrapOperation(
@@ -20138,6 +20601,21 @@ class FrameworkReliabilityTest {
         ): String = "wrapped-${operation.call(target)}"
     }
 
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldReadNameAndDescriptorMixin {
+        @WrapOperation(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "name:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String = "wrapped-desc-${operation.call(target)}"
+    }
+
     @AsmMixin("MixedFieldExpressionValueTarget")
     object WrapOperationInferredFieldReadMixin {
         @WrapOperation(
@@ -20231,6 +20709,24 @@ class FrameworkReliabilityTest {
             operation: Operation<Unit>,
         ) {
             operation.call(target, "wrapped-$value")
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object WrapOperationFieldAssignNameAndDescriptorMixin {
+        @WrapOperation(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "name:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            value: String,
+            operation: Operation<Unit>,
+        ) {
+            operation.call(target, "wrapped-desc-$value")
         }
     }
 
@@ -22648,6 +23144,18 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("FieldPointTarget")
+    object FieldReadWithoutNameInjectMixin {
+        @AsmInject(
+            method = "readName()Ljava/lang/String;",
+            target = InjectionPoint.FIELD,
+            at = At(value = InjectionPoint.FIELD, target = "FieldPointTarget.:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
     object FieldReadReturningHandlerMixin {
         @AsmInject(
             method = "readName()Ljava/lang/String;",
@@ -22688,6 +23196,21 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun redirect(target: Any): String = "name-only"
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldReadNameAndDescriptorRedirectMixin {
+        @Redirect(
+            method = "readName()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "name:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(target: Any): String {
+            target.hashCode()
+            return "redirect-field-desc"
+        }
     }
 
     @AsmMixin("StaticFieldPointTarget")
@@ -22746,6 +23269,26 @@ class FrameworkReliabilityTest {
         @Redirect(
             method = "writeName(Ljava/lang/String;)V",
             at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.name:Ljava/lang/String;"),
+        )
+        @JvmStatic
+        fun redirect(
+            target: Any,
+            value: String,
+        ) {
+            target.hashCode()
+            lastValue = value
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldAssignNameAndDescriptorRedirectMixin {
+        var lastValue: String? = null
+
+        @Redirect(
+            method = "writeName(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "name:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
         )
         @JvmStatic
         fun redirect(
@@ -23362,6 +23905,18 @@ class FrameworkReliabilityTest {
             ),
             require = 1,
             allow = 1,
+        )
+        @JvmStatic
+        fun inject() {
+        }
+    }
+
+    @AsmMixin("FieldPointTarget")
+    object FieldAssignWithoutNameInjectMixin {
+        @AsmInject(
+            method = "writeName(Ljava/lang/String;)V",
+            target = InjectionPoint.FIELD_ASSIGN,
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "FieldPointTarget.:Ljava/lang/String;"),
         )
         @JvmStatic
         fun inject() {
