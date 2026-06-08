@@ -1883,7 +1883,7 @@ class FrameworkReliabilityTest {
             .`as`("Then: 通用 At KDoc 只说明显式 target 格式，不应覆盖 ModifyReceiver 的省略推断例外")
             .contains(
                 "[ModifyArg] / [ModifyArgs] / [ModifyReceiver] 的 INVOKE 模式",
-                "FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，owner 与 desc 均可省略。",
+                "FIELD/FIELD_ASSIGN 目标格式为 `Owner.field:Desc`，字段名必填，owner 与 desc 均可省略。",
             )
     }
 
