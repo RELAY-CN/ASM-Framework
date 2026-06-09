@@ -1620,6 +1620,30 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@Redirect(NEW) 应替换真实非静态内部类构造结果")
+        fun redirectNewInComprehensiveTestRebindsInnerClassToReplacementOuterInstance() {
+            // Given
+            TestInnerClassNewRedirectMixin.reset()
+            AsmRegistry.register(TestInnerClassNewRedirectMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Redirect NEW 应只替换 InnerClass 构造结果，并让 innerMethod 读取替换 outer 的字段状态")
+                .contains("StaticInnerClass|InnerClass-RedirectedInnerOuter|Generic-Integer-123")
+                .doesNotContain("StaticInnerClass|InnerClass-DefaultConstructor|")
+            assertThat(TestInnerClassNewRedirectMixin.observedOuterClassName)
+                .`as`("Then: NEW handler 应接收到真实非静态内部类构造器的 outer this 参数")
+                .isEqualTo("Test")
+            assertThat(TestInnerClassNewRedirectMixin.replacements)
+                .`as`("Then: target=Test\$InnerClass 应只替换综合方法中的非静态内部类构造一次")
+                .isEqualTo(1)
+        }
+
+        @Test
         @DisplayName("@ModifyExpressionValue(CAST) 应只改写真实 lambdaTest 的目标 CHECKCAST")
         fun modifyExpressionValueCastInLambdaTestRewritesOnlySelectedFunctionResult() {
             // Given
@@ -1660,6 +1684,32 @@ class FrameworkReliabilityTest {
             assertThat(TestReflectionCastRedirectMixin.observedValue)
                 .`as`("Then: CAST redirect handler 应接收反射调用私有方法得到的原始对象")
                 .isEqualTo("PrivateMethod-ReflectField")
+        }
+
+        @Test
+        @DisplayName("@WrapOperation(CAST) 应包裹真实 Stream reduce 返回值的 CHECKCAST")
+        fun wrapOperationCastInLambdaStreamTestCallsOriginalCastAndRewritesResult() {
+            // Given
+            TestLambdaStreamCastWrapOperationMixin.reset()
+            AsmRegistry.register(TestLambdaStreamCastWrapOperationMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("lambdaStreamTest")
+                    .invoke(instance) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: WrapOperation CAST 应在真实 Stream.reduce 返回 Object 后调用原 CHECKCAST 并改写字符串结果")
+                .isEqualTo("abc-wrapped")
+            assertThat(TestLambdaStreamCastWrapOperationMixin.observedOriginal)
+                .`as`("Then: Operation.call(value) 应执行真实 String CHECKCAST 并得到 reduce 原始结果")
+                .isEqualTo("abc")
+            assertThat(TestLambdaStreamCastWrapOperationMixin.operationCalls)
+                .`as`("Then: handler 应只包裹 lambdaStreamTest 中唯一的 CHECKCAST")
+                .isEqualTo(1)
         }
 
         @Test
@@ -1727,6 +1777,66 @@ class FrameworkReliabilityTest {
             assertThat(TestExceptionWrapConditionThrowMixin.observedThrowFlag)
                 .`as`("Then: THROW handler 应能继续接收目标方法参数")
                 .isTrue()
+        }
+
+        @Test
+        @DisplayName("@Redirect(THROW) 应在真实异常方法中替换可被原 catch 捕获的异常")
+        fun redirectThrowInTestClassReplacesCustomExceptionAndKeepsCatchFinallyContract() {
+            // Given
+            TestExceptionRedirectThrowMixin.reset()
+            AsmRegistry.register(TestExceptionRedirectThrowMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+            lateinit var result: String
+
+            // When
+            val output =
+                captureStandardOut {
+                    result = invokeExceptionTest(instance, true)
+                }
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Redirect THROW 返回同类型 CustomException 后，原 catch 应捕获替换后的异常消息")
+                .isEqualTo("CaughtException-RedirectedTestException")
+            assertThat(output)
+                .`as`("Then: 替换真实 ATHROW 的异常对象不应跳过 finally 副作用")
+                .contains("Finally block")
+            assertThat(TestExceptionRedirectThrowMixin.observedMessage)
+                .`as`("Then: Redirect handler 应先看到 Test.class 原本构造出的 CustomException")
+                .isEqualTo("TestException")
+        }
+
+        @Test
+        @DisplayName("@WrapOperation(THROW) 应在真实异常方法中调用原操作后替换异常")
+        fun wrapOperationThrowInTestClassCallsOriginalAndKeepsCatchFinallyContract() {
+            // Given
+            TestExceptionWrapOperationThrowMixin.reset()
+            AsmRegistry.register(TestExceptionWrapOperationThrowMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+            lateinit var result: String
+
+            // When
+            val output =
+                captureStandardOut {
+                    result = invokeExceptionTest(instance, true)
+                }
+
+            // Then
+            assertThat(result)
+                .`as`("Then: WrapOperation THROW 替换为同类型异常后，原 catch 应捕获 handler 返回值")
+                .isEqualTo("CaughtException-WrappedTestException")
+            assertThat(output)
+                .`as`("Then: Operation 包裹真实 ATHROW 后仍应保留 finally 副作用")
+                .contains("Finally block")
+            assertThat(TestExceptionWrapOperationThrowMixin.observedOriginalMessage)
+                .`as`("Then: WrapOperation handler 应收到真实 CustomException 原始消息")
+                .isEqualTo("TestException")
+            assertThat(TestExceptionWrapOperationThrowMixin.observedOperationMessage)
+                .`as`("Then: Operation.call(original) 应返回原本即将抛出的异常对象")
+                .isEqualTo("TestException")
+            assertThat(TestExceptionWrapOperationThrowMixin.operationCalls)
+                .`as`("Then: 测试应证明 handler 显式调用了一次原 THROW Operation")
+                .isEqualTo(1)
         }
 
         @Test
@@ -17241,6 +17351,38 @@ class FrameworkReliabilityTest {
     }
 
     @AsmMixin("Test")
+    object TestInnerClassNewRedirectMixin {
+        var observedOuterClassName: String? = null
+        var replacements = 0
+
+        fun reset() {
+            observedOuterClassName = null
+            replacements = 0
+        }
+
+        @Redirect(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(value = InjectionPoint.NEW, target = "Test\$InnerClass"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(outer: Any): Any {
+            observedOuterClassName = outer.javaClass.name
+            replacements += 1
+
+            val testClass = outer.javaClass
+            val replacementOuter = testClass
+                .getDeclaredConstructor(String::class.java)
+                .newInstance("RedirectedInnerOuter")
+            val innerClass = testClass.classLoader.loadClass("Test\$InnerClass")
+            return innerClass
+                .getDeclaredConstructor(testClass)
+                .newInstance(replacementOuter)
+        }
+    }
+
+    @AsmMixin("Test")
     object TestLambdaCastModifyExpressionValueMixin {
         var observedOriginal: String? = null
 
@@ -17281,6 +17423,34 @@ class FrameworkReliabilityTest {
             val original = value.toString()
             observedValue = original
             return "RedirectedCast-$original"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestLambdaStreamCastWrapOperationMixin {
+        var observedOriginal: String? = null
+        var operationCalls = 0
+
+        fun reset() {
+            observedOriginal = null
+            operationCalls = 0
+        }
+
+        @WrapOperation(
+            method = "lambdaStreamTest()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            value: Any,
+            operation: Operation<String>,
+        ): String {
+            val original = operation.call(value)
+            observedOriginal = original
+            operationCalls += 1
+            return "$original-wrapped"
         }
     }
 
@@ -17351,6 +17521,62 @@ class FrameworkReliabilityTest {
             observedMessage = original.message
             observedThrowFlag = throwException
             return false
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestExceptionRedirectThrowMixin {
+        var observedMessage: String? = null
+
+        fun reset() {
+            observedMessage = null
+        }
+
+        @Redirect(
+            method = "exceptionTest(Z)Ljava/lang/String;",
+            at = At(value = InjectionPoint.THROW, target = "Test\$CustomException"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(original: Throwable): Throwable {
+            observedMessage = original.message
+            return original.javaClass
+                .getDeclaredConstructor(String::class.java)
+                .newInstance("RedirectedTestException") as Throwable
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestExceptionWrapOperationThrowMixin {
+        var observedOriginalMessage: String? = null
+        var observedOperationMessage: String? = null
+        var operationCalls = 0
+
+        fun reset() {
+            observedOriginalMessage = null
+            observedOperationMessage = null
+            operationCalls = 0
+        }
+
+        @WrapOperation(
+            method = "exceptionTest(Z)Ljava/lang/String;",
+            at = At(value = InjectionPoint.THROW, target = "Test\$CustomException"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            original: Throwable,
+            operation: Operation<Throwable>,
+        ): Throwable {
+            observedOriginalMessage = original.message
+            val thrown = operation.call(original)
+            operationCalls += 1
+            observedOperationMessage = thrown.message
+            return thrown.javaClass
+                .getDeclaredConstructor(String::class.java)
+                .newInstance("WrappedTestException") as Throwable
         }
     }
 
