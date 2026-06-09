@@ -1526,6 +1526,77 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@Redirect(FIELD) 应替换真实私有字段读取且不改写字段状态")
+        fun redirectFieldInTestA0ReplacesPrivateFieldReadWithoutMutatingState() {
+            // Given
+            TestDynamicStringFieldRedirectMixin.reset()
+            AsmRegistry.register(TestDynamicStringFieldRedirectMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("OriginalField")
+
+            // When
+            val publicRead = clazz.getMethod("testA0").invoke(instance) as String
+            val reflectiveRead = clazz.getMethod("reflectionFieldTest").invoke(instance) as String
+
+            // Then
+            assertThat(publicRead)
+                .`as`("Then: Redirect FIELD 应只替换 testA0 的 dynamicString GETFIELD 表达式")
+                .isEqualTo("RedirectedDynamicString")
+            assertThat(reflectiveRead)
+                .`as`("Then: 字段本身仍应保持构造器写入值，证明 Redirect 没有伪造对象状态")
+                .isEqualTo("ReflectionField-OriginalField")
+            assertThat(TestDynamicStringFieldRedirectMixin.observedReceiverClass)
+                .`as`("Then: FIELD handler 应接收到真实 Test 实例 receiver")
+                .isEqualTo("Test")
+        }
+
+        @Test
+        @DisplayName("@WrapOperation(FIELD) 应包裹真实私有方法内字段读取")
+        fun wrapOperationFieldInPrivateMethodCallsOriginalReadThroughReflectionPath() {
+            // Given
+            TestPrivateMethodFieldWrapOperationMixin.reset()
+            AsmRegistry.register(TestPrivateMethodFieldWrapOperationMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("PrivateField")
+
+            // When
+            val result = clazz.getMethod("reflectionTest").invoke(instance) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: reflectionTest 应进入真实 privateMethod，并让 WrapOperation 包裹其中的 GETFIELD")
+                .isEqualTo("PrivateMethod-PrivateField-wrapped")
+            assertThat(TestPrivateMethodFieldWrapOperationMixin.observedOriginal)
+                .`as`("Then: Operation.call(receiver) 应读取原始 dynamicString 字段值")
+                .isEqualTo("PrivateField")
+        }
+
+        @Test
+        @DisplayName("@ModifyExpressionValue(FIELD_ASSIGN) 应只改写真实构造器最终字段写入值")
+        fun modifyExpressionValueFieldAssignInStringConstructorRewritesFinalDynamicStringWriteOnly() {
+            // Given
+            TestStringConstructorDynamicStringAssignMixin.reset()
+            AsmRegistry.register(TestStringConstructorDynamicStringAssignMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+
+            // When
+            val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("OriginalCtor")
+            val publicRead = clazz.getMethod("testA0").invoke(instance) as String
+            val reflectiveRead = clazz.getMethod("reflectionFieldTest").invoke(instance) as String
+
+            // Then
+            assertThat(publicRead)
+                .`as`("Then: String 构造器最终 dynamicString PUTFIELD 应写入 handler 改写后的业务值")
+                .isEqualTo("CtorAssigned-OriginalCtor")
+            assertThat(reflectiveRead)
+                .`as`("Then: 反射读取同一 private 字段也应看到最终写入后的真实对象状态")
+                .isEqualTo("ReflectionField-CtorAssigned-OriginalCtor")
+            assertThat(TestStringConstructorDynamicStringAssignMixin.observedOriginal)
+                .`as`("Then: ordinal=1 应只观察构造器参数写入，不应误命中实例初始化的 DynamicString 写入")
+                .isEqualTo("OriginalCtor")
+        }
+
+        @Test
         @DisplayName("@RedirectAllMethods 应在真实综合方法中重定向所有匹配调用")
         fun redirectAllMethodsInComprehensiveTestRewritesEveryMatchingOrdinaryMethodCall() {
             // Given
@@ -17009,6 +17080,74 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): Any = replacement ?: original
+    }
+
+    @AsmMixin("Test")
+    object TestDynamicStringFieldRedirectMixin {
+        var observedReceiverClass: String? = null
+
+        fun reset() {
+            observedReceiverClass = null
+        }
+
+        @Redirect(
+            method = "testA0()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "Test.dynamicString:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(target: Any): String {
+            observedReceiverClass = target.javaClass.simpleName
+            return "RedirectedDynamicString"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestPrivateMethodFieldWrapOperationMixin {
+        var observedOriginal: String? = null
+
+        fun reset() {
+            observedOriginal = null
+        }
+
+        @WrapOperation(
+            method = "privateMethod()Ljava/lang/String;",
+            at = At(value = InjectionPoint.FIELD, target = "Test.dynamicString:Ljava/lang/String;"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            target: Any,
+            operation: Operation<String>,
+        ): String {
+            val original = operation.call(target)
+            observedOriginal = original
+            return "$original-wrapped"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestStringConstructorDynamicStringAssignMixin {
+        var observedOriginal: String? = null
+
+        fun reset() {
+            observedOriginal = null
+        }
+
+        @ModifyExpressionValue(
+            method = "<init>(Ljava/lang/String;)V",
+            at = At(value = InjectionPoint.FIELD_ASSIGN, target = "Test.dynamicString:Ljava/lang/String;"),
+            ordinal = 1,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            observedOriginal = original
+            return "CtorAssigned-$original"
+        }
     }
 
     @AsmMixin("Test")
