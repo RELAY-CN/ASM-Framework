@@ -1386,6 +1386,72 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@ModifyArg(INVOKE) 应改写真实闭包 invokedynamic 捕获参数")
+        fun modifyArgInvokeDynamicInClosureTestRewritesCapturedBase() {
+            // Given
+            AsmRegistry.register(TestClosureModifyArgInvokeDynamicMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val firstResult = invokeClosureFunction(instance, 100, 50)
+            val repeatedResult = invokeClosureFunction(instance, 100, 50)
+
+            // Then
+            assertThat(firstResult)
+                .`as`("Then: closureTest(100) 的 captured base 应在真实 LambdaMetafactory 调用点被改写为 200")
+                .isEqualTo(250)
+            assertThat(repeatedResult)
+                .`as`("Then: 重复创建同一个闭包场景应得到相同结果，证明参数改写没有依赖一次性状态")
+                .isEqualTo(250)
+        }
+
+        @Test
+        @DisplayName("@ModifyArgs(INVOKE) 应批量改写真实闭包 invokedynamic 参数组")
+        fun modifyArgsInvokeDynamicInClosureTestRewritesCapturedBaseGroup() {
+            // Given
+            TestClosureModifyArgsInvokeDynamicMixin.reset()
+            AsmRegistry.register(TestClosureModifyArgsInvokeDynamicMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeClosureFunction(instance, 100, 50)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Args 应把 closureTest(100) 的 captured base 从 100 批量改写为 300")
+                .isEqualTo(350)
+            assertThat(TestClosureModifyArgsInvokeDynamicMixin.observedBase)
+                .`as`("Then: @ModifyArgs handler 应先看到真实 invokedynamic 调用点中的原始 captured base")
+                .isEqualTo(100)
+            assertThat(TestClosureModifyArgsInvokeDynamicMixin.observedArgumentCount)
+                .`as`("Then: captured lambda factory 的 Args 容器只应包含 base 参数，不应混入 this receiver")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@WrapOperation(INVOKE) 应包裹真实闭包 invokedynamic 并替换函数工厂返回值")
+        fun wrapOperationInvokeDynamicInClosureTestReplacesRealLambdaFactory() {
+            // Given
+            TestClosureWrapOperationInvokeDynamicMixin.reset()
+            AsmRegistry.register(TestClosureWrapOperationInvokeDynamicMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeClosureFunction(instance, 100, 50)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: handler 应替换真实 LambdaMetafactory 工厂返回的 Function，而不是继续使用原 closureTest 结果")
+                .isEqualTo(450)
+            assertThat(TestClosureWrapOperationInvokeDynamicMixin.observedBase)
+                .`as`("Then: WrapOperation handler 应接收真实 invokedynamic 的 captured base 参数")
+                .isEqualTo(100)
+            assertThat(TestClosureWrapOperationInvokeDynamicMixin.observedAppliedValue)
+                .`as`("Then: 包裹返回的 Function 应保留调用方传入 apply(50) 的业务输入")
+                .isEqualTo(50)
+        }
+
+        @Test
         @DisplayName("@ModifyExpressionValue(INVOKE_ASSIGN) 应在真实综合方法中只改写接口调用返回值")
         fun modifyExpressionValueInvokeAssignInComprehensiveTestRewritesLiteralInterfaceReturnValue() {
             // Given
@@ -1789,6 +1855,19 @@ class FrameworkReliabilityTest {
             instance.javaClass
                 .getMethod("testC0", String::class.java)
                 .invoke(instance, value) as String
+
+        @Suppress("UNCHECKED_CAST")
+        private fun invokeClosureFunction(
+            instance: Any,
+            base: Int,
+            value: Int,
+        ): Int {
+            val closure =
+                instance.javaClass
+                    .getMethod("closureTest", Int::class.javaPrimitiveType)
+                    .invoke(instance, base) as java.util.function.Function<Int, Int>
+            return closure.apply(value)
+        }
 
         private fun invokeExceptionTest(
             instance: Any,
@@ -16779,6 +16858,82 @@ class FrameworkReliabilityTest {
             observedArgument = args[0]
             observedArgumentCount = args.size
             args[0] = "MigratedArgs"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestClosureModifyArgInvokeDynamicMixin {
+        @ModifyArg(
+            method = "closureTest(I)Ljava/util/function/Function;",
+            index = 0,
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/LambdaMetafactory.apply(I)Ljava/util/function/Function;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(base: Int): Int = base + 100
+    }
+
+    @AsmMixin("Test")
+    object TestClosureModifyArgsInvokeDynamicMixin {
+        var observedBase: Int? = null
+        var observedArgumentCount = -1
+
+        fun reset() {
+            observedBase = null
+            observedArgumentCount = -1
+        }
+
+        @ModifyArgs(
+            method = "closureTest(I)Ljava/util/function/Function;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/LambdaMetafactory.apply(I)Ljava/util/function/Function;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(args: Args) {
+            val base = args.get<Int>(0)
+            observedBase = base
+            observedArgumentCount = args.size
+            args[0] = base + 200
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestClosureWrapOperationInvokeDynamicMixin {
+        var observedBase: Int? = null
+        var observedAppliedValue: Int? = null
+
+        fun reset() {
+            observedBase = null
+            observedAppliedValue = null
+        }
+
+        @WrapOperation(
+            method = "closureTest(I)Ljava/util/function/Function;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "java/lang/invoke/LambdaMetafactory.apply(I)Ljava/util/function/Function;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            base: Int,
+            _operation: Operation<java.util.function.Function<Int, Int>>,
+        ): java.util.function.Function<Int, Int> {
+            observedBase = base
+            return java.util.function.Function { value ->
+                observedAppliedValue = value
+                base + value + 300
+            }
         }
     }
 
