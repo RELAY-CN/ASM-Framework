@@ -214,6 +214,48 @@ public class Test extends TestParent implements TestInterface {
         if (n <= 1) return 1;
         return n * recursiveMethod(n - 1);
     }
+
+    // 类型判断分支
+    public String instanceofRoutingTest(Object value) {
+        if (value instanceof String) {
+            return "String-" + value;
+        }
+        return "Other-" + String.valueOf(value);
+    }
+
+    // 连续取值 switch，编译为 tableswitch
+    public String denseSwitchTest(int value) {
+        switch (value) {
+            case 0:
+                return "zero";
+            case 1:
+                return "one";
+            case 2:
+                return "two";
+            default:
+                return "fallback";
+        }
+    }
+
+    // 稀疏取值 switch，编译为 lookupswitch
+    public String sparseSwitchTest(int value) {
+        switch (value) {
+            case 10:
+                return "ten";
+            case 20:
+                return "twenty";
+            case 50:
+                return "fifty";
+            default:
+                return "fallback";
+        }
+    }
+
+    // 局部数组长度，编译为裸 ARRAYLENGTH
+    public int arrayLengthTest(String first, String second) {
+        String[] values = new String[] { first, second, dynamicString };
+        return values.length;
+    }
     
     // 静态初始化块
     static {

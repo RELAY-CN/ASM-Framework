@@ -1713,6 +1713,116 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@WrapOperation(INSTANCEOF) 应包裹真实类型判断分支")
+        fun wrapOperationInstanceofInTestClassCanCallOriginalCheckWithReplacementValue() {
+            // Given
+            TestInstanceofWrapOperationMixin.reset()
+            AsmRegistry.register(TestInstanceofWrapOperationMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("instanceofRoutingTest", Any::class.java)
+                    .invoke(instance, StringBuilder("raw")) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: handler 用替换后的 String 执行原 INSTANCEOF，应让真实业务进入 String 分支")
+                .isEqualTo("String-raw")
+            assertThat(TestInstanceofWrapOperationMixin.observedOriginal)
+                .`as`("Then: 原始 StringBuilder 对象对 String 的 INSTANCEOF 判断应为 false")
+                .isFalse()
+            assertThat(TestInstanceofWrapOperationMixin.observedReplacement)
+                .`as`("Then: Operation.call(value.toString()) 应执行真实 INSTANCEOF 并得到 true")
+                .isTrue()
+        }
+
+        @Test
+        @DisplayName("@Redirect(SWITCH) 应替换真实 tableswitch selector")
+        fun redirectSwitchInDenseSwitchTestRewritesTableSwitchSelector() {
+            // Given
+            TestDenseSwitchRedirectMixin.reset()
+            AsmRegistry.register(TestDenseSwitchRedirectMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("denseSwitchTest", Int::class.javaPrimitiveType)
+                    .invoke(instance, 1) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: denseSwitchTest(1) 原本返回 one，Redirect SWITCH 应把真实 tableswitch selector 改到 case 2")
+                .isEqualTo("two")
+            assertThat(TestDenseSwitchRedirectMixin.observedSelector)
+                .`as`("Then: handler 应接收原始 tableswitch selector")
+                .isEqualTo(1)
+            assertThat(TestDenseSwitchRedirectMixin.observedInput)
+                .`as`("Then: SWITCH handler 仍应能接收目标方法参数前缀")
+                .isEqualTo(1)
+            assertThat(TestDenseSwitchRedirectMixin.replacements)
+                .`as`("Then: denseSwitchTest 中应只存在一个可替换 tableswitch")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@WrapOperation(SWITCH) 应包裹真实 lookupswitch selector")
+        fun wrapOperationSwitchInSparseSwitchTestCallsOriginalAndRewritesLookupSelector() {
+            // Given
+            TestSparseSwitchWrapOperationMixin.reset()
+            AsmRegistry.register(TestSparseSwitchWrapOperationMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("sparseSwitchTest", Int::class.javaPrimitiveType)
+                    .invoke(instance, 10) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: sparseSwitchTest(10) 原本返回 ten，WrapOperation SWITCH 应把真实 lookupswitch selector 改到 case 50")
+                .isEqualTo("fifty")
+            assertThat(TestSparseSwitchWrapOperationMixin.observedOriginalSelector)
+                .`as`("Then: Operation.call(selector) 应返回 lookupswitch 原始 selector")
+                .isEqualTo(10)
+            assertThat(TestSparseSwitchWrapOperationMixin.observedInput)
+                .`as`("Then: WrapOperation SWITCH handler 仍应能接收目标方法参数前缀")
+                .isEqualTo(10)
+            assertThat(TestSparseSwitchWrapOperationMixin.operationCalls)
+                .`as`("Then: sparseSwitchTest 中应只包裹一个 lookupswitch")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@ModifyExpressionValue(ARRAY_LENGTH) 应改写真实裸数组长度")
+        fun modifyExpressionValueArrayLengthInTestClassRewritesBareArrayLengthResult() {
+            // Given
+            TestArrayLengthModifyExpressionValueMixin.reset()
+            AsmRegistry.register(TestArrayLengthModifyExpressionValueMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("arrayLengthTest", String::class.java, String::class.java)
+                    .invoke(instance, "A", "BC") as Int
+
+            // Then
+            assertThat(result)
+                .`as`("Then: 真实局部数组长度为 3，handler 应结合目标方法参数把裸 ARRAYLENGTH 改写为 6")
+                .isEqualTo(6)
+            assertThat(TestArrayLengthModifyExpressionValueMixin.observedOriginal)
+                .`as`("Then: ARRAY_LENGTH handler 应先看到真实局部数组的原始长度")
+                .isEqualTo(3)
+            assertThat(TestArrayLengthModifyExpressionValueMixin.observedInputs)
+                .`as`("Then: ARRAY_LENGTH handler 应继续接收目标方法参数前缀")
+                .containsExactly("A", "BC")
+        }
+
+        @Test
         @DisplayName("@RedirectAllMethods 应在真实综合方法中重定向所有匹配调用")
         fun redirectAllMethodsInComprehensiveTestRewritesEveryMatchingOrdinaryMethodCall() {
             // Given
@@ -17451,6 +17561,123 @@ class FrameworkReliabilityTest {
             observedOriginal = original
             operationCalls += 1
             return "$original-wrapped"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestInstanceofWrapOperationMixin {
+        var observedOriginal: Boolean? = null
+        var observedReplacement: Boolean? = null
+
+        fun reset() {
+            observedOriginal = null
+            observedReplacement = null
+        }
+
+        @WrapOperation(
+            method = "instanceofRoutingTest(Ljava/lang/Object;)Ljava/lang/String;",
+            at = At(value = InjectionPoint.INSTANCEOF, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            value: Any,
+            operation: Operation<Boolean>,
+        ): Boolean {
+            observedOriginal = operation.call(value)
+            observedReplacement = operation.call(value.toString())
+            return observedReplacement == true
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestDenseSwitchRedirectMixin {
+        var observedSelector: Int? = null
+        var observedInput: Int? = null
+        var replacements = 0
+
+        fun reset() {
+            observedSelector = null
+            observedInput = null
+            replacements = 0
+        }
+
+        @Redirect(
+            method = "denseSwitchTest(I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            selector: Int,
+            value: Int,
+        ): Int {
+            observedSelector = selector
+            observedInput = value
+            replacements += 1
+            return if (value == 1) 2 else selector
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestSparseSwitchWrapOperationMixin {
+        var observedOriginalSelector: Int? = null
+        var observedInput: Int? = null
+        var operationCalls = 0
+
+        fun reset() {
+            observedOriginalSelector = null
+            observedInput = null
+            operationCalls = 0
+        }
+
+        @WrapOperation(
+            method = "sparseSwitchTest(I)Ljava/lang/String;",
+            at = At(value = InjectionPoint.SWITCH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            selector: Int,
+            operation: Operation<Int>,
+            value: Int,
+        ): Int {
+            observedOriginalSelector = operation.call(selector)
+            observedInput = value
+            operationCalls += 1
+            return if (value == 10) 50 else observedOriginalSelector ?: selector
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestArrayLengthModifyExpressionValueMixin {
+        var observedOriginal: Int? = null
+        val observedInputs = mutableListOf<String>()
+
+        fun reset() {
+            observedOriginal = null
+            observedInputs.clear()
+        }
+
+        @ModifyExpressionValue(
+            method = "arrayLengthTest(Ljava/lang/String;Ljava/lang/String;)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(
+            original: Int,
+            first: String,
+            second: String,
+        ): Int {
+            observedOriginal = original
+            observedInputs += first
+            observedInputs += second
+            return original + first.length + second.length
         }
     }
 
