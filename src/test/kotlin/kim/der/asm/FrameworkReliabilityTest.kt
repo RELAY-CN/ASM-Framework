@@ -1597,6 +1597,72 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@WrapWithCondition(NEW) 应观察真实综合方法中的内部类构造结果")
+        fun wrapWithConditionNewInComprehensiveTestObservesStaticInnerConstruction() {
+            // Given
+            TestStaticInnerNewWrapConditionMixin.reset()
+            AsmRegistry.register(TestStaticInnerNewWrapConditionMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: handler 放行真实 StaticInnerClass 构造后，综合方法应保留原内部类业务片段")
+                .contains("StaticInnerClass|InnerClass-DefaultConstructor|")
+            assertThat(TestStaticInnerNewWrapConditionMixin.observedClassName)
+                .`as`("Then: NEW handler 应接收到已初始化的真实 Test\$StaticInnerClass 实例")
+                .isEqualTo("Test\$StaticInnerClass")
+            assertThat(TestStaticInnerNewWrapConditionMixin.decisions)
+                .`as`("Then: target=Test\$StaticInnerClass 应只命中综合方法中的静态内部类构造一次")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@ModifyExpressionValue(CAST) 应只改写真实 lambdaTest 的目标 CHECKCAST")
+        fun modifyExpressionValueCastInLambdaTestRewritesOnlySelectedFunctionResult() {
+            // Given
+            TestLambdaCastModifyExpressionValueMixin.reset()
+            AsmRegistry.register(TestLambdaCastModifyExpressionValueMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = instance.javaClass
+                .getMethod("lambdaTest")
+                .invoke(instance) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: ordinal=1 应只改写 function.apply(\"Test\") 后的 String CHECKCAST，不影响 supplier 和方法引用结果")
+                .isEqualTo("LambdaSupplier-LambdaFunction-Test-cast-5-30")
+            assertThat(TestLambdaCastModifyExpressionValueMixin.observedOriginal)
+                .`as`("Then: CAST handler 应先看到真实 Function.apply 返回并完成 CHECKCAST 后的字符串")
+                .isEqualTo("LambdaFunction-Test")
+        }
+
+        @Test
+        @DisplayName("@Redirect(CAST) 应替换真实反射返回值的 CHECKCAST")
+        fun redirectCastInReflectionTestReplacesReflectedPrivateMethodResult() {
+            // Given
+            TestReflectionCastRedirectMixin.reset()
+            AsmRegistry.register(TestReflectionCastRedirectMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor(String::class.java).newInstance("ReflectField")
+
+            // When
+            val result = clazz.getMethod("reflectionTest").invoke(instance) as String
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Redirect CAST 应替换 Method.invoke 返回值上的真实 CHECKCAST 表达式")
+                .isEqualTo("RedirectedCast-PrivateMethod-ReflectField")
+            assertThat(TestReflectionCastRedirectMixin.observedValue)
+                .`as`("Then: CAST redirect handler 应接收反射调用私有方法得到的原始对象")
+                .isEqualTo("PrivateMethod-ReflectField")
+        }
+
+        @Test
         @DisplayName("@RedirectAllMethods 应在真实综合方法中重定向所有匹配调用")
         fun redirectAllMethodsInComprehensiveTestRewritesEveryMatchingOrdinaryMethodCall() {
             // Given
@@ -17147,6 +17213,74 @@ class FrameworkReliabilityTest {
         fun modify(original: String): String {
             observedOriginal = original
             return "CtorAssigned-$original"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestStaticInnerNewWrapConditionMixin {
+        var observedClassName: String? = null
+        var decisions = 0
+
+        fun reset() {
+            observedClassName = null
+            decisions = 0
+        }
+
+        @WrapWithCondition(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(value = InjectionPoint.NEW, target = "Test\$StaticInnerClass"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(original: Any): Boolean {
+            observedClassName = original.javaClass.name
+            decisions += 1
+            return true
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestLambdaCastModifyExpressionValueMixin {
+        var observedOriginal: String? = null
+
+        fun reset() {
+            observedOriginal = null
+        }
+
+        @ModifyExpressionValue(
+            method = "lambdaTest()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            ordinal = 1,
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun modify(original: String): String {
+            observedOriginal = original
+            return "$original-cast"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestReflectionCastRedirectMixin {
+        var observedValue: String? = null
+
+        fun reset() {
+            observedValue = null
+        }
+
+        @Redirect(
+            method = "reflectionTest()Ljava/lang/String;",
+            at = At(value = InjectionPoint.CAST, target = "java/lang/String"),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(value: Any): String {
+            val original = value.toString()
+            observedValue = original
+            return "RedirectedCast-$original"
         }
     }
 
