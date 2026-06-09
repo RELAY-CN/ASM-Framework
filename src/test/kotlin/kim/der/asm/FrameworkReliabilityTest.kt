@@ -1823,6 +1823,58 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@Redirect(ARRAY_LENGTH) 应接收真实裸数组长度的数组引用")
+        fun redirectArrayLengthInTestClassReceivesArrayReferenceAndTargetParameters() {
+            // Given
+            TestArrayLengthRedirectMixin.reset()
+            AsmRegistry.register(TestArrayLengthRedirectMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("arrayLengthTest", String::class.java, String::class.java)
+                    .invoke(instance, "AA", "BCD") as Int
+
+            // Then
+            assertThat(result)
+                .`as`("Then: Redirect ARRAY_LENGTH 应基于真实数组引用计算长度，并结合目标方法参数返回 8")
+                .isEqualTo(8)
+            assertThat(TestArrayLengthRedirectMixin.observedArrayLength)
+                .`as`("Then: handler 应接收即将被 ARRAYLENGTH 消费的局部数组引用")
+                .isEqualTo(3)
+            assertThat(TestArrayLengthRedirectMixin.observedInputs)
+                .`as`("Then: Redirect ARRAY_LENGTH handler 应继续接收目标方法参数前缀")
+                .containsExactly("AA", "BCD")
+        }
+
+        @Test
+        @DisplayName("@WrapWithCondition(ARRAY_LENGTH) 应在真实裸数组长度上应用 Int 默认值")
+        fun wrapWithConditionArrayLengthInTestClassCanDropBareArrayLengthResultToDefaultZero() {
+            // Given
+            TestArrayLengthWrapConditionMixin.reset()
+            AsmRegistry.register(TestArrayLengthWrapConditionMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result =
+                instance.javaClass
+                    .getMethod("arrayLengthTest", String::class.java, String::class.java)
+                    .invoke(instance, "A", "BC") as Int
+
+            // Then
+            assertThat(result)
+                .`as`("Then: WrapWithCondition ARRAY_LENGTH 返回 false 时应把真实 Int 长度结果替换为默认值 0")
+                .isZero()
+            assertThat(TestArrayLengthWrapConditionMixin.observedLength)
+                .`as`("Then: handler 应先观察到真实局部数组长度")
+                .isEqualTo(3)
+            assertThat(TestArrayLengthWrapConditionMixin.observedInputs)
+                .`as`("Then: WrapWithCondition ARRAY_LENGTH handler 应继续接收目标方法参数前缀")
+                .containsExactly("A", "BC")
+        }
+
+        @Test
         @DisplayName("@RedirectAllMethods 应在真实综合方法中重定向所有匹配调用")
         fun redirectAllMethodsInComprehensiveTestRewritesEveryMatchingOrdinaryMethodCall() {
             // Given
@@ -17678,6 +17730,65 @@ class FrameworkReliabilityTest {
             observedInputs += first
             observedInputs += second
             return original + first.length + second.length
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestArrayLengthRedirectMixin {
+        var observedArrayLength: Int? = null
+        val observedInputs = mutableListOf<String>()
+
+        fun reset() {
+            observedArrayLength = null
+            observedInputs.clear()
+        }
+
+        @Redirect(
+            method = "arrayLengthTest(Ljava/lang/String;Ljava/lang/String;)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun redirect(
+            array: Any,
+            first: String,
+            second: String,
+        ): Int {
+            val length = java.lang.reflect.Array.getLength(array)
+            observedArrayLength = length
+            observedInputs += first
+            observedInputs += second
+            return length + first.length + second.length
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestArrayLengthWrapConditionMixin {
+        var observedLength: Int? = null
+        val observedInputs = mutableListOf<String>()
+
+        fun reset() {
+            observedLength = null
+            observedInputs.clear()
+        }
+
+        @WrapWithCondition(
+            method = "arrayLengthTest(Ljava/lang/String;Ljava/lang/String;)I",
+            at = At(value = InjectionPoint.ARRAY_LENGTH),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun shouldKeep(
+            length: Int,
+            first: String,
+            second: String,
+        ): Boolean {
+            observedLength = length
+            observedInputs += first
+            observedInputs += second
+            return false
         }
     }
 
