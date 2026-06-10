@@ -1875,6 +1875,99 @@ class FrameworkReliabilityTest {
         }
 
         @Test
+        @DisplayName("@WrapMethod 应在真实 varargs 方法上保留反射契约并调用原方法")
+        fun wrapMethodVarargsInTestClassPreservesReflectionContractAndCallsOriginal() {
+            // Given
+            TestVarArgsWrapMethodMixin.reset()
+            AsmRegistry.register(TestVarArgsWrapMethodMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor().newInstance()
+            val method = clazz.getMethod("varArgsMethod", Array<String>::class.java)
+
+            // When
+            val result = method.invoke(instance, arrayOf("A", "B") as Any) as String
+
+            // Then
+            assertThat(method.isVarArgs)
+                .`as`("Then: 真实 Test.varArgsMethod 经 WrapMethod 迁移后仍应保留 ACC_VARARGS 反射契约")
+                .isTrue()
+            assertThat(result)
+                .`as`("Then: WrapMethod handler 应能以数组实参调用真实 String.join 业务逻辑")
+                .isEqualTo("wrapped-VarArgs-A,B,C")
+            assertThat(TestVarArgsWrapMethodMixin.observedArguments)
+                .`as`("Then: handler 应先接收调用方传入的真实 varargs 数组")
+                .containsExactly("A", "B")
+            assertThat(TestVarArgsWrapMethodMixin.operationCalls)
+                .`as`("Then: 测试应证明 handler 显式调用了一次迁移后的原 varargs 方法")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@WrapMethod 应按描述符只包裹真实重载方法")
+        fun wrapMethodOverloadedMethodInTestClassMatchesDescriptorOnly() {
+            // Given
+            TestOverloadedTwoArgWrapMethodMixin.reset()
+            AsmRegistry.register(TestOverloadedTwoArgWrapMethodMixin::class.java)
+            val clazz = transformAndLoadTestFixture()
+            val instance = clazz.getDeclaredConstructor().newInstance()
+
+            // When
+            val noArgResult = clazz.getMethod("overloadedMethod").invoke(instance) as String
+            val oneArgResult = clazz.getMethod("overloadedMethod", String::class.java).invoke(instance, "A") as String
+            val twoArgResult =
+                clazz
+                    .getMethod("overloadedMethod", String::class.java, Int::class.javaPrimitiveType)
+                    .invoke(instance, "A", 7) as String
+
+            // Then
+            assertThat(noArgResult)
+                .`as`("Then: descriptor 精确匹配不应污染同名无参 overload")
+                .isEqualTo("Overloaded-0")
+            assertThat(oneArgResult)
+                .`as`("Then: descriptor 精确匹配不应污染同名单参 overload")
+                .isEqualTo("Overloaded-1-A")
+            assertThat(twoArgResult)
+                .`as`("Then: 只有 (String, int) overload 应被 WrapMethod 包裹并调用迁移后的原方法")
+                .isEqualTo("wrapped-Overloaded-2-A-migrated-8")
+            assertThat(TestOverloadedTwoArgWrapMethodMixin.observedArguments)
+                .`as`("Then: handler 应只观察到二参 overload 的真实入参")
+                .isEqualTo("A:7")
+            assertThat(TestOverloadedTwoArgWrapMethodMixin.operationCalls)
+                .`as`("Then: 同名 overload 中只应有二参方法命中一次")
+                .isEqualTo(1)
+        }
+
+        @Test
+        @DisplayName("@WrapOperation(INVOKE) 应稳定命中真实 default method 调用点")
+        fun wrapOperationDefaultMethodInvokeInComprehensiveTestRewritesDefaultMethodOnly() {
+            // Given
+            TestDefaultMethodWrapOperationMixin.reset()
+            AsmRegistry.register(TestDefaultMethodWrapOperationMixin::class.java)
+            val instance = newTransformedTestFixtureInstance()
+
+            // When
+            val result = invokeComprehensiveTest(instance)
+
+            // Then
+            assertThat(result)
+                .`as`("Then: defaultMethod() 调用点应被单独包裹，前后的 parent/interface 调用保持原语义")
+                .contains(
+                    "ParentMethod|ChildOverride-ParentOverridable|InterfaceImpl-Test|" +
+                        "DefaultMethodWrapped-DefaultMethod|LambdaSupplier",
+                )
+                .doesNotContain("InterfaceImpl-DefaultMethodWrapped")
+            assertThat(TestDefaultMethodWrapOperationMixin.observedReceiverClass)
+                .`as`("Then: handler 应接收综合方法中调用 defaultMethod() 的真实 Test receiver")
+                .isEqualTo("Test")
+            assertThat(TestDefaultMethodWrapOperationMixin.observedOriginal)
+                .`as`("Then: Operation.call(receiver) 应执行 Java interface default 方法原始实现")
+                .isEqualTo("DefaultMethod")
+            assertThat(TestDefaultMethodWrapOperationMixin.operationCalls)
+                .`as`("Then: target=Test.defaultMethod() 应只命中综合方法中的 default 调用一次")
+                .isEqualTo(1)
+        }
+
+        @Test
         @DisplayName("@RedirectAllMethods 应在真实综合方法中重定向所有匹配调用")
         fun redirectAllMethodsInComprehensiveTestRewritesEveryMatchingOrdinaryMethodCall() {
             // Given
@@ -23644,6 +23737,93 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: String): String = "#"
+    }
+
+    @AsmMixin("Test")
+    object TestVarArgsWrapMethodMixin {
+        var observedArguments: List<String> = emptyList()
+        var operationCalls = 0
+
+        fun reset() {
+            observedArguments = emptyList()
+            operationCalls = 0
+        }
+
+        @WrapMethod(
+            method = "varArgsMethod([Ljava/lang/String;)Ljava/lang/String;",
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            args: Array<String>,
+            operation: Operation<String>,
+        ): String {
+            observedArguments = args.toList()
+            operationCalls += 1
+            return "wrapped-${operation.call(arrayOf(*args, "C") as Any)}"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestOverloadedTwoArgWrapMethodMixin {
+        var observedArguments: String? = null
+        var operationCalls = 0
+
+        fun reset() {
+            observedArguments = null
+            operationCalls = 0
+        }
+
+        @WrapMethod(
+            method = "overloadedMethod(Ljava/lang/String;I)Ljava/lang/String;",
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            arg1: String,
+            arg2: Int,
+            operation: Operation<String>,
+        ): String {
+            observedArguments = "$arg1:$arg2"
+            operationCalls += 1
+            return "wrapped-${operation.call("$arg1-migrated", arg2 + 1)}"
+        }
+    }
+
+    @AsmMixin("Test")
+    object TestDefaultMethodWrapOperationMixin {
+        var observedReceiverClass: String? = null
+        var observedOriginal: String? = null
+        var operationCalls = 0
+
+        fun reset() {
+            observedReceiverClass = null
+            observedOriginal = null
+            operationCalls = 0
+        }
+
+        @WrapOperation(
+            method = "comprehensiveTest()Ljava/lang/String;",
+            at = At(
+                value = InjectionPoint.INVOKE,
+                target = "Test.defaultMethod()Ljava/lang/String;",
+            ),
+            require = 1,
+            allow = 1,
+        )
+        @JvmStatic
+        fun wrap(
+            receiver: Any,
+            operation: Operation<String>,
+        ): String {
+            observedReceiverClass = receiver.javaClass.simpleName
+            val original = operation.call(receiver)
+            observedOriginal = original
+            operationCalls += 1
+            return "DefaultMethodWrapped-$original"
+        }
     }
 
     @AsmMixin("SliceConstantTarget")
