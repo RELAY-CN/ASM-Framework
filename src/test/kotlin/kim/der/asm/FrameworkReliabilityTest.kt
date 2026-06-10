@@ -24138,7 +24138,7 @@ class FrameworkReliabilityTest {
         fun modify(original: java.lang.invoke.MethodHandle): java.lang.invoke.MethodHandle {
             require(original.invokeWithArguments(10) == "10")
             return java.lang.invoke.MethodHandles.publicLookup().findStatic(
-                Integer::class.java,
+                Int::class.javaObjectType,
                 "toHexString",
                 java.lang.invoke.MethodType.methodType(String::class.java, Int::class.javaPrimitiveType),
             )
@@ -25767,7 +25767,7 @@ class FrameworkReliabilityTest {
     object InheritedInterfaceReturnConstructorInvokerMixin {
         @Invoker("<init>")
         @JvmStatic
-        fun createAsList(value: String): java.util.List<*> = throw UnsupportedOperationException()
+        fun createAsList(value: String): List<*> = throw UnsupportedOperationException()
     }
 
     @AsmMixin("PrivateInterfaceInvokerTarget")

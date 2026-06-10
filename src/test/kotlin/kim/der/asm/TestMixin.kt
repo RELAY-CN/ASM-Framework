@@ -444,7 +444,7 @@ class TestMixin {
         val instance = clazz.getDeclaredConstructor().newInstance()
 
         // 测试泛型方法
-        val genericMethod = clazz.getMethod("genericMethod", Object::class.java)
+        val genericMethod = clazz.getMethod("genericMethod", Any::class.java)
         val genericResult = genericMethod.invoke(instance, "TestString") as String
         assertNotNull(genericResult, "泛型方法应该返回结果")
         println("Generic Method Result: $genericResult")
