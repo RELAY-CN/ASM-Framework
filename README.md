@@ -107,6 +107,7 @@ val transformed = processor.transform(
 - **类型安全** - 完善的 Kotlin 类型系统支持，编译时类型检查
 - **灵活注册** - 支持手动注册、包扫描、JAR 扫描、类加载器扫描等多种注册方式，并可通过 `*WithResult` 入口获取扫描诊断
 - **路径匹配** - 支持使用路径匹配器动态匹配目标类，实现批量处理
+- **调试导出** - `AsmBytecodeDump` 可把转换后字节码写出为 `.class` 或 ASM Trace 文本，便于反编译与指令级排查
 - **Kotlin 友好** - 原生支持 Kotlin object 和 class，自动处理实例化
 
 ## 架构设计

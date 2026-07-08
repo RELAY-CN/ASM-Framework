@@ -1191,6 +1191,66 @@ fun afterReturn(
 
 ## 工具类
 
+### AsmBytecodeDump
+
+转换后字节码调试导出工具。用于排查 Mixin 是否生效、注入点是否命中、参数映射是否正确。
+
+该工具只做只读导出，不会修改输入字节码，也不会注册或触发任何转换。
+
+#### 方法
+
+##### `writeClassFile(classfileBuffer: ByteArray, outputPath: Path): Path`
+
+将 classfile 字节码写出为 `.class` 文件。父目录不存在时会自动创建，已存在文件会被覆盖。
+
+**参数：**
+
+- `classfileBuffer`: 原始或转换后的 classfile 字节码；不得为空
+- `outputPath`: 目标文件路径
+
+**返回：**
+
+- 实际写出的路径
+
+##### `writeClassFile(className: String, classfileBuffer: ByteArray, outputDirectory: Path): Path`
+
+按目标类 internal name 写出 `.class` 文件。`className` 接受 `com/example/Target` 或 `com.example.Target`。
+
+**参数：**
+
+- `className`: 目标类 internal name 或 binary name
+- `classfileBuffer`: 原始或转换后的 classfile 字节码
+- `outputDirectory`: 导出根目录
+
+**返回：**
+
+- 实际写出的路径，例如 `build/asm-dump/com/example/Target.class`
+
+##### `toText(classfileBuffer: ByteArray, parsingOptions: Int = 0): String`
+
+将 classfile 字节码格式化为 ASM Trace 文本，适合快速核对方法签名与指令序列。
+
+**参数：**
+
+- `classfileBuffer`: 原始或转换后的 classfile 字节码
+- `parsingOptions`: 传给 `ClassReader.accept` 的读取标志，默认 `0`
+
+**返回：**
+
+- Trace 文本
+
+##### `writeText(classfileBuffer: ByteArray, outputPath: Path, parsingOptions: Int = 0): Path`
+
+将 ASM Trace 文本写出到文件。
+
+**示例：**
+
+```kotlin
+val transformed = processor.transform(className, classBytes, loader)
+AsmBytecodeDump.writeClassFile(className, transformed, Path.of("build/asm-dump"))
+println(AsmBytecodeDump.toText(transformed))
+```
+
 ### CallbackInfo
 
 回调信息类，用于在注入的方法中控制目标方法的执行流程。

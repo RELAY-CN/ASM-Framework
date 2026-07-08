@@ -1905,12 +1905,28 @@ fun testMixin() {
 
 ### 生成转换后的类文件
 
+推荐使用框架自带的 `AsmBytecodeDump`，它会自动创建父目录，并支持写出 `.class` 或 ASM Trace 文本：
+
 ```kotlin
+import kim.der.asm.utils.AsmBytecodeDump
+import java.nio.file.Path
+
 val transformed = processor.transform(className, classBytes, classLoader)
-Files.write(Paths.get("output/$className.class"), transformed)
+
+// 写出 .class，再用 JD-GUI / CFR 反编译
+AsmBytecodeDump.writeClassFile(
+    className = "com/example/TargetClass",
+    classfileBuffer = transformed,
+    outputDirectory = Path.of("build/asm-dump"),
+)
+
+// 或直接查看 ASM Trace 文本
+val trace = AsmBytecodeDump.toText(transformed)
+println(trace)
+AsmBytecodeDump.writeText(transformed, Path.of("build/asm-dump/Target.trace.txt"))
 ```
 
-然后使用反编译工具（如 JD-GUI）查看。
+`AsmBytecodeDump` 只做只读导出，不会修改输入字节码，也不会触发额外转换。
 
 ### 添加日志
 
@@ -1932,7 +1948,7 @@ javap -s com.example.TargetClass
 ## 常见问题
 
 **Q: 如何调试 ASM 转换？**  
-A: 生成转换后的类文件，使用反编译工具查看。详见 [调试技巧](#调试技巧)
+A: 用 `AsmBytecodeDump.writeClassFile(...)` 导出转换后的 `.class`，或用 `AsmBytecodeDump.toText(...)` 查看 ASM Trace。详见 [调试技巧](#调试技巧)
 
 **Q: Shadow 字段为什么必须是可空类型？**  
 A: Shadow 字段只是引用，不会实际初始化，必须声明为可空类型并初始化为 `null`。
