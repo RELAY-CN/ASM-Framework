@@ -2611,6 +2611,11 @@ class TargetClassContext(
         val type: Type,
         val name: String?,
     ) {
+        /**
+         * 判断该入口参数是否匹配请求的局部变量名集合。
+         *
+         * 空集合表示不按名称过滤；有名称时要求 LocalVariableTable 中的参数名命中集合。
+         */
         fun matchesName(requestedNames: Set<String>): Boolean =
             requestedNames.isEmpty() || (name != null && name in requestedNames)
     }

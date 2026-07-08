@@ -109,6 +109,20 @@ val transformedBytes = processor.transform(
 )
 ```
 
+4. **可选：以 Java Agent 挂载**
+
+发布产物 JAR 已声明 `Premain-Class` / `Agent-Class = kim.der.asm.agent.AsmBootstrap`。
+
+```bash
+java -javaagent:ASM-Framework.jar -cp your-app.jar com.example.Main
+```
+
+注意：
+
+- Mixin 仍需在目标类加载前通过 `AsmRegistry` / `AsmScanner` 注册
+- `premain(String?, Instrumentation)` 与 `agentmain(String?, Instrumentation)` 是 JVM 标准入口；旧的单参数 `agentmain(Instrumentation)` 仅兼容宿主直接调用，已标记废弃
+- Agent 安装时会设置 `canRetransform = true`，便于后续对已加载类做 retransform
+
 ### 支持的注解
 
 - **@AsmMixin** - 标记 Mixin 类

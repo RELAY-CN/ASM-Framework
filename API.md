@@ -204,12 +204,23 @@ ASM 转换失败异常。`AsmProcessor` 在某个 ASM 应用失败时会立即�
 
 `AsmBootstrap` 是 ASM Java Agent 启动入口，实现 `ClassFileTransformer`，用于挂载到 JVM 类加载链路中并按 `AsmRegistry` 的匹配结果应用 ASM 改写。
 
+发布产物 JAR Manifest 会声明：
+
+- `Premain-Class: kim.der.asm.agent.AsmBootstrap`
+- `Agent-Class: kim.der.asm.agent.AsmBootstrap`
+- `Can-Redefine-Classes: true`
+- `Can-Retransform-Classes: true`
+
+启动前请先通过 `AsmRegistry` / `AsmScanner` 注册 Mixin；未注册任何目标时，`transform` 会直接返回原始字节码。
+
 #### 方法
 
 **方法：**
 
 - `transform(loader: ClassLoader?, className: String, classBeingRedefined: Class<*>?, protectionDomain: ProtectionDomain?, classfileBuffer: ByteArray): ByteArray` - 当 `AsmProcessor.shouldTransform(className)` 为 `true` 时读取并改写目标类字节码；没有改写生效时返回原始字节码
-- `agentmain(instrumentation: Instrumentation)` - 通过 `Instrumentation.addTransformer` 注册新的 `AsmBootstrap` 实例
+- `premain(agentArgs: String?, instrumentation: Instrumentation)` - `-javaagent` 启动入口；当前忽略 `agentArgs`，并通过 `addTransformer(..., canRetransform = true)` 安装 transformer
+- `agentmain(agentArgs: String?, instrumentation: Instrumentation)` - 运行期 attach 入口；当前忽略 `agentArgs`，安装行为与 `premain` 相同
+- `agentmain(instrumentation: Instrumentation)` - 旧的单参数安装入口，已标记 `@Deprecated`，请改用标准双参数入口
 
 当前实现只使用 `loader`、`className` 与 `classfileBuffer` 执行转换；`classBeingRedefined` 与 `protectionDomain` 仅保留 Java Agent 调用契约。
 

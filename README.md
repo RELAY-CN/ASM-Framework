@@ -79,6 +79,14 @@ val transformed = processor.transform(
 
 更完整的场景、参数顺序与排错说明见 [GUIDE.md](GUIDE.md)。
 
+可选 Java Agent：
+
+```bash
+java -javaagent:ASM-Framework.jar -cp your-app.jar com.example.Main
+```
+
+JAR Manifest 已声明 `Premain-Class` / `Agent-Class`；Mixin 仍需在目标类加载前注册。
+
 ## 特性
 
 - **类似 Fabric Mixin 的注解系统** - 简洁易用的注解驱动编程，无需直接操作字节码

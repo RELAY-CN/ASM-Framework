@@ -62,6 +62,16 @@ tasks.withType<JavaCompile> {
 }
 
 tasks.jar {
+    manifest {
+        attributes(
+            mapOf(
+                "Premain-Class" to "kim.der.asm.agent.AsmBootstrap",
+                "Agent-Class" to "kim.der.asm.agent.AsmBootstrap",
+                "Can-Redefine-Classes" to "true",
+                "Can-Retransform-Classes" to "true",
+            ),
+        )
+    }
     doLast {
         makeGitCommitHashFile()
     }

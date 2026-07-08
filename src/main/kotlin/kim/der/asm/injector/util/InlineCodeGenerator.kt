@@ -29,9 +29,26 @@ object InlineCodeGenerator {
      * 因此不能只把异常表挂到原始指令上复用。
      */
     data class InlineCode(
+        /**
+         * 已适配到目标方法槽位的指令副本。
+         */
         val instructions: InsnList,
+        /**
+         * 与 [instructions] 同源的 try/catch 表；label 必须指向本份指令副本。
+         */
         val tryCatchBlocks: List<TryCatchBlockNode>,
     ) {
+        /**
+         * 深拷贝当前内联结果。
+         *
+         * RETURN 等多锚点注入可能把同一份 handler 字节码插入多次；每次插入都需要独立的
+         * 指令与 try/catch label 映射，避免多个插入点共享同一组 LabelNode。
+         *
+         * @return 与当前结果语义等价、但 label/指令节点互不共享的新副本
+         *
+         * @author Dr (dr@der.kim)
+         * @date 2026-07-09
+         */
         fun deepCopy(): InlineCode {
             val labelMap = mutableMapOf<LabelNode, LabelNode>()
             instructions.toArray().filterIsInstance<LabelNode>().forEach { label ->
