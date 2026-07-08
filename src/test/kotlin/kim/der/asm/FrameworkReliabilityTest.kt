@@ -334,6 +334,51 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("公开文档应锁定普通 AsmInject handler 参数顺序")
+    fun documentationContractsKeepAsmInjectHandlerParameterOrderAligned() {
+        // Given
+        val readme = Files.readString(Path.of("README.md"))
+        val guide = Files.readString(Path.of("GUIDE.md"))
+        val api = Files.readString(Path.of("API.md"))
+        val asmInjectKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
+        val parameterMapperKDoc =
+            Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "util", "ParameterMapper.kt"))
+        val license = Files.readString(Path.of("LICENSE"))
+
+        // Then
+        assertThat(readme)
+            .`as`("Then: README 应提供可复制的快速开始，并指向 LICENSE")
+            .contains("## 快速开始")
+            .contains("implementation(\"kim.der:ASM-Framework:<version>\")")
+            .contains("参数顺序：CallbackInfo → 目标 this（可选）→ 原方法参数前缀")
+            .contains("[LICENSE](LICENSE)")
+        assertThat(license)
+            .`as`("Then: LICENSE 文件应存在且保留版权声明")
+            .contains("Copyright 2020-2025 Dr (dr@der.kim)")
+            .contains("RELAY-CN LICENSE")
+        assertThat(guide)
+            .`as`("Then: GUIDE 应有独立的 Handler 参数顺序章节，并修正 this FAQ")
+            .contains("## Handler 参数顺序")
+            .contains("**`CallbackInfo` / `CallbackInfoReturnable<T>`**（可选；需要取消或改返回值时放在第一位）")
+            .contains("**目标类的 `this`**（可选；仅实例目标方法")
+            .contains("详见 [Handler 参数顺序](#handler-参数顺序)")
+            .doesNotContain("如果方法签名包含目标类类型作为第一个参数，可以接收 `this`")
+        assertThat(api)
+            .`as`("Then: API 应说明普通 AsmInject 推荐参数顺序")
+            .contains("可选 `CallbackInfo` → 可选目标类 `this` → 目标方法参数前缀 → 可选 `@Local`")
+            .contains("`CallbackInfo` 必须位于第一位")
+        assertThat(asmInjectKDoc)
+            .`as`("Then: AsmInject KDoc 应锁定参数顺序契约")
+            .contains("可选的 [CallbackInfo] → 可选的目标类 `this` → 目标方法参数前缀 → 可选的 [Local]")
+            .contains("`CallbackInfo` 必须位于第一位")
+        assertThat(parameterMapperKDoc)
+            .`as`("Then: ParameterMapper KDoc 应提示错误顺序不会自动纠正")
+            .contains("可选 [CallbackInfo] → 可选目标 `this` → 目标方法参数前缀 → 可选 [Local]")
+            .contains("若把 [CallbackInfo] 放在末尾，框架不会自动纠正")
+    }
+
+    @Test
     @DisplayName("公开 KDoc 应保持 ModifyArgs Args 容器契约一致")
     fun publicKDocKeepsModifyArgsArgsContainerContractAligned() {
         // Given

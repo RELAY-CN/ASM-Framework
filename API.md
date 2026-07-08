@@ -382,8 +382,11 @@ object RemoveInterfacesMixin
 - `inline: Boolean = false` - 是否内联代码；handler 内部普通 try/catch 会随内联字节码一起复制，异常范围只覆盖 handler 自身指令
 
 handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 `CallbackInfoReturnable<T>` 标注返回值类型。
+普通 `@AsmInject`（`HEAD` / `TAIL` / `RETURN` 与多数指令点观察注入）的推荐参数顺序是：
+可选 `CallbackInfo` → 可选目标类 `this` → 目标方法参数前缀 → 可选 `@Local`。
+`CallbackInfo` 必须位于第一位；把它放在末尾会导致参数映射失败或拿到错误值。
 普通 `HEAD` / `TAIL` / `RETURN` 注入以及 `INVOKE_STRING` / `FIELD` / `FIELD_ASSIGN` / `LOAD` / `STORE` / `NEW` / `CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `ARRAY_LENGTH` / `THROW`
-指令点注入，可在回调参数后按顺序接收目标方法参数前缀。
+指令点注入，可在回调参数后按顺序接收目标方法参数前缀；需要访问目标实例时，把兼容目标类类型放在 `CallbackInfo` 之后、原方法参数之前。
 `INVOKE` 的 `Shift.BEFORE` / `Shift.AFTER` 注入和 `INVOKE_ASSIGN` 注入会先接收匹配调用的方法参数前缀，再继续接收目标方法参数前缀；
 引用或数组调用参数、目标方法参数可用原值类型的父类、接口、`Any` 或 `Object` 接收，基础类型仍需精确匹配。
 实例调用 receiver 会被框架保存和恢复，但不会作为普通 handler 参数传入；`invokedynamic` 调用没有 receiver，handler 参数来自动态调用点描述符。

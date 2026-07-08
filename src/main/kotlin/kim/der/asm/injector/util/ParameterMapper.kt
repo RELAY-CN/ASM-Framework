@@ -21,6 +21,8 @@ import java.lang.reflect.Method
  *
  * 用于在生成 ASM 方法调用指令时，把目标方法的局部变量槽位映射到 ASM 方法参数。
  * 当前映射按声明顺序匹配参数，并支持在 ASM 方法首参中跳过 [CallbackInfo]、为实例方法传入目标 `this`。
+ * 普通注入的推荐顺序是：可选 [CallbackInfo] → 可选目标 `this` → 目标方法参数前缀 → 可选 [Local]。
+ * 若把 [CallbackInfo] 放在末尾，框架不会自动纠正，后续参数映射会失败。
  * handler 参数显式标记 [Local] 时，会从调用方提供的局部变量捕获上下文读取当前注入点可见的槽位值。
  *
  * @author Dr (dr@der.kim)

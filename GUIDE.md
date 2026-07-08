@@ -6,6 +6,7 @@
 
 - [快速开始](#快速开始)
 - [常见场景](#常见场景)
+- [Handler 参数顺序](#handler-参数顺序)
 - [最佳实践](#最佳实践)
 - [调试技巧](#调试技巧)
 - [故障排除](#故障排除)
@@ -18,7 +19,7 @@
 
 ```kotlin
 dependencies {
-    implementation("kim.der:asm-framework:版本号")
+    implementation("kim.der:ASM-Framework:<version>")
 }
 ```
 
@@ -1602,6 +1603,61 @@ object FieldPointMixin {
 
 普通 `INVOKE_STRING` 同样属于观察型指令点，可用 `Slice` 缩小候选调用范围，也可用 `At.by` 调整插入锚点。它必须通过 `At.target = "owner.name(desc)"` 或 `At.target = "owner/name(desc)"` 匹配普通方法调用，并通过唯一一个 `ldc=<string>` 或 `string=<string>` 过滤调用实参中的直接 `LDC String`；过滤值按 `=` 后的完整文本匹配，前后空格不会被修剪；handler 不接收字符串实参，也不会替换该字符串。局部变量、字符串拼接、方法返回值和 `invokedynamic` 字符串来源不会被匹配。需要在同一类调用点上替换调用、包裹操作、条件保留、改写返回值或替换 receiver 时，使用 `@Redirect(INVOKE)`、`@WrapOperation(INVOKE)`、`@WrapWithCondition(INVOKE/INVOKE_ASSIGN)`、`@ModifyExpressionValue(INVOKE/INVOKE_ASSIGN)` 或 `@ModifyReceiver(INVOKE)` 并声明同样的直接字符串实参过滤；`@ModifyReceiver(INVOKE)` 的过滤只检查调用参数来源，不匹配 receiver。
 
+## Handler 参数顺序
+
+普通 `@AsmInject`（`HEAD` / `TAIL` / `RETURN` 与多数指令点观察注入）的 handler 参数按声明顺序映射。
+把 `CallbackInfo` 放错位置时，框架不会自动纠正，多余参数会映射失败或拿到错误值。
+
+### 标准顺序
+
+1. **`CallbackInfo` / `CallbackInfoReturnable<T>`**（可选；需要取消或改返回值时放在第一位）
+2. **目标类的 `this`**（可选；仅实例目标方法，类型需兼容目标类，可用父类 / 接口 / `Any` / `Object`）
+3. **目标方法参数前缀**（按原方法声明顺序；可不声明后面不需要的参数）
+4. **`@Local` 局部变量**（可选；只读捕获当前注入锚点可见的局部变量）
+
+### 正确示例
+
+```kotlin
+@AsmInject(
+    method = "a(Lcom/example/Unit;FZ)V",
+    target = InjectionPoint.HEAD,
+    cancellable = true,
+)
+private fun optimizeEarlyExit(
+    ci: CallbackInfo,          // 1. CallbackInfo
+    self: TargetClass,         // 2. 目标 this
+    unit: Unit,                // 3. 原方法参数
+    radius: Float,
+    firstPass: Boolean,
+) {
+    if (radius <= 0f) {
+        ci.cancel()
+    }
+}
+```
+
+### 常见错误
+
+```kotlin
+// ❌ CallbackInfo 放在最后：会被当成“多出来的目标参数”，映射失败或拿到 null
+private fun wrongOrder(
+    self: TargetClass,
+    unit: Unit,
+    radius: Float,
+    firstPass: Boolean,
+    ci: CallbackInfo,
+)
+```
+
+### 可省略的参数
+
+- 不需要取消 / 改返回值时，可省略 `CallbackInfo`（保持 `cancellable = false`）
+- 不需要访问目标实例时，可省略 `this`
+- 不需要全部原方法参数时，只声明需要的前缀即可
+- `INVOKE` 的 `BEFORE` / `AFTER` 与 `INVOKE_ASSIGN` 会先接收匹配调用点的方法参数前缀，再追加目标方法参数前缀；实例调用的 receiver 不会作为普通 handler 参数传入
+
+更多真实示例见 `src/test/kotlin/kim/der/asm/mixin/ThisAccessMixin.kt`。
+
 ## 最佳实践
 
 ### 1. 组织 Mixin 类
@@ -1882,7 +1938,9 @@ A: 生成转换后的类文件，使用反编译工具查看。详见 [调试技
 A: Shadow 字段只是引用，不会实际初始化，必须声明为可空类型并初始化为 `null`。
 
 **Q: 如何访问目标类的 `this`？**  
-A: 在 `@AsmInject` 中，如果方法签名包含目标类类型作为第一个参数，可以接收 `this`。
+A: 在普通 `@AsmInject` 中，把目标类兼容类型放在 `CallbackInfo` 之后、原方法参数之前。
+完整顺序是：`CallbackInfo`（可选）→ 目标 `this`（可选）→ 原方法参数前缀 → `@Local`（可选）。
+详见 [Handler 参数顺序](#handler-参数顺序)。
 
 **Q: 支持 Kotlin 协程吗？**  
 A: 目前不支持，建议在注入方法中使用同步代码。

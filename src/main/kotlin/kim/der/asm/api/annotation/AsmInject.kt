@@ -21,6 +21,9 @@ package kim.der.asm.api.annotation
  *
  * ## Handler 参数
  *
+ * - 普通 `@AsmInject`（HEAD / TAIL / RETURN 与多数指令点观察注入）的参数顺序为：
+ *   可选的 [CallbackInfo] → 可选的目标类 `this` → 目标方法参数前缀 → 可选的 [Local] 局部变量。
+ *   `CallbackInfo` 必须位于第一位；把它放在末尾会导致参数映射失败或拿到错误值。
  * - HEAD、TAIL、RETURN 与普通指令点注入可在 [CallbackInfo] 后按顺序接收目标方法参数前缀。
  * - [InjectionPoint.TAIL]、[InjectionPoint.RETURN] 与普通指令点注入可在 [CallbackInfo] 后用 [Local]
  *   标记 handler 参数，只读捕获当前注入锚点可见的 LocalVariableTable 局部变量；

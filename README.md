@@ -18,6 +18,67 @@ IronCore ASM-Framework 是一个基于 ASM 的字节码操作框架，提供了�
 
 框架采用 Kotlin 编写，充分利用了 Kotlin 的类型系统和语言特性，提供了类型安全、易于使用的 API。通过注解系统，开发者可以声明式地定义字节码转换规则，框架会自动处理字节码的解析、转换和生成。
 
+## 快速开始
+
+### 1. 添加依赖
+
+```kotlin
+repositories {
+    mavenCentral()
+    // 若使用项目私有仓库，按实际坐标配置
+}
+
+dependencies {
+    implementation("kim.der:ASM-Framework:<version>")
+}
+```
+
+`<version>` 当前发布以 Git short commit 为准；也可直接依赖本地 `publishToMavenLocal` 产物。
+
+### 2. 写第一个 Mixin
+
+```kotlin
+import kim.der.asm.api.annotation.*
+
+@AsmMixin("com/example/TargetClass")
+object DemoMixin {
+    @AsmInject(
+        method = "run(Ljava/lang/String;)V",
+        target = InjectionPoint.HEAD,
+        cancellable = true,
+        require = 1,
+        allow = 1,
+    )
+    fun onRun(ci: CallbackInfo, target: TargetClass, input: String) {
+        // 参数顺序：CallbackInfo → 目标 this（可选）→ 原方法参数前缀
+        if (input.isBlank()) {
+            ci.cancel()
+        }
+    }
+}
+```
+
+### 3. 注册并转换
+
+```kotlin
+import kim.der.asm.AsmRegistry
+import kim.der.asm.AsmScanner
+import kim.der.asm.transformer.AsmProcessor
+
+// 手动注册，或扫描包
+AsmRegistry.register(DemoMixin::class.java)
+// AsmScanner.scanPackage("com.example.mixin")
+
+val processor = AsmProcessor()
+val transformed = processor.transform(
+    className = "com/example/TargetClass",
+    classfileBuffer = originalBytes,
+    loader = null,
+)
+```
+
+更完整的场景、参数顺序与排错说明见 [GUIDE.md](GUIDE.md)。
+
 ## 特性
 
 - **类似 Fabric Mixin 的注解系统** - 简洁易用的注解驱动编程，无需直接操作字节码
@@ -91,5 +152,7 @@ Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转
 欢迎提交 Issue 和 Pull Request！
 
 ## 许可证
+
+见 [LICENSE](LICENSE)。
 
 Copyright 2020-2025 Dr (dr@der.kim) and contributors.
