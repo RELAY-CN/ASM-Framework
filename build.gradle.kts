@@ -2,9 +2,15 @@
  * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
  */
 
+import org.gradle.api.artifacts.Configuration
+import org.gradle.api.artifacts.ResolvedArtifact
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.bundling.Jar
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-import org.jetbrains.kotlin.gradle.internal.backend.common.serialization.metadata.DynamicTypeDeserializer.id
-import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -15,7 +21,13 @@ plugins {
 }
 
 group = "kim.der"
-version = getGitCommitHash()
+version =
+    providers
+        .exec {
+            commandLine("git", "rev-parse", "--short", "HEAD")
+        }.standardOutput.asText
+        .map(String::trim)
+        .get()
 
 repositories {
     maven(url = "https://mirrors.cloud.tencent.com/nexus/repository/maven-public")
@@ -53,6 +65,8 @@ java {
     withSourcesJar()
 }
 
+configureGradleRes()
+
 tasks.withType<JavaCompile> {
     // 使用Java11做标准语法并编译
     sourceCompatibility = JvmTarget.JVM_11.target
@@ -72,13 +86,17 @@ tasks.jar {
             ),
         )
     }
-    doLast {
-        makeGitCommitHashFile()
-    }
 }
+
+val mainJar = tasks.named<Jar>("jar")
 
 tasks.test {
     useJUnitPlatform()
+    dependsOn(mainJar)
+    inputs.file(mainJar.flatMap { it.archiveFile }).withPropertyName("mainJar")
+    doFirst {
+        systemProperty("asmFramework.mainJar", mainJar.get().archiveFile.get().asFile.absolutePath)
+    }
 }
 
 configureGraalVmAgent()
@@ -88,7 +106,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "kim.der"
             artifactId = project.name
-            version = getGitCommitHash()
+            version = project.version.toString()
 
             from(project.components.getByName("java"))
 
@@ -137,55 +155,139 @@ publishing {
     }
 }
 
-// Helper functions from buildSrc
-fun getGitCommitHash(): String =
-    try {
-        Runtime
-            .getRuntime()
-            .exec(arrayOf("git", "rev-parse", "--short", "HEAD"))
-            .inputStream
-            .bufferedReader()
-            .readText()
-            .trim()
-    } catch (_: Exception) {
-        "unknown"
+/**
+ * 生成可供下游运行时读取的构建资源，并只在 JAR 阶段注入兼容路径。
+ *
+ * FileList 依赖 classes，因此不能把 generated-resources 反向挂到 processResources，
+ * 否则会形成 `processResources -> generateGradleRes -> classes -> processResources` 任务环。
+ */
+fun Project.configureGradleRes() {
+    val generatedDirectory = layout.buildDirectory.dir("generated-resources/gradleRes/$name")
+    val compileClasspath = configurations.getByName("compileClasspath")
+    val compileOnly = configurations.getByName("compileOnly")
+    val runtimeClasspath = configurations.getByName("runtimeClasspath")
+    val mainOutput = extensions.getByType(JavaPluginExtension::class.java).sourceSets.getByName("main").output
+    val dependencyLines =
+        providers.provider {
+            resolveGradleResDependencyLines(compileClasspath, compileOnly, runtimeClasspath)
+        }
+    val implementationLines = dependencyLines.map { it.first }
+    val compileOnlyLines = dependencyLines.map { it.second }
+    val gitCommitHash = version.toString()
+    val fileListFile = generatedDirectory.get().file("FileList.txt").asFile
+    val compileOnlyFile = generatedDirectory.get().file("compileOnly.txt").asFile
+    val implementationFile = generatedDirectory.get().file("implementation.txt").asFile
+    val gitCommitHashFile = generatedDirectory.get().file("GitCommitHash.txt").asFile
+    val buildDirectory = layout.buildDirectory.get().asFile
+    val fileListRoots =
+        listOf(
+            File(buildDirectory, "classes/kotlin/main") to "kotlin/main",
+            File(buildDirectory, "classes/java/main") to "java/main",
+            File(buildDirectory, "resources/main") to "main",
+        )
+
+    val generateGradleRes =
+        tasks.register("generateGradleRes") {
+            group = "build"
+            description = "生成 gradleRes 四件套到 build/generated-resources"
+            dependsOn(tasks.named("classes"))
+
+            inputs.property("formatVersion", 1)
+            inputs.property("gitCommitHash", gitCommitHash)
+            inputs.property("implementationDependencies", implementationLines)
+            inputs.property("compileOnlyDependencies", compileOnlyLines)
+            inputs.files(mainOutput).withPathSensitivity(PathSensitivity.RELATIVE)
+            inputs.files(compileClasspath).withPathSensitivity(PathSensitivity.NONE)
+            inputs.files(runtimeClasspath).withPathSensitivity(PathSensitivity.NONE)
+            outputs.files(fileListFile, compileOnlyFile, implementationFile, gitCommitHashFile)
+
+            doLast {
+                val fileList =
+                    fileListRoots
+                        .flatMap { (root, prefix) ->
+                            if (!root.isDirectory) {
+                                emptyList()
+                            } else {
+                                root.walkTopDown()
+                                    .filter(File::isFile)
+                                    .map { file -> "$prefix/${file.relativeTo(root).invariantSeparatorsPath}" }
+                                    .toList()
+                            }
+                        }.sorted()
+                        .joinToString("\n")
+                val contents =
+                    mapOf(
+                        fileListFile to fileList,
+                        compileOnlyFile to compileOnlyLines.get().joinToString("\n"),
+                        implementationFile to implementationLines.get().joinToString("\n"),
+                        gitCommitHashFile to gitCommitHash,
+                    )
+
+                contents.forEach { (file, content) ->
+                    file.parentFile.mkdirs()
+                    if (!file.isFile || file.readText(Charsets.UTF_8) != content) {
+                        file.writeText(content, Charsets.UTF_8)
+                    }
+                }
+            }
+        }
+
+    // 迁移期忽略源树遗留副本，避免旧 Git hash 与 generated 四件套同时进入 JAR。
+    tasks.named<ProcessResources>("processResources") {
+        exclude("gradleRes/**")
     }
 
-fun Project.makeGitCommitHashFile() {
-    try {
-        val gitHashFile = File("$rootDir/src/main/resources/gradleRes/$name/GitCommitHash.txt")
-        gitHashFile.fuckGithub()
-        gitHashFile.writeText(getGitCommitHash())
-    } catch (_: Exception) {
-        // 忽略
+    tasks.named<Jar>("jar") {
+        dependsOn(generateGradleRes)
+        from(generatedDirectory) {
+            include("FileList.txt", "compileOnly.txt", "implementation.txt", "GitCommitHash.txt")
+            into("gradleRes/${project.name}")
+        }
     }
 }
 
-fun File.fuckGithub() {
-    try {
-        if (this.parentFile == null || this.parentFile!!.delete()) {
-            return
+private fun Project.resolveGradleResDependencyLines(
+    compileClasspath: Configuration,
+    compileOnly: Configuration,
+    runtimeClasspath: Configuration,
+): Pair<List<String>, List<String>> {
+    val compileOnlyArtifacts: Set<List<String?>> =
+        compileOnly.allDependencies
+            .flatMap { dependency ->
+                val detachedConfiguration = configurations.detachedConfiguration(dependency)
+                compileClasspath.attributes.keySet().forEach { attribute ->
+                    @Suppress("UNCHECKED_CAST")
+                    val typedAttribute = attribute as Attribute<Any>
+                    compileClasspath.attributes.getAttribute(typedAttribute)?.let { value ->
+                        detachedConfiguration.attributes.attribute(typedAttribute, value)
+                    }
+                }
+                detachedConfiguration.resolvedConfiguration
+                    .resolvedArtifacts
+                    .map(ResolvedArtifact::gradleResKey)
+            }.toSet()
+    val runtimeArtifacts =
+        runtimeClasspath.resolvedConfiguration.resolvedArtifacts
+            .map(ResolvedArtifact::gradleResKey)
+            .toSet()
+    val classified: List<Pair<Boolean, String>> =
+        compileClasspath.resolvedConfiguration.resolvedArtifacts.map { artifact: ResolvedArtifact ->
+            val dependencyKind =
+                if (artifact.id.componentIdentifier is ProjectComponentIdentifier) "project" else artifact.type
+            val id = artifact.moduleVersion.id
+            val line = "$dependencyKind:${id.group}:${id.name}:${id.version}:${artifact.classifier}"
+            val key = artifact.gradleResKey()
+            (key in compileOnlyArtifacts && key !in runtimeArtifacts) to line
         }
-        this.parentFile?.mkdirs()
+    val (compileOnlyEntries, implementationEntries) = classified.partition { it.first }
 
-        if (this.isDirectory) {
-            return
-        }
+    return implementationEntries.map { it.second }.distinct().sorted() to
+        compileOnlyEntries.map { it.second }.distinct().sorted()
+}
 
-        if (!this.exists()) {
-            try {
-                Files.createFile(toPath())
-            } catch (e: IOException) {
-                println(path)
-                println(canWrite())
-                error(e)
-            }
-        } else {
-            this.delete()
-        }
-    } catch (_: Exception) {
-        println("remove Files Error???")
-    }
+private fun ResolvedArtifact.gradleResKey(): List<String?> {
+    val id = moduleVersion.id
+    return listOf(id.group, id.name, id.version, type, classifier)
 }
 
 /*
