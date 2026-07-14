@@ -33,7 +33,8 @@ import java.lang.reflect.Modifier
  *
  * 1. RETURN 与 TAIL 注入
  * 2. 其他非 HEAD 注入（如 INVOKE）
- * 3. 最后处理 HEAD 注入
+ * 3. HEAD 注入
+ * 4. 最后执行 [AsmDelete] 成员删除
  *
  * 以上顺序用于避免 HEAD 注入创建的 RETURN 指令被 RETURN 注入二次处理，导致“取消分支仍触发 RETURN 注入”这类行为偏差。
  *
@@ -48,6 +49,11 @@ class TargetClassContext(
 ) {
     private val groupStates = linkedMapOf<String, GroupState>()
 
+    private data class AsmDeletePlan(
+        val methodSignatures: List<String>,
+        val fieldNames: List<String>,
+    )
+
     /**
      * 应用 ASM 到目标类。
      *
@@ -57,6 +63,9 @@ class TargetClassContext(
      */
     fun applyAsm(): Boolean {
         var transformed = false
+        val methodsToProcess = asmInfo.asmClass.declaredMethods.toList()
+        val fieldsToProcess = asmInfo.asmClass.declaredFields.toList()
+        val asmDeletePlan = buildAsmDeletePlan(methodsToProcess, fieldsToProcess)
 
         // 检查是否需要为 class 类型的 Mixin 创建静态字段
         ensureSingletonField()
@@ -100,7 +109,6 @@ class TargetClassContext(
 
         // 收集所有需要处理的方法，按注入点类型分组
         // 注意：必须按照特定的顺序处理注入，以确保行为一致
-        val methodsToProcess = asmInfo.asmClass.declaredMethods.toList()
         val copyMethodNames = buildCopyMethodNames(methodsToProcess)
 
         // 第一轮：处理 RETURN 和 TAIL 注入（必须在 HEAD 注入之前）
@@ -281,7 +289,204 @@ class TargetClassContext(
         }
 
         verifyGroupCounts()
+        if (applyAsmDeletePlan(asmDeletePlan)) {
+            transformed = true
+        }
         return transformed
+    }
+
+    /**
+     * 在改写目标类前解析并校验全部 @AsmDelete 声明。
+     *
+     * 删除固定在最终阶段执行；预检保证配置错误不会在目标 [ClassNode] 已被部分改写后才暴露。
+     */
+    private fun buildAsmDeletePlan(
+        methods: List<Method>,
+        fields: List<java.lang.reflect.Field>,
+    ): AsmDeletePlan {
+        if (asmInfo.asmClass.getAnnotation(AsmDelete::class.java) != null) {
+            throw IllegalStateException(
+                "@AsmDelete on asm class ${asmInfo.asmClass.name} cannot delete target class $className; " +
+                    "apply it to a method or field declaration instead",
+            )
+        }
+
+        methods
+            .firstOrNull { method ->
+                method.getAnnotation(AsmDelete::class.java) != null && hasConflictingAsmDeleteAnnotation(method)
+            }?.let { method ->
+                throw IllegalStateException(
+                    "@AsmDelete cannot be combined with another transformation annotation on " +
+                        "${asmInfo.asmClass.name}.${method.name}",
+                )
+            }
+        fields
+            .firstOrNull { field ->
+                field.getAnnotation(AsmDelete::class.java) != null && hasConflictingAsmDeleteAnnotation(field)
+            }?.let { field ->
+                throw IllegalStateException(
+                    "@AsmDelete cannot be combined with another field transformation annotation on " +
+                        "${asmInfo.asmClass.name}.${field.name}",
+                )
+            }
+
+        val methodSignatures =
+            methods.mapNotNull { method ->
+                val annotation = method.getAnnotation(AsmDelete::class.java) ?: return@mapNotNull null
+                val methodSignature = annotation.value.ifEmpty { buildMethodSignature(method) }
+                val (methodName, methodDesc) = parseMethodSignature(methodSignature)
+                if (methodName == "<init>" || methodName == "<clinit>") {
+                    throw IllegalStateException("Cannot remove lifecycle method $methodSignature in class $className")
+                }
+                if (methodName.isEmpty() || methodDesc.isEmpty()) {
+                    throw IllegalStateException(
+                        "@AsmDelete method target must use a complete JVM signature: $methodSignature",
+                    )
+                }
+                val validDescriptor =
+                    try {
+                        val argumentTypes = Type.getArgumentTypes(methodDesc)
+                        val returnType = Type.getReturnType(methodDesc)
+                        Type.getMethodDescriptor(returnType, *argumentTypes) == methodDesc
+                    } catch (_: IllegalArgumentException) {
+                        false
+                    } catch (_: IndexOutOfBoundsException) {
+                        false
+                    }
+                if (!validDescriptor) {
+                    throw IllegalStateException(
+                        "@AsmDelete method target has an invalid JVM descriptor: $methodSignature",
+                    )
+                }
+                val targetMethod = requireTargetMethod(methodSignature)
+                "${targetMethod.name}${targetMethod.desc}"
+            }
+        val fieldNames =
+            fields.mapNotNull { field ->
+                val annotation = field.getAnnotation(AsmDelete::class.java) ?: return@mapNotNull null
+                val fieldName = annotation.value.ifEmpty { field.name }
+                requireTargetField(fieldName)
+                fieldName
+            }
+
+        if (methodSignatures.isEmpty() && fieldNames.isEmpty()) {
+            return AsmDeletePlan(emptyList(), emptyList())
+        }
+
+        methodSignatures
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .firstOrNull { it.value > 1 }
+            ?.let { duplicate ->
+                throw IllegalStateException(
+                    "@AsmDelete target method ${duplicate.key} is declared more than once in ${asmInfo.asmClass.name}",
+                )
+            }
+        fieldNames
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .firstOrNull { it.value > 1 }
+            ?.let { duplicate ->
+                throw IllegalStateException(
+                    "@AsmDelete target field ${duplicate.key} is declared more than once in ${asmInfo.asmClass.name}",
+                )
+            }
+
+        val removeMethodSignatures =
+            methods.mapNotNull { method ->
+                val annotation = method.getAnnotation(RemoveMethod::class.java) ?: return@mapNotNull null
+                val selector = annotation.method.ifEmpty { buildMethodSignature(method) }
+                findTargetMethod(selector)?.let { targetMethod -> "${targetMethod.name}${targetMethod.desc}" }
+            }.toSet()
+        methodSignatures.firstOrNull(removeMethodSignatures::contains)?.let { duplicate ->
+            throw IllegalStateException(
+                "@AsmDelete target method $duplicate is also targeted by @RemoveMethod in ${asmInfo.asmClass.name}",
+            )
+        }
+
+        val removeFieldNames = mutableSetOf<String>()
+        methods.forEach { method ->
+            method.getAnnotation(RemoveField::class.java)?.let { annotation ->
+                removeFieldNames += annotation.field.ifEmpty { inferFieldNameFromRemoveFieldMethod(method.name) }
+            }
+        }
+        fields.forEach { field ->
+            field.getAnnotation(RemoveField::class.java)?.let { annotation ->
+                removeFieldNames += annotation.field.ifEmpty { field.name }
+            }
+        }
+        fieldNames.firstOrNull(removeFieldNames::contains)?.let { duplicate ->
+            throw IllegalStateException(
+                "@AsmDelete target field $duplicate is also targeted by @RemoveField in ${asmInfo.asmClass.name}",
+            )
+        }
+
+        val generatedMethodReferences = mutableMapOf<String, String>()
+        methods.forEach { method ->
+            method.getAnnotation(WrapMethod::class.java)?.let { annotation ->
+                val targetMethod =
+                    if (annotation.method.isNotEmpty()) {
+                        findTargetMethod(annotation.method)
+                    } else {
+                        resolveWrapMethodTargetMethod(method, annotation).first
+                    }
+                targetMethod?.let {
+                    generatedMethodReferences.putIfAbsent("${it.name}${it.desc}", "@WrapMethod")
+                }
+            }
+            method.getAnnotation(Invoker::class.java)?.let { annotation ->
+                val targetMethodName = annotation.value.ifEmpty { inferMethodNameFromInvoker(method.name) }
+                if (targetMethodName != "<init>") {
+                    generatedMethodReferences.putIfAbsent(
+                        "$targetMethodName${Type.getMethodDescriptor(method)}",
+                        "@Invoker",
+                    )
+                }
+            }
+            method.getAnnotation(Shadow::class.java)?.let { annotation ->
+                val targetMethodName = resolveShadowTargetName(annotation.method, method.name)
+                generatedMethodReferences.putIfAbsent(
+                    "$targetMethodName${Type.getMethodDescriptor(method)}",
+                    "@Shadow",
+                )
+            }
+        }
+        methodSignatures.firstOrNull(generatedMethodReferences::containsKey)?.let { target ->
+            throw IllegalStateException(
+                "@AsmDelete target method $target cannot also be referenced by " +
+                    "${generatedMethodReferences.getValue(target)} in ${asmInfo.asmClass.name}",
+            )
+        }
+
+        val generatedFieldReferences = mutableMapOf<String, String>()
+        methods.forEach { method ->
+            method.getAnnotation(Accessor::class.java)?.let { annotation ->
+                val targetFieldName = annotation.value.ifEmpty { inferFieldNameFromMethod(method.name) }
+                generatedFieldReferences.putIfAbsent(targetFieldName, "@Accessor")
+            }
+        }
+        fields.forEach { field ->
+            field.getAnnotation(Shadow::class.java)?.let { annotation ->
+                val targetFieldName = resolveShadowTargetName(annotation.method, field.name)
+                generatedFieldReferences.putIfAbsent(targetFieldName, "@Shadow")
+            }
+        }
+        fieldNames.firstOrNull(generatedFieldReferences::containsKey)?.let { target ->
+            throw IllegalStateException(
+                "@AsmDelete target field $target cannot also be referenced by " +
+                    "${generatedFieldReferences.getValue(target)} in ${asmInfo.asmClass.name}",
+            )
+        }
+
+        return AsmDeletePlan(methodSignatures, fieldNames)
+    }
+
+    private fun applyAsmDeletePlan(plan: AsmDeletePlan): Boolean {
+        plan.methodSignatures.forEach { removeTargetMethod(it) }
+        plan.fieldNames.forEach { removeTargetField(it) }
+        return plan.methodSignatures.isNotEmpty() || plan.fieldNames.isNotEmpty()
     }
 
     /**
@@ -361,8 +566,13 @@ class TargetClassContext(
             val shadowAnnotation = field.getAnnotation(Shadow::class.java)
             val mutableAnnotation = field.getAnnotation(Mutable::class.java)
             val finalAnnotation = field.getAnnotation(Final::class.java)
+            val asmDeleteAnnotation = field.getAnnotation(AsmDelete::class.java)
             val addFieldAnnotation = field.getAnnotation(AddField::class.java)
             val removeFieldAnnotation = field.getAnnotation(RemoveField::class.java)
+
+            if (asmDeleteAnnotation != null) {
+                continue
+            }
 
             if (addFieldAnnotation != null) {
                 if (applyAddField(field, addFieldAnnotation)) {
@@ -4019,10 +4229,7 @@ class TargetClassContext(
             annotation.field.ifEmpty {
                 field.name
             }
-        val targetField = requireTargetField(targetFieldName)
-
-        classNode.fields.remove(targetField)
-        return true
+        return removeTargetField(targetFieldName)
     }
 
     /**
@@ -4036,10 +4243,7 @@ class TargetClassContext(
             annotation.field.ifEmpty {
                 inferFieldNameFromRemoveFieldMethod(method.name)
             }
-        val targetField = requireTargetField(targetFieldName)
-
-        classNode.fields.remove(targetField)
-        return true
+        return removeTargetField(targetFieldName)
     }
 
     /**
@@ -4057,11 +4261,57 @@ class TargetClassContext(
                 annotation.method
             }
 
+        return removeTargetMethod(methodSignature)
+    }
+
+    private fun hasConflictingAsmDeleteAnnotation(method: Method): Boolean =
+        method.annotations.any { annotation ->
+            annotation.annotationClass.java != AsmDelete::class.java &&
+                annotation.annotationClass.java in setOf(
+                    Group::class.java,
+                    RemoveMethod::class.java,
+                    RemoveField::class.java,
+                    RemoveSynchronized::class.java,
+                    AsmInject::class.java,
+                    ModifyArg::class.java,
+                    ModifyArgs::class.java,
+                    ModifyReceiver::class.java,
+                    WrapOperation::class.java,
+                    WrapMethod::class.java,
+                    WrapWithCondition::class.java,
+                    ModifyExpressionValue::class.java,
+                    ModifyVariable::class.java,
+                    Redirect::class.java,
+                    Overwrite::class.java,
+                    Copy::class.java,
+                    Unique::class.java,
+                    Mutable::class.java,
+                    ModifyReturnValue::class.java,
+                    ModifyConstant::class.java,
+                    Accessor::class.java,
+                    Invoker::class.java,
+                    Shadow::class.java,
+                )
+        }
+
+    private fun hasConflictingAsmDeleteAnnotation(field: java.lang.reflect.Field): Boolean =
+        field.getAnnotation(AddField::class.java) != null ||
+            field.getAnnotation(RemoveField::class.java) != null ||
+            field.getAnnotation(Shadow::class.java) != null ||
+            field.getAnnotation(Unique::class.java) != null ||
+            field.getAnnotation(Mutable::class.java) != null ||
+            field.getAnnotation(Final::class.java) != null
+
+    private fun removeTargetMethod(methodSignature: String): Boolean {
         val targetMethod = findTargetMethod(methodSignature)
             ?: throw IllegalStateException(buildMissingTargetMethodMessage(methodSignature))
-
-        // 从类中移除方法
         classNode.methods.remove(targetMethod)
+        return true
+    }
+
+    private fun removeTargetField(fieldName: String): Boolean {
+        val targetField = requireTargetField(fieldName)
+        classNode.fields.remove(targetField)
         return true
     }
 

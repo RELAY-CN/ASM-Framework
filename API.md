@@ -314,16 +314,32 @@ object VersionedConfigMixin {
 
 ### @AsmDelete
 
-标记 ASM 类或 ASM 方法中的删除意图。
+删除 Mixin 声明对应的目标方法或字段。
 
-该注解用于表达“目标声明需要被移除或屏蔽”的治理意图。当前模块仅提供注解定义与元数据，不保证存在对应的转换处理逻辑；是否以及如何执行删除由具体转换器实现决定。
+方法级标注按 handler 的 JVM 名称与描述符推断目标方法，字段级标注按字段名推断目标字段；也可以用 `value` 显式指定目标方法签名或字段名。目标不存在时转换失败。
+类级标注不能删除整个 JVM 类，转换时会明确失败；构造器和类初始化器不能通过 `@AsmDelete` 删除。
+
+成员删除在同一 Mixin 的最终转换阶段执行。位于独立声明的普通 Inject、Overwrite 或 Modify 类就地改写与删除命中同一成员时，最终以删除为准；`@AsmDelete` 与任何其他转换注解标在同一声明时会转换失败。`@WrapMethod`、`@Accessor`、`@Invoker` 或 `@Shadow` 与删除目标重叠时也会失败，避免留下孤立实现、桥接方法或明确的悬空引用。删除只移除成员声明，不会自动改写目标类中已有的成员引用，使用方必须确保剩余字节码不再依赖该成员。
+
+`@AsmDelete` 会改变类结构，只适用于目标类初次定义前的加载转换或离线转换。JVM retransform/redefine 不允许删除已加载类的字段或方法，因此不能通过 Agent retransform 对已加载类执行成员删除。
+
+**参数：**
+
+- `value: String = ""` - 目标方法 JVM 签名或字段名；为空时按被标注成员推断
 
 **示例：**
 
 ```kotlin
-@AsmDelete
 @AsmMixin("com/example/TargetClass")
-object DeleteIntentMixin
+object DeleteMixin {
+    @AsmDelete("legacyEndpoint()V")
+    @JvmStatic
+    fun deleteLegacyEndpoint() {}
+
+    @AsmDelete
+    @JvmField
+    val legacyField: String? = null
+}
 ```
 
 ### @AddInterface

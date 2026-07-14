@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.AddField
 import kim.der.asm.api.annotation.AddInterface
 import kim.der.asm.api.annotation.Args
 import kim.der.asm.api.annotation.AsmInject
+import kim.der.asm.api.annotation.AsmDelete
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.api.annotation.At
 import kim.der.asm.api.annotation.CallbackInfo
@@ -471,7 +472,7 @@ class FrameworkReliabilityTest {
     }
 
     @Test
-    @DisplayName("公开指南应保持删除意图与 Slice 边界失败契约一致")
+    @DisplayName("公开指南应保持 AsmDelete 执行边界与 Slice 失败契约一致")
     fun guideKeepsDeleteIntentAndSliceBoundaryFailureContractsAligned() {
         // Given
         val guide = Files.readString(Path.of("GUIDE.md"))
@@ -484,14 +485,14 @@ class FrameworkReliabilityTest {
             guide
                 .substringAfter("### 支持的注解")
                 .substringBefore("详细说明请参考")
+        val guideAgentSection =
+            requiredSection(guide, "4. **可选：以 Java Agent 挂载**", "### 支持的注解")
         val guideSliceOverview =
             guide
                 .substringAfter("当目标方法内有多个相同调用")
                 .substringBefore("```kotlin")
         val apiAsmDeleteSection =
-            api
-                .substringAfter("### @AsmDelete")
-                .substringBefore("### @Shadow")
+            requiredSection(api, "### @AsmDelete", "### @AddInterface")
         val apiRemoveMethodSection =
             api
                 .substringAfter("### @RemoveMethod")
@@ -503,26 +504,43 @@ class FrameworkReliabilityTest {
 
         // Then
         assertThat(guideAnnotationList)
-            .`as`("Then: GUIDE 支持列表应区分 AsmDelete 元数据意图和实际转换型删除注解")
+            .`as`("Then: GUIDE 支持列表应明确 AsmDelete 的成员删除和失败边界")
             .contains(
-                "**@AsmDelete** - 表达删除或屏蔽目标声明的治理意图",
-                "当前仅作为元数据，不保证存在对应转换处理逻辑",
+                "**@AsmDelete** - 删除目标方法或字段",
+                "类级整类删除意图会在转换阶段失败",
                 "**@RemoveMethod** - 移除方法；目标方法不存在时转换失败",
                 "**@RemoveSynchronized** - 移除 synchronized；目标方法不存在时转换失败",
                 "移除方法标志与 monitor 指令",
             )
         assertThat(apiAsmDeleteSection)
-            .`as`("Then: API 的 AsmDelete 段应保持非执行元数据语义")
+            .`as`("Then: API 的 AsmDelete 段应说明成员目标、执行阶段与 JVM 结构变更边界")
             .contains(
-                "当前模块仅提供注解定义与元数据",
-                "不保证存在对应的转换处理逻辑",
+                "删除 Mixin 声明对应的目标方法或字段",
+                "`value` 显式指定目标方法签名或字段名",
+                "类级标注不能删除整个 JVM 类",
+                "构造器和类初始化器不能通过 `@AsmDelete` 删除",
+                "同一 Mixin 的最终转换阶段",
+                "位于独立声明的普通 Inject、Overwrite 或 Modify 类就地改写",
+                "`@AsmDelete` 与任何其他转换注解标在同一声明时会转换失败",
+                "JVM retransform/redefine 不允许删除已加载类的字段或方法",
+            )
+        assertThat(guideAgentSection)
+            .`as`("Then: GUIDE 的 Agent 说明应明确 retransform 不能执行成员删除")
+            .contains(
+                "`@AsmDelete` 会改变类结构",
+                "JVM retransform/redefine 不允许删除已加载类的字段或方法",
             )
         assertThat(asmDeleteKDoc)
-            .`as`("Then: AsmDelete KDoc 应说明它不是当前转换器保证执行的删除能力")
+            .`as`("Then: AsmDelete KDoc 应与可执行成员删除和类级限制保持一致")
             .contains(
-                "ASM 删除意图标记",
-                "当前模块仅提供注解定义与元数据",
-                "不保证存在对应的处理逻辑",
+                "删除 Mixin 声明对应的目标成员",
+                "目标不存在时转换失败",
+                "类级标注仅用于表达不受当前字节码转换模型支持的整类删除意图",
+                "构造器和类初始化器不能被删除",
+                "同一 Mixin 的最终转换阶段",
+                "位于独立声明的普通就地改写",
+                "与任何其他转换注解标在同一声明时会转换失败",
+                "JVM retransform/redefine 不允许删除已加载类的字段或方法",
             )
         assertThat(apiRemoveMethodSection)
             .`as`("Then: RemoveMethod API 应说明缺失目标失败，避免删除治理静默失效")
@@ -11654,6 +11672,248 @@ class FrameworkReliabilityTest {
     }
 
     @Test
+    @DisplayName("AsmDelete 应移除显式指定的目标方法")
+    fun asmDeleteRemovesExplicitTargetMethod() {
+        // Given
+        AsmRegistry.register(AsmDeleteExplicitMethodMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val targetClass = loadClass("StrictTarget", transformed)
+        val instance = targetClass.getDeclaredConstructor().newInstance()
+
+        // Then
+        assertThat(instance)
+            .`as`("Then: 删除目标方法后的 class 应通过 JVM 校验并可实例化")
+            .isNotNull
+        assertThat(targetClass.declaredMethods.map { it.name })
+            .`as`("Then: @AsmDelete(value) 应从可加载类中删除显式 keep()V")
+            .doesNotContain("keep")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 应从 handler 签名推断目标方法")
+    fun asmDeleteInfersTargetMethodFromHandlerSignature() {
+        // Given
+        AsmRegistry.register(AsmDeleteInferredMethodMixin::class.java)
+
+        // When
+        val classNode = readClass(AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader))
+
+        // Then
+        assertThat(classNode.methods.map { "${it.name}${it.desc}" })
+            .`as`("Then: 省略 @AsmDelete value 时应按 handler JVM 签名删除 keep()V")
+            .doesNotContain("keep()V")
+            .contains("<init>()V")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 应移除显式指定的目标字段")
+    fun asmDeleteRemovesExplicitTargetField() {
+        // Given
+        AsmRegistry.register(AsmDeleteFieldMixin::class.java)
+
+        // When
+        val classNode = readClass(AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader))
+
+        // Then
+        assertThat(classNode.fields.map { it.name })
+            .`as`("Then: @AsmDelete(value) 应删除 name 字段")
+            .doesNotContain("name")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 应从 Mixin 字段声明推断目标字段")
+    fun asmDeleteInfersTargetFieldFromFieldDeclaration() {
+        // Given
+        AsmRegistry.register(AsmDeleteInferredFieldMixin::class.java)
+
+        // When
+        val classNode = readClass(AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader))
+
+        // Then
+        assertThat(classNode.fields.map { it.name })
+            .`as`("Then: 省略 @AsmDelete value 时应按被标注字段名删除 name 字段")
+            .doesNotContain("name")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 目标缺失时应暴露可诊断的转换失败")
+    fun asmDeleteWithMissingTargetFailsDuringTransform() {
+        // Given
+        AsmRegistry.register(MissingAsmDeleteTargetMixin::class.java)
+
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        val rootCause = generateSequence<Throwable>(exception) { it.cause }.last()
+        assertThat(rootCause.message)
+            .`as`("Then: @AsmDelete 缺失目标时应指出目标签名和可用方法")
+            .contains(
+                "Cannot find target method missing()V in class StrictTarget",
+                "Available methods in StrictTarget: [<init>()V, keep()V]",
+            )
+    }
+
+    @Test
+    @DisplayName("AsmDelete 字段目标缺失时应暴露可诊断的转换失败")
+    fun asmDeleteWithMissingFieldFailsDuringTransform() {
+        // Given
+        AsmRegistry.register(MissingAsmDeleteFieldMixin::class.java)
+
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        val rootCause = generateSequence<Throwable>(exception) { it.cause }.last()
+        assertThat(rootCause.message)
+            .`as`("Then: @AsmDelete 缺失字段时应指出目标名称和当前可用字段")
+            .contains(
+                "Cannot find target field missingField in class FieldTarget",
+                "Available fields in FieldTarget: [name:Ljava/lang/String;]",
+            )
+    }
+
+    @Test
+    @DisplayName("AsmDelete 应在同一 Mixin 的就地方法改写后执行")
+    fun asmDeleteRunsAfterInPlaceMethodTransformations() {
+        // Given
+        AsmRegistry.register(AsmDeleteAfterInjectMixin::class.java)
+
+        // When
+        val transformed = AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        val targetClass = loadClass("StrictTarget", transformed)
+
+        // Then
+        assertThat(targetClass.declaredMethods.map { it.name })
+            .`as`("Then: HEAD 注入先命中目标方法，最终删除阶段仍应稳定移除该方法")
+            .doesNotContain("keep")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 类级和生命周期目标应快速失败")
+    fun asmDeleteRejectsClassAndLifecycleTargets() {
+        // Given / When / Then
+        AsmRegistry.register(ClassLevelAsmDeleteMixin::class.java)
+        val classException = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+        assertThat(generateSequence<Throwable>(classException) { it.cause }.last().message)
+            .contains("cannot delete target class StrictTarget")
+
+        AsmRegistry.clear()
+        AsmRegistry.register(LifecycleAsmDeleteMixin::class.java)
+        val lifecycleException = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+        assertThat(generateSequence<Throwable>(lifecycleException) { it.cause }.last().message)
+            .contains("Cannot remove lifecycle method <init>()V")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 与其他转换注解冲突时应快速失败")
+    fun asmDeleteRejectsConflictingMethodAnnotations() {
+        // Given / When / Then
+        AsmRegistry.register(ConflictingAsmDeleteMixin::class.java)
+        val conflictException = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+        assertThat(generateSequence<Throwable>(conflictException) { it.cause }.last().message)
+            .contains("@AsmDelete cannot be combined")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 不应留下指向已删除字段的 Accessor")
+    fun asmDeleteRejectsGeneratedMemberReferences() {
+        // Given
+        AsmRegistry.register(ConflictingAsmDeleteAccessorMixin::class.java)
+
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("FieldTarget", fieldTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        assertThat(generateSequence<Throwable>(exception) { it.cause }.last().message)
+            .contains("@AsmDelete target field name cannot also be referenced by @Accessor")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 重复删除同一目标时应快速失败")
+    fun asmDeleteRejectsDuplicateTargets() {
+        // Given
+        AsmRegistry.register(DuplicateAsmDeleteTargetMixin::class.java)
+
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        assertThat(generateSequence<Throwable>(exception) { it.cause }.last().message)
+            .contains("@AsmDelete target method keep()V is declared more than once")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 与独立 RemoveMethod 重复治理同一目标时应快速失败")
+    fun asmDeleteRejectsIndependentRemoveMethodOverlap() {
+        // Given
+        AsmRegistry.register(AsmDeleteRemoveMethodOverlapMixin::class.java)
+
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        assertThat(generateSequence<Throwable>(exception) { it.cause }.last().message)
+            .contains("@AsmDelete target method keep()V is also targeted by @RemoveMethod")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 与 WrapMethod 命中同一目标时应快速失败")
+    fun asmDeleteRejectsWrapMethodOverlap() {
+        // Given
+        AsmRegistry.register(AsmDeleteWrapMethodOverlapMixin::class.java)
+
+        // When
+        val exception = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        assertThat(generateSequence<Throwable>(exception) { it.cause }.last().message)
+            .contains("@AsmDelete target method keep()V cannot also be referenced by @WrapMethod")
+    }
+
+    @Test
+    @DisplayName("AsmDelete 方法 value 必须是合法的完整 JVM 签名")
+    fun asmDeleteRejectsIncompleteAndInvalidMethodSignatures() {
+        // Given / When
+        AsmRegistry.register(IncompleteAsmDeleteSignatureMixin::class.java)
+        val incompleteException = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+
+        AsmRegistry.clear()
+        AsmRegistry.register(InvalidAsmDeleteDescriptorMixin::class.java)
+        val invalidException = assertThrows(AsmTransformException::class.java) {
+            AsmProcessor().transform("StrictTarget", strictTargetBytes(), javaClass.classLoader)
+        }
+
+        // Then
+        assertThat(generateSequence<Throwable>(incompleteException) { it.cause }.last().message)
+            .contains("@AsmDelete method target must use a complete JVM signature: keep")
+        assertThat(generateSequence<Throwable>(invalidException) { it.cause }.last().message)
+            .contains("@AsmDelete method target has an invalid JVM descriptor: keep()Q")
+    }
+
+    @Test
     fun removeFieldRemovesTargetField() {
         AsmRegistry.register(RemoveFieldMixin::class.java)
 
@@ -15178,6 +15438,138 @@ class FrameworkReliabilityTest {
         @JvmStatic
         fun removeKeepMarker() {
         }
+    }
+
+    @AsmMixin("StrictTarget")
+    object AsmDeleteExplicitMethodMixin {
+        @AsmDelete("keep()V")
+        @JvmStatic
+        fun removeLegacyName() {}
+    }
+
+    @AsmMixin("StrictTarget")
+    object AsmDeleteInferredMethodMixin {
+        @AsmDelete
+        @JvmStatic
+        fun keep() {}
+    }
+
+    @AsmMixin("FieldTarget")
+    object AsmDeleteFieldMixin {
+        @AsmDelete("name")
+        @JvmField
+        val legacyName: String? = null
+    }
+
+    @AsmMixin("FieldTarget")
+    object AsmDeleteInferredFieldMixin {
+        @AsmDelete
+        @JvmField
+        val name: String? = null
+    }
+
+    @AsmMixin("StrictTarget")
+    object MissingAsmDeleteTargetMixin {
+        @AsmDelete("missing()V")
+        @JvmStatic
+        fun removeMissing() {}
+    }
+
+    @AsmMixin("FieldTarget")
+    object MissingAsmDeleteFieldMixin {
+        @AsmDelete("missingField")
+        @JvmField
+        val marker: String? = null
+    }
+
+    @AsmMixin("StrictTarget")
+    object AsmDeleteAfterInjectMixin {
+        @AsmInject(method = "keep()V", target = InjectionPoint.HEAD)
+        @JvmStatic
+        fun beforeKeep() {}
+
+        @AsmDelete("keep()V")
+        @JvmStatic
+        fun removeKeep() {}
+    }
+
+    @AsmDelete
+    @AsmMixin("StrictTarget")
+    object ClassLevelAsmDeleteMixin
+
+    @AsmMixin("StrictTarget")
+    object LifecycleAsmDeleteMixin {
+        @AsmDelete("<init>()V")
+        @JvmStatic
+        fun removeConstructor() {}
+    }
+
+    @AsmMixin("StrictTarget")
+    object ConflictingAsmDeleteMixin {
+        @AsmDelete("keep()V")
+        @RemoveMethod("keep()V")
+        @JvmStatic
+        fun removeKeep() {}
+    }
+
+    @AsmMixin("FieldTarget")
+    object ConflictingAsmDeleteAccessorMixin {
+        @AsmDelete("name")
+        @JvmField
+        val legacyName: String? = null
+
+        @Accessor("name")
+        @JvmStatic
+        fun getName(): String? = null
+    }
+
+    @AsmMixin("StrictTarget")
+    object DuplicateAsmDeleteTargetMixin {
+        @AsmDelete("keep()V")
+        @JvmStatic
+        fun removeKeepFirst() {}
+
+        @AsmDelete("keep()V")
+        @JvmStatic
+        fun removeKeepSecond() {}
+    }
+
+    @AsmMixin("StrictTarget")
+    object AsmDeleteRemoveMethodOverlapMixin {
+        @AsmDelete("keep()V")
+        @JvmStatic
+        fun deleteKeep() {}
+
+        @RemoveMethod("keep()V")
+        @JvmStatic
+        fun removeKeep() {}
+    }
+
+    @AsmMixin("StrictTarget")
+    object AsmDeleteWrapMethodOverlapMixin {
+        @AsmDelete("keep()V")
+        @JvmStatic
+        fun deleteKeep() {}
+
+        @WrapMethod(method = "keep()V")
+        @JvmStatic
+        fun wrapKeep(operation: Operation<Unit>) {
+            operation.call()
+        }
+    }
+
+    @AsmMixin("StrictTarget")
+    object IncompleteAsmDeleteSignatureMixin {
+        @AsmDelete("keep")
+        @JvmStatic
+        fun deleteKeep() {}
+    }
+
+    @AsmMixin("StrictTarget")
+    object InvalidAsmDeleteDescriptorMixin {
+        @AsmDelete("keep()Q")
+        @JvmStatic
+        fun deleteKeep() {}
     }
 
     @AsmMixin("StrictTarget")

@@ -122,12 +122,13 @@ java -javaagent:ASM-Framework.jar -cp your-app.jar com.example.Main
 - Mixin 仍需在目标类加载前通过 `AsmRegistry` / `AsmScanner` 注册
 - `premain(String?, Instrumentation)` 与 `agentmain(String?, Instrumentation)` 是 JVM 标准入口；旧的单参数 `agentmain(Instrumentation)` 仅兼容宿主直接调用，已标记废弃
 - Agent 安装时会设置 `canRetransform = true`，便于后续对已加载类做 retransform
+- `@AsmDelete` 会改变类结构，只能用于目标类初次定义前的加载转换或离线转换；JVM retransform/redefine 不允许删除已加载类的字段或方法
 
 ### 支持的注解
 
 - **@AsmMixin** - 标记 Mixin 类
 - **@Group** - 将同一 Mixin 内多个处理器合并为一个组级命中数契约
-- **@AsmDelete** - 表达删除或屏蔽目标声明的治理意图；当前仅作为元数据，不保证存在对应转换处理逻辑
+- **@AsmDelete** - 删除目标方法或字段；在同一 Mixin 的最终转换阶段执行，目标不存在、构造器/类初始化器、结构性 handler 重叠或类级整类删除意图会在转换阶段失败
 - **@AddInterface** - 为目标类追加接口声明；接口名会去除首尾空白，空白接口名会在转换阶段失败
 - **@RemoveInterface** - 从目标类移除接口声明；接口名会去除首尾空白，空白接口名会在转换阶段失败
 - **@AsmInject** - 在指定位置注入代码

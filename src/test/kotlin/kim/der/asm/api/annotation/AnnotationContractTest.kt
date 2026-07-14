@@ -80,8 +80,8 @@ class AnnotationContractTest {
         }
 
         @Test
-        @DisplayName("@AsmDelete 删除意图应在类与方法上运行期可见")
-        fun asmDeleteIntentIsRuntimeVisibleOnClassAndMethod() {
+        @DisplayName("@AsmDelete 配置应在类、方法与字段上运行期可见")
+        fun asmDeleteConfigurationIsRuntimeVisibleOnSupportedTargets() {
             // Given
             val fixtureClass = DeleteIntentFixture::class.java
             val method = fixtureClass.getDeclaredMethod("deprecatedEndpoint")
@@ -89,13 +89,18 @@ class AnnotationContractTest {
             // When
             val classAnnotation = fixtureClass.getAnnotation(AsmDelete::class.java)
             val methodAnnotation = method.getAnnotation(AsmDelete::class.java)
+            val field = fixtureClass.getDeclaredField("legacyField")
+            val fieldAnnotation = field.getAnnotation(AsmDelete::class.java)
 
             // Then
             assertThat(classAnnotation)
-                .`as`("@AsmDelete 标注类时应作为运行期治理意图保留下来")
+                .`as`("@AsmDelete 标注类时应保留运行期配置，以便转换器明确拒绝整类删除")
                 .isNotNull
             assertThat(methodAnnotation)
-                .`as`("@AsmDelete 标注方法时应作为运行期治理意图保留下来")
+                .`as`("@AsmDelete 标注方法时应保留运行期删除配置")
+                .isNotNull
+            assertThat(fieldAnnotation)
+                .`as`("@AsmDelete 标注字段时应作为运行期删除配置保留下来")
                 .isNotNull
         }
     }
@@ -250,13 +255,13 @@ class AnnotationContractTest {
         private val functionTarget = setOf(ElementType.METHOD)
         private val fieldTarget = setOf(ElementType.FIELD)
         private val parameterTarget = setOf(ElementType.PARAMETER)
-        private val classAndFunctionTarget = setOf(ElementType.TYPE, ElementType.METHOD)
+        private val classFunctionFieldTarget = setOf(ElementType.TYPE, ElementType.METHOD, ElementType.FIELD)
         private val fieldAndFunctionTarget = setOf(ElementType.FIELD, ElementType.METHOD)
 
         @JvmStatic
         fun publicAnnotationContracts(): Stream<Arguments> =
             Stream.of(
-                annotationContract(AsmDelete::class.java, classAndFunctionTarget),
+                annotationContract(AsmDelete::class.java, classFunctionFieldTarget),
                 annotationContract(AsmInject::class.java, functionTarget),
                 annotationContract(At::class.java, emptySet()),
                 annotationContract(Slice::class.java, emptySet()),
@@ -295,7 +300,7 @@ class AnnotationContractTest {
         @JvmStatic
         fun publicAnnotationDefaultContracts(): Stream<Arguments> =
             Stream.of(
-                defaultContract(AsmDelete(), emptyMap()),
+                defaultContract(AsmDelete(), linkedMapOf("value" to "")),
                 defaultContract(
                     AsmInject(),
                     linkedMapOf(
@@ -626,6 +631,11 @@ class AnnotationContractTest {
         @Suppress("unused")
         fun deprecatedEndpoint() {
         }
+
+        @AsmDelete("legacyField")
+        @JvmField
+        @Suppress("unused")
+        val legacyField: String? = null
     }
 
     private object LocalCaptureFixture {
