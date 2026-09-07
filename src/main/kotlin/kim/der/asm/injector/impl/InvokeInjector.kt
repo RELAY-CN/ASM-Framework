@@ -659,7 +659,7 @@ class InvokeInjector(
         }
 
         val targetClassInternalName =
-            asmInfo.targets.firstOrNull()?.replace('.', '/')
+            (asmInfo.targetClassName ?: asmInfo.targets.firstOrNull())?.replace('.', '/')
                 ?: instanceType.internalName
         val singletonFieldName = "\$asmInstance\$${asmInfo.asmClass.simpleName}"
         val singletonFieldDesc = "L${instanceType.internalName};"

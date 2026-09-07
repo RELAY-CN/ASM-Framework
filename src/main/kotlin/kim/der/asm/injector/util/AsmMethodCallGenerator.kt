@@ -74,7 +74,7 @@ object AsmMethodCallGenerator {
                 // 普通类：使用单例模式（参考 Mixin-master）
                 // 在目标类中创建一个静态字段来缓存 Mixin 实例
                 val targetClassInternalName =
-                    targetClassName?.replace('.', '/')
+                    (targetClassName ?: asmInfo.targetClassName)?.replace('.', '/')
                         ?: asmInfo.targets.firstOrNull()?.replace('.', '/')
                         ?: instanceType.internalName // 回退到 Mixin 类本身
 
@@ -136,7 +136,7 @@ object AsmMethodCallGenerator {
 
         // 加载其他参数
         val targetClassInternalName =
-            targetClassName?.replace('.', '/')
+            (targetClassName ?: asmInfo.targetClassName)?.replace('.', '/')
                 ?: asmInfo.targets.firstOrNull()?.replace('.', '/')
         val localCaptureContext =
             if (localCaptureAnchor != null && targetClassInternalName != null) {

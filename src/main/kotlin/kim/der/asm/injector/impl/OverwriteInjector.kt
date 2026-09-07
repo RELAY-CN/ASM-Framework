@@ -66,7 +66,7 @@ class OverwriteInjector(
         adaptMethodSignature(asmMethodNode, target)
 
         // 转换 Shadow 字段和方法调用
-        val targetClassName = asmInfo.targets.firstOrNull()?.replace('.', '/')
+        val targetClassName = (asmInfo.targetClassName ?: asmInfo.targets.firstOrNull())?.replace('.', '/')
         if (targetClassName != null) {
             transformShadowReferences(target, targetClassName)
         }
@@ -83,6 +83,7 @@ class OverwriteInjector(
      * 获取 ASM 类的字节码
      */
     private fun getAsmClassBytes(): ByteArray {
+        asmInfo.asmClassBytes?.let { return it }
         val className = asmInfo.asmClass.name.replace('.', '/')
         val resource = className + ".class"
         val inputStream =

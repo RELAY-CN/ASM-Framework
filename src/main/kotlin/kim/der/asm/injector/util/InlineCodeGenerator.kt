@@ -188,14 +188,14 @@ object InlineCodeGenerator {
         asmInfo: AsmInfo,
         asmMethod: Method,
     ): MethodNode? {
-        val className = asmInfo.asmClass.name.replace('.', '/')
-        val resource = className + ".class"
-        val inputStream =
-            asmInfo.asmClass.classLoader?.getResourceAsStream(resource)
-                ?: ClassLoader.getSystemClassLoader().getResourceAsStream(resource)
-                ?: return null
-
-        val classBytes = inputStream.use { it.readBytes() }
+        val classBytes = asmInfo.asmClassBytes ?: run {
+            val resource = asmInfo.asmClass.name.replace('.', '/') + ".class"
+            val inputStream =
+                asmInfo.asmClass.classLoader?.getResourceAsStream(resource)
+                    ?: ClassLoader.getSystemClassLoader().getResourceAsStream(resource)
+                    ?: return null
+            inputStream.use { it.readBytes() }
+        }
         val reader = ClassReader(classBytes)
         val classNode = ClassNode()
         reader.accept(classNode, ClassReader.EXPAND_FRAMES)

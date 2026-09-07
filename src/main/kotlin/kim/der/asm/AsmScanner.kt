@@ -101,6 +101,26 @@ data class AsmScanFailure(
  * @date 2025-11-24
  */
 object AsmScanner {
+    /** 扫描过程中原地累积结果，避免每发现一个类都复制已有列表。 */
+    private class AsmScanResultAccumulator {
+        private val registeredClasses = mutableListOf<String>()
+        private val skippedClasses = mutableListOf<String>()
+        private val failures = mutableListOf<AsmScanFailure>()
+
+        fun add(result: AsmScanResult) {
+            registeredClasses.addAll(result.registeredClasses)
+            skippedClasses.addAll(result.skippedClasses)
+            failures.addAll(result.failures)
+        }
+
+        fun toResult(): AsmScanResult =
+            AsmScanResult(
+                registeredClasses = registeredClasses.toList(),
+                skippedClasses = skippedClasses.toList(),
+                failures = failures.toList(),
+            )
+    }
+
     /**
      * 扫描指定包中的所有 ASM 类并注册。
      *
@@ -188,23 +208,22 @@ object AsmScanner {
         if (!directory.exists()) return AsmScanResult()
 
         val files = directory.listFiles() ?: return AsmScanResult()
-        var result = AsmScanResult()
+        val accumulator = AsmScanResultAccumulator()
 
         for (file in files) {
-            result =
-                result.merge(
-                    if (file.isDirectory) {
-                        scanDirectory(file, "$packageName.${file.name}", classLoader)
-                    } else if (file.name.endsWith(".class")) {
-                        val className = "$packageName.${file.name.substring(0, file.name.length - 6)}"
-                        registerAsmClass(className, classLoader)
-                    } else {
-                        AsmScanResult()
-                    },
-                )
+            accumulator.add(
+                if (file.isDirectory) {
+                    scanDirectory(file, "$packageName.${file.name}", classLoader)
+                } else if (file.name.endsWith(".class")) {
+                    val className = "$packageName.${file.name.substring(0, file.name.length - 6)}"
+                    registerAsmClass(className, classLoader)
+                } else {
+                    AsmScanResult()
+                },
+            )
         }
 
-        return result
+        return accumulator.toResult()
     }
 
     /**
@@ -229,7 +248,7 @@ object AsmScanner {
     /**
      * 扫描 JAR 文件中的 ASM 类并返回诊断结果。
      *
-     * 该入口会为目标 JAR 创建临时 [URLClassLoader]，并在扫描结束后关闭。
+     * 该入口会为目标 JAR 创建临时 [URLClassLoader]；扫描时会捕获 Mixin classfile，扫描结束即可关闭加载器。
      *
      * @param jarFile 待扫描的 JAR 文件
      * @param packageName 限定扫描的包名；为空字符串时扫描整个 JAR
@@ -268,7 +287,7 @@ object AsmScanner {
         return try {
             val packagePath = packageName.replace('.', '/')
             val packagePrefix = if (packagePath.isEmpty()) "" else "$packagePath/"
-            var result = AsmScanResult()
+            val accumulator = AsmScanResultAccumulator()
 
             JarFile(jarFile).use { jar ->
                 URLClassLoader(arrayOf(jarFile.toURI().toURL()), parentClassLoader).use { classLoader ->
@@ -279,13 +298,21 @@ object AsmScanner {
 
                         if (!entry.isDirectory && name.startsWith(packagePrefix) && name.endsWith(".class")) {
                             val className = name.substring(0, name.length - 6).replace('/', '.')
-                            result = result.merge(registerAsmClass(className, classLoader))
+                            accumulator.add(
+                                registerAsmClass(className, classLoader) {
+                                    // 让加载器选择多版本 JAR 条目，保持反射类与 classfile 快照一致。
+                                    val inputStream = checkNotNull(classLoader.getResourceAsStream(name)) {
+                                        "Cannot find class file for $className"
+                                    }
+                                    inputStream.use { it.readBytes() }
+                                },
+                            )
                         }
                     }
                 }
             }
 
-            result
+            accumulator.toResult()
         } catch (throwable: Throwable) {
             AsmScanResult(failures = listOf(AsmScanFailure(jarFile.absolutePath, throwable.message ?: throwable.javaClass.name)))
         }
@@ -330,25 +357,24 @@ object AsmScanner {
     ): AsmScanResult {
         val path = packageName.replace('.', '/')
         return try {
-            var result = AsmScanResult()
+            val accumulator = AsmScanResultAccumulator()
             classLoader.getResources(path).iterator().forEach { resource ->
-                result =
-                    result.merge(
-                        when (resource.protocol) {
-                            "file" -> scanDirectory(File(resource.toURI()), packageName, classLoader)
-                            "jar" -> {
-                                val connection = resource.openConnection()
-                                if (connection is JarURLConnection) {
-                                    scanJar(File(connection.jarFileURL.toURI()), packageName, classLoader)
-                                } else {
-                                    AsmScanResult()
-                                }
+                accumulator.add(
+                    when (resource.protocol) {
+                        "file" -> scanDirectory(File(resource.toURI()), packageName, classLoader)
+                        "jar" -> {
+                            val connection = resource.openConnection()
+                            if (connection is JarURLConnection) {
+                                scanJar(File(connection.jarFileURL.toURI()), packageName, classLoader)
+                            } else {
+                                AsmScanResult()
                             }
-                            else -> AsmScanResult()
-                        },
-                    )
+                        }
+                        else -> AsmScanResult()
+                    },
+                )
             }
-            result
+            accumulator.toResult()
         } catch (throwable: Throwable) {
             AsmScanResult(failures = listOf(AsmScanFailure(packageName, throwable.message ?: throwable.javaClass.name)))
         }
@@ -369,11 +395,17 @@ object AsmScanner {
     private fun registerAsmClass(
         className: String,
         classLoader: ClassLoader,
+        asmClassBytes: (() -> ByteArray)? = null,
     ): AsmScanResult =
         try {
             val clazz = Class.forName(className, false, classLoader)
             if (clazz.isAnnotationPresent(AsmMixin::class.java)) {
-                AsmRegistry.register(clazz)
+                // 父加载器可能已经定义同名类，此时不能绑定当前 JAR 中的另一份字节码。
+                if (asmClassBytes != null && clazz.classLoader === classLoader) {
+                    AsmRegistry.registerScanned(clazz, asmClassBytes())
+                } else {
+                    AsmRegistry.register(clazz)
+                }
                 AsmScanResult(registeredClasses = listOf(className))
             } else {
                 AsmScanResult(skippedClasses = listOf(className))

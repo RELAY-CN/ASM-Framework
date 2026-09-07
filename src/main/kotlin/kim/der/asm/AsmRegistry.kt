@@ -7,6 +7,7 @@ package kim.der.asm
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.func.Find
+import java.util.LinkedHashMap
 
 /**
  * ASM 注册器。
@@ -25,7 +26,7 @@ import kim.der.asm.func.Find
 object AsmRegistry {
     private val asms = mutableMapOf<String, MutableList<AsmInfo>>()
     private val pathMatchers = mutableListOf<AsmInfo>()
-    private val targetCache = mutableMapOf<String, List<AsmInfo>>()
+    private val targetCache = LinkedHashMap<String, List<AsmInfo>>()
     private var nextRegistrationOrder = 0L
 
     /**
@@ -43,6 +44,15 @@ object AsmRegistry {
     @JvmStatic
     @Synchronized
     fun register(asmClass: Class<*>) {
+        registerInternal(asmClass, null)
+    }
+
+    @Synchronized
+    internal fun registerScanned(asmClass: Class<*>, asmClassBytes: ByteArray) {
+        registerInternal(asmClass, asmClassBytes)
+    }
+
+    private fun registerInternal(asmClass: Class<*>, asmClassBytes: ByteArray?) {
         val annotation = asmClass.getAnnotation(AsmMixin::class.java) ?: return
 
         val targets =
@@ -52,6 +62,11 @@ object AsmRegistry {
                 else -> return
             }
 
+        // 扫描器可能重复发现同一个类；重复注册会让每个 handler 被执行多次。
+        if (asms[targets.first()]?.any { it.asmClass === asmClass } == true) {
+            return
+        }
+
         val asmInfo =
             AsmInfo(
                 asmClass = asmClass,
@@ -59,7 +74,7 @@ object AsmRegistry {
                 pathMatcher = null,
                 priority = annotation.priority,
                 registrationOrder = nextRegistrationOrder++,
-            )
+            ).also { it.asmClassBytes = asmClassBytes }
 
         targets.forEach { target ->
             asms.getOrPut(target) { mutableListOf() }.add(asmInfo)
@@ -106,7 +121,8 @@ object AsmRegistry {
     /**
      * 获取目标类的所有 ASM。
      *
-     * 返回结果会被缓存，直到下一次注册或清理操作。结果顺序固定为路径匹配命中在前、精确目标命中在后；
+     * 非空结果会被有限缓存，直到下一次注册、清理或淘汰。未命中结果不缓存，避免动态类名无限增长。
+     * 结果顺序固定为路径匹配命中在前、精确目标命中在后；
      * 同一匹配来源内按 priority 从高到低排序，priority 相同时保持注册顺序。
      * 该顺序会直接影响 [kim.der.asm.transformer.AsmProcessor] 对多个 Mixin 的应用顺序。
      * 若路径匹配器抛出异常，异常会原样传播给调用方，本方法不会吞掉匹配阶段错误。
@@ -120,16 +136,27 @@ object AsmRegistry {
     @JvmStatic
     @Synchronized
     fun getForTarget(targetClass: String): List<AsmInfo> {
-        return targetCache.getOrPut(targetClass) {
-            buildList {
-                // 不能调换顺序：路径匹配在前，精确匹配在后（避免模糊覆盖精准）
-                pathMatchers
-                    .filter { asmInfo -> asmInfo.pathMatcher?.invoke(targetClass) == true }
-                    .sortedByPriority()
-                    .forEach(::add)
-                asms[targetClass]?.sortedByPriority()?.let(::addAll)
-            }
+        targetCache[targetClass]?.let { return it }
+
+        val matches = buildList {
+            // 不能调换顺序：路径匹配在前，精确匹配在后（避免模糊覆盖精准）
+            pathMatchers
+                .filter { asmInfo -> asmInfo.pathMatcher?.invoke(targetClass) == true }
+                .sortedByPriority()
+                .forEach { add(it.forTarget(targetClass)) }
+            asms[targetClass]
+                ?.sortedByPriority()
+                ?.forEach { add(it.forTarget(targetClass)) }
         }
+
+        // 动态类名通常只产生未命中查询；不缓存空结果，避免类名无限增长。
+        if (matches.isEmpty()) return emptyList()
+
+        if (targetCache.size >= MAX_TARGET_CACHE_ENTRIES) {
+            targetCache.remove(targetCache.entries.first().key)
+        }
+        targetCache[targetClass] = matches
+        return matches
     }
 
     /**
@@ -158,5 +185,13 @@ object AsmRegistry {
     private fun Iterable<AsmInfo>.sortedByPriority(): List<AsmInfo> =
         sortedWith(compareByDescending<AsmInfo> { it.priority }.thenBy { it.registrationOrder })
 
+    /** 创建当前目标类的转换快照，并保留扫描阶段捕获的 classfile。 */
+    private fun AsmInfo.forTarget(targetClass: String): AsmInfo =
+        copy().also {
+            it.targetClassName = targetClass
+            it.asmClassBytes = asmClassBytes
+        }
+
     private const val DEFAULT_PRIORITY = 1000
+    private const val MAX_TARGET_CACHE_ENTRIES = 4096
 }

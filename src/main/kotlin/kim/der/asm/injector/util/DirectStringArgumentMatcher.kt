@@ -147,14 +147,15 @@ internal object DirectStringArgumentMatcher {
     /**
      * 解析数据流分析使用的 owner。
      *
-     * 精确目标注册优先使用目标类；路径匹配注册没有固定目标类，此处退回 ASM 类名即可，因为本次来源分析
+     * 优先使用当前查询目标类；直接构造注册信息时才使用声明目标或 ASM 类名，因为本次来源分析
      * 不依赖 owner 的继承关系或类加载。
      *
      * @param asmInfo 当前 ASM 注册信息
      * @return JVM internal name
      */
     private fun analysisOwner(asmInfo: AsmInfo): String =
-        asmInfo.targets.firstOrNull()
+        asmInfo.targetClassName
+            ?: asmInfo.targets.firstOrNull()
             ?: Type.getType(asmInfo.asmClass).internalName
 
     /**

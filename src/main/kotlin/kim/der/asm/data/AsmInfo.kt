@@ -57,4 +57,11 @@ data class AsmInfo(
      * 用于在 [priority] 相同时保持稳定注册顺序，避免排序后同优先级 Mixin 出现非确定性。
      */
     val registrationOrder: Long = 0L,
-)
+) {
+    // 元数据不加入主构造器，保留公开构造器、copy 与解构方法的二进制签名。
+    /** 当前查询目标类 internal name，仅用于本次转换快照。 */
+    internal var targetClassName: String? = null
+
+    /** 扫描时捕获的 ASM classfile，避免临时类加载器关闭后无法回读。 */
+    internal var asmClassBytes: ByteArray? = null
+}
