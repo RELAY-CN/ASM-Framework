@@ -28,6 +28,8 @@ ASM 注册器，负责管理所有注册的 ASM 类。
 
 - `asmClass`: 带 `@AsmMixin` 注解的类；未标注或未声明目标类时会被跳过
 
+重复注册同一个 `Class` 不会重复应用 handler；`targets` 中重复的目标名也只注册一次。
+
 ##### `registerWithPathMatcher(asmClass: Class<*>, pathMatcher: Find<String, Boolean>)`
 
 注册一个按目标类路径动态匹配的 ASM 类。`pathMatcher` 接收目标类 internal name，返回 `true` 表示该 ASM 应用于该目标类。
@@ -46,6 +48,8 @@ ASM 注册器，负责管理所有注册的 ASM 类。
 ##### `clear()`
 
 清空所有注册的 ASM、路径匹配器与目标缓存。该入口主要用于测试隔离、重新扫描或 agent 生命周期重置。
+同时关闭扫描器创建并持有的 JAR 类加载器，释放文件句柄；调用方提供的父加载器不会被关闭。
+应在旧 Mixin 和转换结果结束使用后调用；清理后重新扫描会创建新的加载器，适用于重新加载更新后的 JAR。
 
 **示例：**
 
@@ -103,6 +107,10 @@ ASM 扫描器，用于自动扫描和注册 ASM 类。
 - `scanJarWithResult(jarFile: File, packageName: String): AsmScanResult` - 扫描 JAR 并返回诊断结果；`packageName` 为空字符串时扫描整个 JAR
 - `scanClassLoader(classLoader: ClassLoader, packageName: String)` - 扫描类加载器中的包资源，并忽略诊断结果
 - `scanClassLoaderWithResult(classLoader: ClassLoader, packageName: String): AsmScanResult` - 扫描类加载器中的包资源并返回诊断结果
+
+JAR 扫描按规范文件路径与父加载器身份复用加载器，重复扫描不会重复注册同一个 Mixin。
+加载器随注册表存活，以支持方法签名、初始化和 handler 方法体中的延迟依赖加载；使用结束后调用 `AsmRegistry.clear()` 释放。
+未注册任何自有 Mixin 的扫描会立即关闭新建的加载器。JAR 存续期间应保持文件内容不变，更新或删除前先结束使用并清理注册表。
 
 **示例：**
 

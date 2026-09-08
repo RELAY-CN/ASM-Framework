@@ -7,6 +7,10 @@ package kim.der.asm
 import kim.der.asm.api.annotation.AsmMixin
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.func.Find
+import java.io.File
+import java.io.IOException
+import java.net.URLClassLoader
+import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 
 /**
@@ -24,9 +28,14 @@ import java.util.LinkedHashMap
  * @date 2025-11-24
  */
 object AsmRegistry {
+    // @JvmStatic 与实例方法的 @Synchronized 使用不同监视器，所有注册表状态必须显式共用这把锁。
+    private val registryLock = Any()
+    // 扫描与 clear 按生命周期锁 -> 状态锁排序；类加载期间只持有前者，允许 agent 并发查询。
+    private val scanLifecycleLock = Any()
     private val asms = mutableMapOf<String, MutableList<AsmInfo>>()
     private val pathMatchers = mutableListOf<AsmInfo>()
     private val targetCache = LinkedHashMap<String, List<AsmInfo>>()
+    private val scannedClassLoaders = IdentityHashMap<ClassLoader, MutableMap<File, URLClassLoader>>()
     private var nextRegistrationOrder = 0L
 
     /**
@@ -42,14 +51,41 @@ object AsmRegistry {
      * @date 2025-11-24
      */
     @JvmStatic
-    @Synchronized
     fun register(asmClass: Class<*>) {
         registerInternal(asmClass, null)
     }
 
-    @Synchronized
     internal fun registerScanned(asmClass: Class<*>, asmClassBytes: ByteArray) {
         registerInternal(asmClass, asmClassBytes)
+    }
+
+    /**
+     * 扫描器创建的加载器随注册表存活，支持转换和 handler 执行时的延迟类解析。
+     * 同一父加载器与规范 JAR 路径复用一个加载器，避免重复扫描产生不同的 Class 身份。
+     * 生命周期锁使 clear 等待扫描结束；无注册条目时立即释放，不持有查询使用的状态锁执行类加载。
+     */
+    internal fun <T> withJarClassLoader(
+        jarFile: File,
+        parentClassLoader: ClassLoader,
+        scan: (URLClassLoader) -> T,
+    ): T = synchronized(scanLifecycleLock) {
+        val source = jarFile.canonicalFile
+        scannedClassLoaders[parentClassLoader]?.get(source)?.let { return@synchronized scan(it) }
+
+        val classLoader = URLClassLoader(arrayOf(source.toURI().toURL()), parentClassLoader)
+        try {
+            scan(classLoader)
+        } finally {
+            // 部分扫描失败时，已经注册的 Mixin 仍需要这个加载器；父加载器提供的类不需要保留它。
+            val isRegistered = synchronized(registryLock) {
+                asms.values.any { entries -> entries.any { it.asmClass.classLoader === classLoader } }
+            }
+            if (isRegistered) {
+                scannedClassLoaders.getOrPut(parentClassLoader) { mutableMapOf() }[source] = classLoader
+            } else {
+                classLoader.close()
+            }
+        }
     }
 
     private fun registerInternal(asmClass: Class<*>, asmClassBytes: ByteArray?) {
@@ -57,31 +93,33 @@ object AsmRegistry {
 
         val targets =
             when {
-                annotation.targets.isNotEmpty() -> annotation.targets.asList()
+                annotation.targets.isNotEmpty() -> annotation.targets.distinct()
                 annotation.value.isNotEmpty() -> listOf(annotation.value)
                 else -> return
             }
 
-        // 扫描器可能重复发现同一个类；重复注册会让每个 handler 被执行多次。
-        if (asms[targets.first()]?.any { it.asmClass === asmClass } == true) {
-            return
+        synchronized(registryLock) {
+            // 扫描器可能重复发现同一个类；重复注册会让每个 handler 被执行多次。
+            if (asms[targets.first()]?.any { it.asmClass === asmClass } == true) {
+                return
+            }
+
+            val asmInfo =
+                AsmInfo(
+                    asmClass = asmClass,
+                    targets = targets,
+                    pathMatcher = null,
+                    priority = annotation.priority,
+                    registrationOrder = nextRegistrationOrder++,
+                ).also { it.asmClassBytes = asmClassBytes }
+
+            targets.forEach { target ->
+                asms.getOrPut(target) { mutableListOf() }.add(asmInfo)
+            }
+
+            // 注册关系变更后，清空缓存以避免返回过期结果
+            targetCache.clear()
         }
-
-        val asmInfo =
-            AsmInfo(
-                asmClass = asmClass,
-                targets = targets,
-                pathMatcher = null,
-                priority = annotation.priority,
-                registrationOrder = nextRegistrationOrder++,
-            ).also { it.asmClassBytes = asmClassBytes }
-
-        targets.forEach { target ->
-            asms.getOrPut(target) { mutableListOf() }.add(asmInfo)
-        }
-
-        // 注册关系变更后，清空缓存以避免返回过期结果
-        targetCache.clear()
     }
 
     /**
@@ -98,24 +136,25 @@ object AsmRegistry {
      * @date 2025-11-24
      */
     @JvmStatic
-    @Synchronized
     fun registerWithPathMatcher(
         asmClass: Class<*>,
         pathMatcher: Find<String, Boolean>,
     ) {
         val annotation = asmClass.getAnnotation(AsmMixin::class.java)
-        val asmInfo =
-            AsmInfo(
-                asmClass = asmClass,
-                targets = emptyList(),
-                pathMatcher = pathMatcher,
-                priority = annotation?.priority ?: DEFAULT_PRIORITY,
-                registrationOrder = nextRegistrationOrder++,
-            )
+        synchronized(registryLock) {
+            val asmInfo =
+                AsmInfo(
+                    asmClass = asmClass,
+                    targets = emptyList(),
+                    pathMatcher = pathMatcher,
+                    priority = annotation?.priority ?: DEFAULT_PRIORITY,
+                    registrationOrder = nextRegistrationOrder++,
+                )
 
-        pathMatchers.add(asmInfo)
-        // 路径匹配可能影响任意目标类，直接清空整个缓存
-        targetCache.clear()
+            pathMatchers.add(asmInfo)
+            // 路径匹配可能影响任意目标类，直接清空整个缓存
+            targetCache.clear()
+        }
     }
 
     /**
@@ -134,9 +173,8 @@ object AsmRegistry {
      * @date 2025-11-24
      */
     @JvmStatic
-    @Synchronized
-    fun getForTarget(targetClass: String): List<AsmInfo> {
-        targetCache[targetClass]?.let { return it }
+    fun getForTarget(targetClass: String): List<AsmInfo> = synchronized(registryLock) {
+        targetCache[targetClass]?.let { return@synchronized it }
 
         val matches = buildList {
             // 不能调换顺序：路径匹配在前，精确匹配在后（避免模糊覆盖精准）
@@ -150,31 +188,47 @@ object AsmRegistry {
         }
 
         // 动态类名通常只产生未命中查询；不缓存空结果，避免类名无限增长。
-        if (matches.isEmpty()) return emptyList()
+        if (matches.isEmpty()) return@synchronized emptyList()
 
         if (targetCache.size >= MAX_TARGET_CACHE_ENTRIES) {
             targetCache.remove(targetCache.entries.first().key)
         }
         targetCache[targetClass] = matches
-        return matches
+        matches
     }
 
     /**
-     * 清除所有注册的 ASM 与目标缓存。
+     * 清除所有注册的 ASM 与目标缓存，并关闭扫描器创建的 JAR 类加载器。
      *
      * 该方法主要用于测试隔离、重新扫描或 agent 生命周期重置。调用后已创建的处理器不会持有注册快照，
-     * 后续转换查询会基于新的空注册表重新计算。
+     * 后续转换查询会基于新的空注册表重新计算。调用前应结束旧 Mixin 的使用；调用方提供的父加载器不会被关闭。
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
     @JvmStatic
-    @Synchronized
     fun clear() {
-        asms.clear()
-        pathMatchers.clear()
-        targetCache.clear()
-        nextRegistrationOrder = 0L
+        synchronized(scanLifecycleLock) {
+            val classLoaders = synchronized(registryLock) {
+                asms.clear()
+                pathMatchers.clear()
+                targetCache.clear()
+                nextRegistrationOrder = 0L
+
+                scannedClassLoaders.values.flatMap { it.values }.also { scannedClassLoaders.clear() }
+            }
+            var closeFailure: IOException? = null
+            classLoaders.forEach { classLoader ->
+                try {
+                    classLoader.close()
+                } catch (exception: IOException) {
+                    // 尝试释放所有自有加载器，再把关闭失败交给调用方，避免一个失败阻止其余资源释放。
+                    val previousFailure = closeFailure
+                    if (previousFailure == null) closeFailure = exception else previousFailure.addSuppressed(exception)
+                }
+            }
+            closeFailure?.let { throw it }
+        }
     }
 
     /**

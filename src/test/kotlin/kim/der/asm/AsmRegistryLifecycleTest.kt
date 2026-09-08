@@ -14,8 +14,13 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class AsmRegistryLifecycleTest {
@@ -60,6 +65,49 @@ class AsmRegistryLifecycleTest {
         assertEquals(1, AsmRegistry.getForTarget("lifecycle/Target").size)
         assertEquals(1, transformAndLoad("lifecycle/Target").getMethod("value").invoke(null))
         assertEquals(1, handlerCalls)
+    }
+
+    @Test
+    fun repeatedTargetsRunHandlerOnce() {
+        AsmRegistry.register(RepeatedTargetMixin::class.java)
+
+        assertEquals(1, AsmRegistry.getForTarget("lifecycle/Target").size)
+        assertEquals(1, transformAndLoad("lifecycle/Target").getMethod("value").invoke(null))
+        assertEquals(1, handlerCalls)
+    }
+
+    @Test
+    fun scannedRegistrationUsesSameStateLockAsPublicQueries() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val registrationStarted = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        val mixin = MultiTargetMixin::class.java
+        val bytes = requireNotNull(mixin.classLoader.getResourceAsStream(mixin.name.replace('.', '/') + ".class"))
+            .use { it.readBytes() }
+        AsmRegistry.registerWithPathMatcher(ExactMixin::class.java) {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            false
+        }
+        try {
+            val query = executor.submit { AsmRegistry.getForTarget("lifecycle/First") }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val registration = executor.submit {
+                registrationStarted.countDown()
+                AsmRegistry.registerScanned(mixin, bytes)
+            }
+            assertTrue(registrationStarted.await(5, TimeUnit.SECONDS))
+            assertFailsWith<TimeoutException> { registration.get(200, TimeUnit.MILLISECONDS) }
+            release.countDown()
+            query.get(5, TimeUnit.SECONDS)
+            registration.get(5, TimeUnit.SECONDS)
+            assertEquals(1, AsmRegistry.getForTarget("lifecycle/First").size)
+        } finally {
+            release.countDown()
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test
@@ -136,6 +184,14 @@ class AsmRegistryLifecycleTest {
 
     @AsmMixin(targets = ["lifecycle/First", "lifecycle/Second"])
     class MultiTargetMixin {
+        @AsmInject(method = "value()I")
+        fun beforeValue() {
+            handlerCalls++
+        }
+    }
+
+    @AsmMixin(targets = ["lifecycle/Target", "lifecycle/Target"])
+    class RepeatedTargetMixin {
         @AsmInject(method = "value()I")
         fun beforeValue() {
             handlerCalls++

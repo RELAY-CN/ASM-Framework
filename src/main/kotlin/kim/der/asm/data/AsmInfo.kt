@@ -62,6 +62,6 @@ data class AsmInfo(
     /** 当前查询目标类 internal name，仅用于本次转换快照。 */
     internal var targetClassName: String? = null
 
-    /** 扫描时捕获的 ASM classfile，避免临时类加载器关闭后无法回读。 */
+    /** 扫描时捕获的 ASM classfile，供转换复用并保持反射类与字节码来源一致。 */
     internal var asmClassBytes: ByteArray? = null
 }

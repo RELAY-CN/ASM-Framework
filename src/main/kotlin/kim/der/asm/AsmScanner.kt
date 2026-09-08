@@ -248,7 +248,8 @@ object AsmScanner {
     /**
      * 扫描 JAR 文件中的 ASM 类并返回诊断结果。
      *
-     * 该入口会为目标 JAR 创建临时 [URLClassLoader]；扫描时会捕获 Mixin classfile，扫描结束即可关闭加载器。
+     * 该入口为目标 JAR 复用由注册表管理的 [URLClassLoader]，并捕获 Mixin classfile。
+     * 已注册类的加载器在 [AsmRegistry.clear] 时关闭，以支持扫描结束后的依赖解析。
      *
      * @param jarFile 待扫描的 JAR 文件
      * @param packageName 限定扫描的包名；为空字符串时扫描整个 JAR
@@ -271,7 +272,7 @@ object AsmScanner {
      *
      * @param jarFile 待扫描的 JAR 文件
      * @param packageName 限定扫描的包名
-     * @param parentClassLoader 临时 JAR 类加载器的父加载器
+     * @param parentClassLoader JAR 类加载器的父加载器
      * @return 扫描诊断结果
      *
      * @author Dr (dr@der.kim)
@@ -290,7 +291,7 @@ object AsmScanner {
             val accumulator = AsmScanResultAccumulator()
 
             JarFile(jarFile).use { jar ->
-                URLClassLoader(arrayOf(jarFile.toURI().toURL()), parentClassLoader).use { classLoader ->
+                AsmRegistry.withJarClassLoader(jarFile, parentClassLoader) { classLoader ->
                     val entries = jar.entries()
                     while (entries.hasMoreElements()) {
                         val entry = entries.nextElement()
