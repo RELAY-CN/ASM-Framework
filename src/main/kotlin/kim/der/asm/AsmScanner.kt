@@ -211,11 +211,14 @@ object AsmScanner {
         val accumulator = AsmScanResultAccumulator()
 
         for (file in files) {
+            // 模块描述符和 JAR 元数据不属于可加载的应用类。
+            if (file.name == "module-info.class" || file.name == "META-INF") continue
             accumulator.add(
                 if (file.isDirectory) {
-                    scanDirectory(file, "$packageName.${file.name}", classLoader)
+                    scanDirectory(file, appendPackage(packageName, file.name), classLoader)
                 } else if (file.name.endsWith(".class")) {
-                    val className = "$packageName.${file.name.substring(0, file.name.length - 6)}"
+                    val simpleName = file.name.substring(0, file.name.length - 6)
+                    val className = appendPackage(packageName, simpleName)
                     registerAsmClass(className, classLoader)
                 } else {
                     AsmScanResult()
@@ -290,24 +293,26 @@ object AsmScanner {
             val packagePrefix = if (packagePath.isEmpty()) "" else "$packagePath/"
             val accumulator = AsmScanResultAccumulator()
 
-            JarFile(jarFile).use { jar ->
+            JarFile(jarFile, true, JarFile.OPEN_READ, JarFile.runtimeVersion()).use { jar ->
                 AsmRegistry.withJarClassLoader(jarFile, parentClassLoader) { classLoader ->
-                    val entries = jar.entries()
-                    while (entries.hasMoreElements()) {
-                        val entry = entries.nextElement()
-                        val name = entry.name
-
-                        if (!entry.isDirectory && name.startsWith(packagePrefix) && name.endsWith(".class")) {
-                            val className = name.substring(0, name.length - 6).replace('/', '.')
-                            accumulator.add(
-                                registerAsmClass(className, classLoader) {
-                                    // 让加载器选择多版本 JAR 条目，保持反射类与 classfile 快照一致。
-                                    val inputStream = checkNotNull(classLoader.getResourceAsStream(name)) {
-                                        "Cannot find class file for $className"
-                                    }
-                                    inputStream.use { it.readBytes() }
-                                },
-                            )
+                    // 版本视图使用逻辑类名，避免重复扫描或将版本目录当作包名。
+                    jar.versionedStream().use { entries ->
+                        entries.forEach { entry ->
+                            val name = entry.name
+                            if (!entry.isDirectory && !name.startsWith("META-INF/") && name != "module-info.class" &&
+                                name.startsWith(packagePrefix) && name.endsWith(".class")
+                            ) {
+                                val className = name.substring(0, name.length - 6).replace('/', '.')
+                                accumulator.add(
+                                    registerAsmClass(className, classLoader) {
+                                        // 让加载器选择多版本 JAR 条目，保持反射类与 classfile 快照一致。
+                                        val inputStream = checkNotNull(classLoader.getResourceAsStream(name)) {
+                                            "Cannot find class file for $className"
+                                        }
+                                        inputStream.use { it.readBytes() }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -414,4 +419,7 @@ object AsmScanner {
         } catch (throwable: Throwable) {
             AsmScanResult(failures = listOf(AsmScanFailure(className, throwable.message ?: throwable.javaClass.name)))
         }
+
+    private fun appendPackage(packageName: String, name: String): String =
+        if (packageName.isEmpty()) name else "$packageName.$name"
 }

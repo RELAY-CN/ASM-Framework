@@ -13,6 +13,8 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -93,15 +95,119 @@ class AsmScannerLifecycleTest {
         Files.delete(jar)
     }
 
-    @Test
-    fun multiReleaseJarUsesRuntimeSelectedBytecode() {
+    @ParameterizedTest
+    @ValueSource(strings = ["", "lifecycle.external"])
+    fun multiReleaseJarUsesRuntimeSelectedBytecode(packageName: String) {
         val jar = createJar(mixinBytes(42), mixinBytes(7))
-        val result = AsmScanner.scanJarWithResult(jar.toFile(), "lifecycle.external")
+        val result = AsmScanner.scanJarWithResult(jar.toFile(), packageName)
 
         assertTrue(result.failures.isEmpty(), result.failures.toString())
+        assertEquals(listOf(MIXIN.replace('/', '.')), result.registeredClasses)
         val mixin = AsmRegistry.getForTarget(TARGET).single().asmClass
         assertEquals(7, mixin.getMethod("value").invoke(null))
         assertEquals(7, transformAndLoad().getMethod("value").invoke(null))
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["", "lifecycle.external"])
+    fun multiReleaseJarFindsVersionOnlyMixin(packageName: String) {
+        val jar = createJar(null, mixinBytes(7))
+        val result = AsmScanner.scanJarWithResult(jar.toFile(), packageName)
+
+        assertTrue(result.failures.isEmpty(), result.failures.toString())
+        assertEquals(listOf(MIXIN.replace('/', '.')), result.registeredClasses)
+        assertEquals(7, transformAndLoad().getMethod("value").invoke(null))
+    }
+
+    @Test
+    fun multiReleaseJarIgnoresFutureVersions() {
+        val futureVersion = Runtime.version().feature() + 1
+        val jar = createJar(
+            mixinBytes(42), mixinBytes(7),
+            extraClasses = mapOf(
+                "META-INF/versions/$futureVersion/$MIXIN.class" to byteArrayOf(0),
+                "META-INF/versions/$futureVersion/lifecycle/external/FutureOnly.class" to byteArrayOf(0),
+            ),
+        )
+        val result = AsmScanner.scanJarWithResult(jar.toFile(), "")
+
+        assertTrue(result.failures.isEmpty(), result.failures.toString())
+        assertEquals(listOf(MIXIN.replace('/', '.')), result.registeredClasses)
+        assertEquals(7, transformAndLoad().getMethod("value").invoke(null))
+    }
+
+    @Test
+    fun ordinaryJarIgnoresVersionedClassesAndMetadata() {
+        val jar = createJar(
+            mixinBytes(42), mixinBytes(7),
+            extraClasses = mapOf("META-INF/tools/Hidden.class" to byteArrayOf(0)),
+            multiRelease = false,
+        )
+        val result = AsmScanner.scanJarWithResult(jar.toFile(), "")
+
+        assertTrue(result.failures.isEmpty(), result.failures.toString())
+        assertEquals(listOf(MIXIN.replace('/', '.')), result.registeredClasses)
+        assertTrue(result.skippedClasses.isEmpty())
+        assertEquals(42, transformAndLoad().getMethod("value").invoke(null))
+    }
+
+    @Test
+    fun moduleDescriptorIsNotLoadedAsAClass() {
+        val jar = createJar(mixinBytes(42), extraClasses = mapOf("module-info.class" to moduleDescriptorBytes()))
+        val result = AsmScanner.scanJarWithResult(jar.toFile(), "")
+
+        assertTrue(result.failures.isEmpty(), result.failures.toString())
+        assertEquals(listOf(MIXIN.replace('/', '.')), result.registeredClasses)
+        assertTrue(result.skippedClasses.isEmpty())
+    }
+
+    @Test
+    fun emptyDirectoryPackageScansRootAndNestedClasses() {
+        val nestedClass = directory.resolve("$MIXIN.class")
+        Files.createDirectories(nestedClass.parent)
+        Files.write(nestedClass, mixinBytes(42))
+        Files.write(directory.resolve("RootMixin.class"), mixinBytes(7, mixinName = "RootMixin"))
+        Files.write(directory.resolve("module-info.class"), moduleDescriptorBytes())
+        val metadataClass = directory.resolve("META-INF/versions/11/$MIXIN.class")
+        Files.createDirectories(metadataClass.parent)
+        Files.write(metadataClass, byteArrayOf(0))
+        URLClassLoader(arrayOf(directory.toUri().toURL()), javaClass.classLoader).use { loader ->
+            val thread = Thread.currentThread()
+            val originalLoader = thread.contextClassLoader
+            val result = try {
+                thread.contextClassLoader = loader
+                AsmScanner.scanDirectoryWithResult(directory.toFile(), "")
+            } finally {
+                thread.contextClassLoader = originalLoader
+            }
+
+            assertTrue(result.failures.isEmpty(), result.failures.toString())
+            assertEquals(setOf("RootMixin", MIXIN.replace('/', '.')), result.registeredClasses.toSet())
+            assertTrue(result.skippedClasses.isEmpty())
+            assertEquals(2, AsmRegistry.getForTarget(TARGET).size)
+        }
+    }
+
+    @Test
+    fun pathMatcherCanWaitForJarScanOnAnotherThread() {
+        val jar = createJar(mixinBytes(42))
+        val executor = Executors.newSingleThreadExecutor()
+        AsmRegistry.registerWithPathMatcher(javaClass) {
+            // 使用有超时的等待暴露状态锁被回调占用的问题，失败时仍能释放测试线程。
+            val scan = executor.submit<AsmScanResult> {
+                AsmScanner.scanJarWithResult(jar.toFile(), "lifecycle.external")
+            }.get(5, TimeUnit.SECONDS)
+            assertTrue(scan.failures.isEmpty(), scan.failures.toString())
+            false
+        }
+        try {
+            assertTrue(AsmRegistry.getForTarget(TARGET).isEmpty())
+            assertEquals(listOf(MIXIN.replace('/', '.')), AsmRegistry.getForTarget(TARGET).map { it.asmClass.name })
+            assertEquals(42, transformAndLoad().getMethod("value").invoke(null))
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test
@@ -268,19 +374,22 @@ class AsmScannerLifecycleTest {
     }
 
     private fun createJar(
-        bytes: ByteArray,
+        bytes: ByteArray?,
         versionedBytes: ByteArray? = null,
         extraClasses: Map<String, ByteArray> = emptyMap(),
+        multiRelease: Boolean = versionedBytes != null,
     ): Path {
         val jar = directory.resolve("mixin.jar")
         val manifest = Manifest().apply {
             mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
-            if (versionedBytes != null) mainAttributes[Attributes.Name.MULTI_RELEASE] = "true"
+            if (multiRelease) mainAttributes[Attributes.Name.MULTI_RELEASE] = "true"
         }
         JarOutputStream(Files.newOutputStream(jar), manifest).use { output ->
-            output.putNextEntry(JarEntry("$MIXIN.class"))
-            output.write(bytes)
-            output.closeEntry()
+            if (bytes != null) {
+                output.putNextEntry(JarEntry("$MIXIN.class"))
+                output.write(bytes)
+                output.closeEntry()
+            }
             if (versionedBytes != null) {
                 output.putNextEntry(JarEntry("META-INF/versions/11/$MIXIN.class"))
                 output.write(versionedBytes)
@@ -295,9 +404,20 @@ class AsmScannerLifecycleTest {
         return jar
     }
 
-    private fun mixinBytes(value: Int, withDependencies: Boolean = false): ByteArray {
+    private fun moduleDescriptorBytes(): ByteArray {
         val writer = ClassWriter(0)
-        writer.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, MIXIN, null, "java/lang/Object", null)
+        writer.visit(Opcodes.V11, Opcodes.ACC_MODULE, "module-info", null, null, null)
+        writer.visitModule("lifecycle.fixture", 0, null).apply {
+            visitRequire("java.base", Opcodes.ACC_MANDATED, null)
+            visitEnd()
+        }
+        writer.visitEnd()
+        return writer.toByteArray()
+    }
+
+    private fun mixinBytes(value: Int, withDependencies: Boolean = false, mixinName: String = MIXIN): ByteArray {
+        val writer = ClassWriter(0)
+        writer.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, mixinName, null, "java/lang/Object", null)
         writer.visitAnnotation(Type.getDescriptor(AsmMixin::class.java), true).apply {
             visit("value", TARGET)
             visitEnd()

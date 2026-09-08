@@ -17,10 +17,11 @@ import org.objectweb.asm.Opcodes
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class AsmRegistryLifecycleTest {
@@ -77,37 +78,113 @@ class AsmRegistryLifecycleTest {
     }
 
     @Test
-    fun scannedRegistrationUsesSameStateLockAsPublicQueries() {
+    fun scannedRegistrationCompletesWhilePathMatcherIsRunning() {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
-        val registrationStarted = CountDownLatch(1)
+        val firstCall = AtomicBoolean(true)
         val executor = Executors.newFixedThreadPool(2)
         val mixin = MultiTargetMixin::class.java
         val bytes = requireNotNull(mixin.classLoader.getResourceAsStream(mixin.name.replace('.', '/') + ".class"))
             .use { it.readBytes() }
         AsmRegistry.registerWithPathMatcher(ExactMixin::class.java) {
-            entered.countDown()
-            check(release.await(5, TimeUnit.SECONDS))
-            false
+            if (firstCall.getAndSet(false)) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            true
         }
         try {
-            val query = executor.submit { AsmRegistry.getForTarget("lifecycle/First") }
+            val query = executor.submit<List<AsmInfo>> { AsmRegistry.getForTarget("lifecycle/First") }
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             val registration = executor.submit {
-                registrationStarted.countDown()
                 AsmRegistry.registerScanned(mixin, bytes)
             }
-            assertTrue(registrationStarted.await(5, TimeUnit.SECONDS))
-            assertFailsWith<TimeoutException> { registration.get(200, TimeUnit.MILLISECONDS) }
-            release.countDown()
-            query.get(5, TimeUnit.SECONDS)
             registration.get(5, TimeUnit.SECONDS)
-            assertEquals(1, AsmRegistry.getForTarget("lifecycle/First").size)
+            assertFalse(query.isDone)
+            val expected = listOf(ExactMixin::class.java, mixin)
+            assertEquals(expected, AsmRegistry.getForTarget("lifecycle/First").map { it.asmClass })
+            release.countDown()
+            assertEquals(listOf(ExactMixin::class.java), query.get(5, TimeUnit.SECONDS).map { it.asmClass })
+            assertEquals(expected, AsmRegistry.getForTarget("lifecycle/First").map { it.asmClass })
         } finally {
             release.countDown()
             executor.shutdown()
             assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
         }
+    }
+
+    @Test
+    fun matcherCanAddPathRegistrationWithoutChangingCurrentQuerySnapshot() {
+        val firstCall = AtomicBoolean(true)
+        AsmRegistry.registerWithPathMatcher(ExactMixin::class.java) {
+            if (firstCall.getAndSet(false)) {
+                AsmRegistry.registerWithPathMatcher(RepeatedTargetMixin::class.java) { true }
+            }
+            true
+        }
+
+        assertEquals(listOf(ExactMixin::class.java), AsmRegistry.getForTarget("lifecycle/First").map { it.asmClass })
+        assertFalse(targetCache().containsKey("lifecycle/First"))
+        assertEquals(
+            listOf(ExactMixin::class.java, RepeatedTargetMixin::class.java),
+            AsmRegistry.getForTarget("lifecycle/First").map { it.asmClass },
+        )
+    }
+
+    @Test
+    fun matcherCanClearAndReplaceRegistrationsWithoutRestoringOldCache() {
+        AsmRegistry.registerWithPathMatcher(ExactMixin::class.java) {
+            AsmRegistry.clear()
+            AsmRegistry.register(MultiTargetMixin::class.java)
+            true
+        }
+
+        // 清理后注册数量相同，也不能把旧生命周期的查询结果写回新缓存。
+        assertEquals(listOf(ExactMixin::class.java), AsmRegistry.getForTarget("lifecycle/First").map { it.asmClass })
+        assertFalse(targetCache().containsKey("lifecycle/First"))
+        assertEquals(listOf(MultiTargetMixin::class.java), AsmRegistry.getForTarget("lifecycle/First").map { it.asmClass })
+    }
+
+    @Test
+    fun clearingDuringMatchingDoesNotResurrectRegistrations() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        AsmRegistry.registerWithPathMatcher(ExactMixin::class.java) {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            true
+        }
+        try {
+            val query = executor.submit<List<AsmInfo>> { AsmRegistry.getForTarget("lifecycle/Target") }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            executor.submit { AsmRegistry.clear() }.get(5, TimeUnit.SECONDS)
+            assertFalse(query.isDone)
+            release.countDown()
+            assertEquals(listOf(ExactMixin::class.java), query.get(5, TimeUnit.SECONDS).map { it.asmClass })
+            assertTrue(targetCache().isEmpty())
+            assertTrue(AsmRegistry.getForTarget("lifecycle/Target").isEmpty())
+        } finally {
+            release.countDown()
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun matcherExceptionPropagatesWithoutCachingPartialResults() {
+        val failure = IllegalStateException("matcher failed")
+        var fail = true
+        AsmRegistry.registerWithPathMatcher(ExactMixin::class.java) { true }
+        AsmRegistry.registerWithPathMatcher(RepeatedTargetMixin::class.java) {
+            if (fail) throw failure
+            true
+        }
+
+        assertSame(failure, assertFailsWith<IllegalStateException> { AsmRegistry.getForTarget("lifecycle/Target") })
+        assertTrue(targetCache().isEmpty())
+        fail = false
+        assertEquals(2, AsmRegistry.getForTarget("lifecycle/Target").size)
     }
 
     @Test

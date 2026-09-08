@@ -21,8 +21,8 @@ import java.util.LinkedHashMap
  * 同一匹配来源内按 [AsmMixin.priority] 从高到低排序，同优先级保持注册顺序，因此一个目标类存在多个 Mixin
  * 时会按该顺序依次应用。
  *
- * 该对象的公开注册、查询与清理入口均使用同步锁保护。注册关系变化会清空目标缓存，
- * 以避免类加载器或 agent 场景下扫描注册与转换查询交错时读取到过期匹配结果。
+ * 注册表状态使用同步锁保护，用户路径匹配器在锁外基于注册快照执行。
+ * 注册关系变化会清空目标缓存，并阻止旧查询写回过期匹配结果。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -37,6 +37,8 @@ object AsmRegistry {
     private val targetCache = LinkedHashMap<String, List<AsmInfo>>()
     private val scannedClassLoaders = IdentityHashMap<ClassLoader, MutableMap<File, URLClassLoader>>()
     private var nextRegistrationOrder = 0L
+    // 只要注册关系发生变化就递增，防止查询快照在并发注册后把旧结果写回缓存。
+    private var registryVersion = 0L
 
     /**
      * 注册带 [AsmMixin] 的 ASM 类。
@@ -119,6 +121,7 @@ object AsmRegistry {
 
             // 注册关系变更后，清空缓存以避免返回过期结果
             targetCache.clear()
+            registryVersion++
         }
     }
 
@@ -154,6 +157,7 @@ object AsmRegistry {
             pathMatchers.add(asmInfo)
             // 路径匹配可能影响任意目标类，直接清空整个缓存
             targetCache.clear()
+            registryVersion++
         }
     }
 
@@ -165,6 +169,8 @@ object AsmRegistry {
      * 同一匹配来源内按 priority 从高到低排序，priority 相同时保持注册顺序。
      * 该顺序会直接影响 [kim.der.asm.transformer.AsmProcessor] 对多个 Mixin 的应用顺序。
      * 若路径匹配器抛出异常，异常会原样传播给调用方，本方法不会吞掉匹配阶段错误。
+     * 回调可并发执行，也可重入注册或扫描；调用方负责回调自身的线程安全。
+     * 查询返回捕获时的注册快照，回调期间发生的注册或清理会在下一次查询中体现。
      *
      * @param targetClass 目标类 internal name，例如 `com/example/Target`
      * @return 匹配到的 ASM 列表；没有匹配时返回空列表
@@ -173,28 +179,37 @@ object AsmRegistry {
      * @date 2025-11-24
      */
     @JvmStatic
-    fun getForTarget(targetClass: String): List<AsmInfo> = synchronized(registryLock) {
-        targetCache[targetClass]?.let { return@synchronized it }
+    fun getForTarget(targetClass: String): List<AsmInfo> {
+        val snapshot = synchronized(registryLock) {
+            targetCache[targetClass]?.let { return it }
+            RegistrySnapshot(
+                version = registryVersion,
+                pathMatchers = pathMatchers.toList(),
+                exactMatches = asms[targetClass]?.toList().orEmpty(),
+            )
+        }
 
         val matches = buildList {
-            // 不能调换顺序：路径匹配在前，精确匹配在后（避免模糊覆盖精准）
-            pathMatchers
+            // 用户回调可能重入注册或扫描，不能在 registryLock 内执行。
+            snapshot.pathMatchers
                 .filter { asmInfo -> asmInfo.pathMatcher?.invoke(targetClass) == true }
                 .sortedByPriority()
                 .forEach { add(it.forTarget(targetClass)) }
-            asms[targetClass]
-                ?.sortedByPriority()
-                ?.forEach { add(it.forTarget(targetClass)) }
+            snapshot.exactMatches
+                .sortedByPriority()
+                .forEach { add(it.forTarget(targetClass)) }
         }
 
-        // 动态类名通常只产生未命中查询；不缓存空结果，避免类名无限增长。
-        if (matches.isEmpty()) return@synchronized emptyList()
-
-        if (targetCache.size >= MAX_TARGET_CACHE_ENTRIES) {
-            targetCache.remove(targetCache.entries.first().key)
+        synchronized(registryLock) {
+            // 查询允许返回捕获时快照，但只有注册表未变化时才能写缓存。
+            if (registryVersion == snapshot.version && matches.isNotEmpty()) {
+                if (targetCache.size >= MAX_TARGET_CACHE_ENTRIES) {
+                    targetCache.remove(targetCache.entries.first().key)
+                }
+                targetCache[targetClass] = matches
+            }
         }
-        targetCache[targetClass] = matches
-        matches
+        return matches
     }
 
     /**
@@ -214,6 +229,7 @@ object AsmRegistry {
                 pathMatchers.clear()
                 targetCache.clear()
                 nextRegistrationOrder = 0L
+                registryVersion++
 
                 scannedClassLoaders.values.flatMap { it.values }.also { scannedClassLoaders.clear() }
             }
@@ -245,6 +261,12 @@ object AsmRegistry {
             it.targetClassName = targetClass
             it.asmClassBytes = asmClassBytes
         }
+
+    private class RegistrySnapshot(
+        val version: Long,
+        val pathMatchers: List<AsmInfo>,
+        val exactMatches: List<AsmInfo>,
+    )
 
     private const val DEFAULT_PRIORITY = 1000
     private const val MAX_TARGET_CACHE_ENTRIES = 4096
