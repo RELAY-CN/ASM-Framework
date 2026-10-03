@@ -20,13 +20,13 @@ import kim.der.asm.api.annotation.Mutable
  *
  * 与 Shadow 结合使用：
  * - Accessor 为外部代码提供访问接口
- * - Shadow 在 Mixin 类内部提供字段引用
+ * - Shadow 在复制到目标的 Mixin 方法体内提供字段引用
  * - 可以在同一个 Mixin 中同时使用两者：
  *   ```kotlin
  *   @AsmMixin("Test")
  *   class MyMixin {
- *       @Shadow(prefix = "")
- *       private val dynamicString: String? = null  // 在注入方法中使用
+ *       @Shadow
+ *       private val dynamicString: String? = null  // 在 Overwrite、Copy 或 inline handler 中使用
  *
  *       @Accessor("dynamicString")
  *       fun getDynamicString(): String { ... }     // 供外部代码使用

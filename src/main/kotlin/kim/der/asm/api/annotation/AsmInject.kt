@@ -68,7 +68,8 @@ package kim.der.asm.api.annotation
  * @param allow 最大命中数；大于等于 0 时实际命中数不能超过该值
  * @param expect 期望命中数；设置为非默认值时不一致会输出警告
  * @param inline 是否内联代码；为 true 时将直接把 ASM 方法的字节码插入到目标方法中，而不是生成方法调用；
- * 普通 try/catch 异常表会随 handler 方法体一起复制，异常范围只覆盖内联的 handler 指令
+ * 普通 try/catch 异常表会随 handler 方法体一起复制，异常范围只覆盖内联的 handler 指令；
+ * [AddField] / [Shadow] 的直接成员引用会绑定到目标类，具体字段和 Kotlin 属性边界见 [AddField]
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -145,6 +146,9 @@ annotation class AsmInject(
      *
      * 开启后转换器复制 handler 方法体到目标方法，而不是生成一次普通方法调用。
      * handler 内部的普通 try/catch 会同步复制；异常处理范围只覆盖内联 handler 自身指令。
+     * [AddField] / [Shadow] 字段的直接读写指令及 [Shadow] / [Copy] 方法调用会绑定到目标成员。
+     * 普通 class 的实例 handler 内联到实例目标时，直接字段访问使用目标 this；关闭内联时
+     * handler 的 this 仍是 Mixin 实例。字段初始值不会复制，Kotlin 属性访问边界见 [AddField]。
      */
     val inline: Boolean = false,
 )

@@ -422,7 +422,7 @@ object RemoveInterfacesMixin
 - `slice: Slice = Slice()` - 注入点切片；当前普通 `INVOKE` / `INVOKE_ASSIGN`、`INVOKE_STRING`、`FIELD` / `FIELD_ASSIGN`、`LOAD` / `STORE`、`NEW`、`CAST` / `INSTANCEOF` / `JUMP` / `SWITCH` / `CONSTANT` / `ARRAY_LENGTH` / `THROW` 指令点注入支持用 `INVOKE`、`FIELD`、`FIELD_ASSIGN` 或 `CONSTANT` 边界缩小查找范围
 - `allow: Int = -1` - 允许的最大命中数；`-1` 表示不限制
 - `expect: Int = 1` - 期望命中数；设置为非默认值时，不一致会输出警告但不阻断转换
-- `inline: Boolean = false` - 是否内联代码；handler 内部普通 try/catch 会随内联字节码一起复制，异常范围只覆盖 handler 自身指令
+- `inline: Boolean = false` - 是否内联代码；handler 内部普通 try/catch 会随内联字节码一起复制，异常范围只覆盖 handler 自身指令；直接成员引用的目标绑定规则见 [@AddField](#addfield) 与 [@Shadow](#shadow)，普通非内联回调仍使用 Mixin receiver
 
 handler 首参可以是 `CallbackInfo`，非 `void` 目标方法也可以使用 `CallbackInfoReturnable<T>` 标注返回值类型。
 普通 `@AsmInject`（`HEAD` / `TAIL` / `RETURN` 与多数指令点观察注入）的推荐参数顺序是：
@@ -476,6 +476,8 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 
 `@Overwrite` 会复制 ASM 方法体到目标方法，并保留目标方法自己的签名。目标方法不存在、方法体无法提取，
 或返回值/参数槽位无法适配时，转换会失败，不会静默跳过。
+复制体中的 `@AddField` / `@Shadow` 字段指令会绑定到目标字段，`@Shadow` / `@Copy` 方法调用也会绑定到目标方法。
+别名解析与 `@Copy`、内联 `@AsmInject` 一致；字段初始化与 Kotlin 属性访问边界见 [@AddField](#addfield)。
 
 当同一个 Mixin 同时使用 `@ReplaceAllMethods` 时，类级全方法替换会先执行，随后方法级 `@Overwrite`
 可以定点覆盖某个关键方法。
@@ -495,7 +497,7 @@ handler 参数对应原调用参数，返回值需要与原调用返回类型兼
 标记 `@Unique` 后，框架会为复制方法生成唯一名称，访问级别设为 `private synthetic`，并保留静态性。
 同一个 Mixin 中 `@Overwrite`、`@Copy` 与 inline `@AsmInject` 方法体里对该复制方法的调用会被同步改写到唯一名称。
 
-当前 `@Unique` 不处理字段唯一化，也不改变 `@AddField` 的同名字段跳过语义。
+当前 `@Unique` 不处理字段唯一化；`@AddField` 的同名字段仍按其类型与 static 兼容规则复用。
 
 **示例：** 见 [GUIDE.md](GUIDE.md#常见场景)
 
@@ -964,7 +966,10 @@ handler 参数接收引用或数组栈值时，可声明为原值类型的父类
 ### @Shadow
 
 在 Mixin 类中引用目标类的字段或方法。转换阶段会校验目标成员存在，字段还会校验类型一致；
-在 `@Overwrite` 等复制方法体的场景中，对 Shadow 字段/方法的访问会改写为目标类对应成员。
+字段和方法的 `static` 属性也必须与目标一致，否则在转换阶段失败。
+在 `@Overwrite`、`@Copy` 和 `@AsmInject(inline = true)` 复制的方法体中，Shadow 直接字段指令和方法调用
+会按相同名称规则改写为目标成员，方法重载按完整 JVM 描述符精确匹配。
+普通非内联 handler 仍在 Mixin 上执行，`@Shadow` 不会自动切换 receiver。
 Shadow 字段/方法会先匹配目标类自身成员；若不存在，会沿可加载父类查找可继承成员。
 字段还会查找可加载接口中的 `public static` 字段；方法还会查找可加载接口中的默认方法。
 `@Mutable` 只会移除目标类自身字段的 `final` 标志，不会改写继承字段的修饰符。
@@ -974,6 +979,8 @@ Shadow 字段/方法会先匹配目标类自身成员；若不存在，会沿可
 - `@Shadow()`：使用 ASM 类中的字段名/方法名
 - `@Shadow("shadow_name")`：去掉 `shadow_` 前缀后匹配目标成员 `name`
 - `@Shadow("actualName")`：直接匹配显式目标成员 `actualName`
+
+`method` 只填写成员名称，不附加 JVM 参数描述符；描述符来自被标注方法自身。
 
 **参数：**
 
@@ -1048,6 +1055,8 @@ fun create(value: String): Any = throw UnsupportedOperationException()
 `synchronized`、`strictfp` 或 `varargs` 方法，框架会保留对应 `static`、`synchronized`、`strictfp` 与 `varargs`
 JVM 标志，避免调用点和反射契约漂移。与 `@Unique` 配合并发生同签名冲突时，复制方法会改名为唯一的
 `private synthetic` 方法，但仍保留这些 JVM 调用契约。
+复制体内的 `@AddField` / `@Shadow` 字段指令和 `@Shadow` / `@Copy` 方法调用会绑定到目标成员，
+别名解析与 `@Overwrite`、内联 `@AsmInject` 一致。字段初始化和 Kotlin 属性访问边界见 [@AddField](#addfield)。
 
 **参数：**
 
@@ -1106,12 +1115,19 @@ val legacyFlag: Boolean = false
 
 向目标类添加字段声明。
 
-该注解标在 ASM 类字段上，只复制字段声明，不复制字段初始化逻辑。非静态字段使用 JVM 默认值初始化，静态字段也不会自动执行 ASM 类中的初始化代码。若目标类已存在同名字段，会跳过并保持原字段不变。
+该注解标在 ASM 类字段上，只复制字段声明，不复制字段初始化逻辑。非静态字段使用 JVM 默认值初始化，静态字段也不会自动执行 ASM 类中的初始化代码。
+若目标类已存在同名字段，会复用原声明；字段类型和 `static` 属性必须一致，否则转换失败。
+原字段的其他修饰符保持不变，但显式标注的 `@Mutable` / `@Final` 仍会按目标别名应用。
 
 在 `@Overwrite`、`@Copy` 和 `@AsmInject(inline = true)` 复制的方法体中，直接读写 `@AddField`
 字段会自动改写为目标类字段访问，支持实例字段、静态字段和 `field` 指定的别名，无需额外标注 `@Shadow`。
 同一字段同时标注 `@AddField` 与 `@Shadow` 时，以 `@AddField.field`（为空时为声明名）作为目标名称。
 普通非内联 `@AsmInject` 仍调用 Mixin handler，直接访问的是 Mixin 自身字段，不会同步到目标对象。
+
+该映射针对复制体中的 `GETFIELD` / `PUTFIELD` / `GETSTATIC` / `PUTSTATIC` 指令，不会自动迁移
+Kotlin getter/setter、委托属性或 lambda 中的间接访问。Kotlin 普通 class 可用 `@JvmField var` 明确产生字段指令；
+object / companion 的字段通常是静态字段，不代表每个目标实例的状态。
+目标 `final` 字段仍受 JVM 写入限制，需要在普通方法内赋值时应使用 `@Mutable` 移除 `final`。
 
 **参数：**
 
@@ -1184,8 +1200,9 @@ object MyMixin
 
 标记字段或 `@Accessor` setter 为可变，用于移除目标类自身字段的 `final` 修饰符。
 
-该注解可用于 `@Shadow` 字段，也可用于写入 final 字段的 `@Accessor` setter。它只会改写目标类自身字段；
+该注解可用于 `@AddField`、`@Shadow` 字段，也可用于写入 final 字段的 `@Accessor` setter。它只会改写目标类自身字段；
 继承字段和接口字段不会被改写，接口字段 setter 仍会在转换阶段失败。
+`@AddField` 会按实际目标名处理新增或复用字段；同时标注 `@Mutable` 与 `@Final` 时最终保留 `final`。
 
 **示例：**
 
@@ -1207,6 +1224,8 @@ fun setFinalField(value: String) {
 
 当 `@Final` 与 `@Shadow` 一起使用时，框架会按 `@Shadow("targetName")` 或 `shadow_` 前缀解析出的真实目标字段名添加
 `final`，而不是只按 ASM 侧字段名查找目标字段。这样可以在 ASM 侧使用别名字段，同时保持字段修饰符变更落到真实目标成员上。
+与 `@AddField` 同用时按新增字段的目标名生效，双注解名称冲突时 `@AddField` 优先。
+目标字段为 `volatile` 时转换失败，因为 JVM 不允许 `final` / `volatile` 组合。
 
 **示例：**
 
@@ -1804,8 +1823,8 @@ priority 相同时保持注册顺序。
 
 1. **方法签名必须精确匹配**：包括参数类型和返回类型
 2. **静态性只在目标成员需要时强制**：生成或覆盖静态目标成员、Accessor/Invoker 静态性匹配、构造器 Invoker 等需要静态入口的场景必须使用静态方法或 `@JvmStatic`；普通注入、Redirect、Wrap、Modify handler 可以是静态方法、`@JvmStatic` 方法，或 Kotlin `object` 实例方法
-3. **Shadow 字段必须是可空类型**：并初始化为 `null`
-4. **Shadow 成员必须在 class 中**：不能在 object 中声明
+3. **Shadow 类型与静态性必须匹配目标**：引用类型可用 `null` 作占位，基本类型可用零值；初始值不复制
+4. **区分实例与静态声明**：目标实例字段使用普通 class；object / companion 字段通常是静态字段，方法按实际 JVM static 属性匹配
 5. **类型使用内部名称**：类名使用 `/` 分隔，如 `com/example/Class`
 6. **错误处理**：建议在应用 ASM 时进行适当的错误处理
 

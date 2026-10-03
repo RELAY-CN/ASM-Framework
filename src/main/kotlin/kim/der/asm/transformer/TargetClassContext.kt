@@ -9,6 +9,7 @@ import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AsmInjectorFactory
 import kim.der.asm.injector.impl.DefaultReturnValueProvider
 import kim.der.asm.injector.util.InlineCodeGenerator
+import kim.der.asm.injector.util.MixinMemberNames
 import kim.der.asm.injector.util.SliceBoundaryResolver
 import kim.der.asm.utils.transformer.BytecodeUtil
 import kim.der.asm.utils.transformer.InstructionUtil
@@ -446,7 +447,7 @@ class TargetClassContext(
                 }
             }
             method.getAnnotation(Shadow::class.java)?.let { annotation ->
-                val targetMethodName = resolveShadowTargetName(annotation.method, method.name)
+                val targetMethodName = MixinMemberNames.shadowTargetName(annotation.method, method.name)
                 generatedMethodReferences.putIfAbsent(
                     "$targetMethodName${Type.getMethodDescriptor(method)}",
                     "@Shadow",
@@ -469,7 +470,7 @@ class TargetClassContext(
         }
         fields.forEach { field ->
             field.getAnnotation(Shadow::class.java)?.let { annotation ->
-                val targetFieldName = resolveShadowTargetName(annotation.method, field.name)
+                val targetFieldName = MixinMemberNames.shadowTargetName(annotation.method, field.name)
                 generatedFieldReferences.putIfAbsent(targetFieldName, "@Shadow")
             }
         }
@@ -557,7 +558,7 @@ class TargetClassContext(
     }
 
     /**
-     * 应用字段处理（Shadow, Mutable, Final）
+     * 应用字段声明、校验与修饰符；AddField 决定名称后仍需进入统一修饰符处理。
      */
     private fun applyFields(): Boolean {
         var transformed = false
@@ -575,27 +576,20 @@ class TargetClassContext(
             }
 
             if (addFieldAnnotation != null) {
-                if (applyAddField(field, addFieldAnnotation)) {
+                if (applyAddField(field)) {
                     transformed = true
                 }
-                continue
-            }
-
-            if (removeFieldAnnotation != null) {
+            } else if (removeFieldAnnotation != null) {
                 if (applyRemoveField(field, removeFieldAnnotation)) {
                     transformed = true
                 }
                 continue
-            }
-
-            if (shadowAnnotation != null) {
-                if (applyShadowField(field, shadowAnnotation)) {
-                    transformed = true
-                }
+            } else if (shadowAnnotation != null) {
+                applyShadowField(field, shadowAnnotation)
             }
 
             if (mutableAnnotation != null || finalAnnotation != null) {
-                if (applyFieldModifiers(field, shadowAnnotation, mutableAnnotation != null, finalAnnotation != null)) {
+                if (applyFieldModifiers(field, mutableAnnotation != null, finalAnnotation != null)) {
                     transformed = true
                 }
             }
@@ -615,10 +609,11 @@ class TargetClassContext(
      */
     private fun applyAddField(
         field: java.lang.reflect.Field,
-        annotation: AddField,
     ): Boolean {
-        val targetFieldName = annotation.field.ifEmpty { field.name }
-        if (classNode.fields.any { it.name == targetFieldName }) {
+        val targetFieldName = MixinMemberNames.fieldTargetName(field)
+        val existingField = classNode.fields.find { it.name == targetFieldName }
+        if (existingField != null) {
+            validateFieldContract(field, existingField, "AddField")
             return false
         }
 
@@ -661,30 +656,29 @@ class TargetClassContext(
     private fun applyShadowField(
         field: java.lang.reflect.Field,
         annotation: Shadow,
-    ): Boolean {
+    ) {
         val fieldName = field.name
-        val targetFieldName = resolveShadowTargetName(annotation.method, fieldName)
+        val targetFieldName = MixinMemberNames.shadowTargetName(annotation.method, fieldName)
 
         // 查找目标字段
         val targetField = findAccessorTargetField(targetFieldName)
             ?: throw IllegalStateException("Shadow field $targetFieldName not found in $className")
 
-        val shadowFieldType = Type.getType(field.type)
-        val targetFieldType = Type.getType(targetField.field.desc)
-        if (shadowFieldType != targetFieldType) {
+        validateFieldContract(field, targetField.field, "Shadow")
+    }
+
+    /** 字段指令保留描述符和 opcode，因此同名字段的类型与 static 属性必须一致。 */
+    private fun validateFieldContract(field: java.lang.reflect.Field, targetField: FieldNode, annotationName: String) {
+        val declaredType = Type.getType(field.type)
+        val targetType = Type.getType(targetField.desc)
+        if (declaredType != targetType) {
             throw IllegalStateException(
-                "Shadow field $targetFieldName type ($shadowFieldType) must match target field type ($targetFieldType)",
+                "$annotationName field ${targetField.name} type ($declaredType) must match target field type ($targetType)",
             )
         }
-
-        // 如果字段存在，应用 Mutable 修饰符
-        if (field.isAnnotationPresent(Mutable::class.java) && targetField.owner == className) {
-            val originalAccess = targetField.field.access
-            targetField.field.access = targetField.field.access and Opcodes.ACC_FINAL.inv()
-            return targetField.field.access != originalAccess
+        if (Modifier.isStatic(field.modifiers) != (targetField.access and Opcodes.ACC_STATIC != 0)) {
+            throw IllegalStateException("$annotationName field ${targetField.name} static modifier must match target field in $className")
         }
-
-        return false
     }
 
     /**
@@ -695,13 +689,17 @@ class TargetClassContext(
         annotation: Shadow,
     ) {
         val methodName = method.name
-        val targetMethodName = resolveShadowTargetName(annotation.method, methodName)
+        val targetMethodName = MixinMemberNames.shadowTargetName(annotation.method, methodName)
 
         // 验证目标方法是否存在（Shadow 方法只是引用，不需要转换）
         val methodSignature = "$targetMethodName${Type.getMethodDescriptor(method)}"
         val targetMethod = findShadowTargetMethod(methodSignature)
         if (targetMethod == null) {
             throw IllegalStateException("Shadow method $methodSignature not found in $className")
+        }
+        // JVM 方法描述符不包含 static 信息，单独校验才能避免改写后调用 opcode 与目标不符。
+        if (Modifier.isStatic(method.modifiers) != (targetMethod.access and Opcodes.ACC_STATIC != 0)) {
+            throw IllegalStateException("Shadow method $methodSignature static modifier must match target method in $className")
         }
     }
 
@@ -748,46 +746,26 @@ class TargetClassContext(
         method: MethodNode,
     ): Boolean = isInheritedClassMemberVisible(owner, method.access)
 
-    private fun resolveShadowTargetName(
-        declaredName: String,
-        memberName: String,
-    ): String =
-        when {
-            declaredName.isEmpty() -> memberName
-            declaredName.startsWith(Shadow.prefix) -> declaredName.substring(Shadow.prefix.length)
-            else -> declaredName
-        }
-
     /**
      * 应用字段修饰符
      */
     private fun applyFieldModifiers(
         field: java.lang.reflect.Field,
-        shadowAnnotation: Shadow?,
         mutable: Boolean,
         final: Boolean,
     ): Boolean {
-        // 字段修饰符必须与 Shadow 的目标名解析保持一致，避免别名字段只完成校验却没有修改真实目标字段。
-        val targetFieldName = resolveShadowTargetName(shadowAnnotation?.method.orEmpty(), field.name)
-        val targetField = classNode.fields.find { it.name == targetFieldName }
-        var transformed = false
-
-        if (targetField != null) {
-            if (mutable) {
-                // 移除 FINAL 标志
-                val originalAccess = targetField.access
-                targetField.access = targetField.access and Opcodes.ACC_FINAL.inv()
-                transformed = transformed || targetField.access != originalAccess
-            }
-            if (final) {
-                // 添加 FINAL 标志
-                val originalAccess = targetField.access
-                targetField.access = targetField.access or Opcodes.ACC_FINAL
-                transformed = transformed || targetField.access != originalAccess
-            }
+        val targetFieldName = MixinMemberNames.fieldTargetName(field)
+        val targetField = classNode.fields.find { it.name == targetFieldName } ?: return false
+        val originalAccess = targetField.access
+        var access = originalAccess
+        if (mutable) access = access and Opcodes.ACC_FINAL.inv()
+        if (final) access = access or Opcodes.ACC_FINAL
+        // JVM 禁止 final 与 volatile 共存；保留明确的转换错误，不输出无法加载的 class。
+        if (access and Opcodes.ACC_FINAL != 0 && access and Opcodes.ACC_VOLATILE != 0) {
+            throw IllegalStateException("Field $targetFieldName in $className cannot be both final and volatile")
         }
-
-        return transformed
+        targetField.access = access
+        return access != originalAccess
     }
 
     /**

@@ -17,32 +17,33 @@ import kim.der.asm.api.annotation.Shadow
  * 这个示例展示了如何同时使用 Shadow 和 Accessor：
  * 1. 使用 Shadow 在 Mixin 类中引用目标类的字段和方法
  * 2. 使用 Accessor 为这些字段生成访问器方法（供外部代码使用）
- * 3. 在 Inject 方法中使用 Shadow 字段和方法
+ * 3. 在 Overwrite、Copy 或 inline AsmInject 复制体中使用 Shadow 字段和方法
  *
  * 使用场景：
- * - 在注入方法中需要访问和修改目标类的私有字段
+ * - 在复制方法体中需要访问和修改目标类的私有字段
  * - 同时需要为外部代码提供访问这些字段的接口
- * - 在注入方法中需要调用目标类的私有方法
+ * - 在复制方法体中需要调用目标类的私有方法
  *
  * 注意：
- * - Shadow 字段和方法在 class 中声明（不是 object）
- * - Accessor 方法在 object 中声明（需要 @JvmStatic 用于静态字段）
+ * - 本例引用实例字段，因此使用普通 class；Shadow 成员的 static 属性必须与目标一致
+ * - Accessor 可以声明在 class 中；访问静态字段时方法需要 Java static 或 @JvmStatic
  * - 可以在同一个 Mixin 类中同时使用 Shadow 和 Accessor
+ * - 普通非内联 handler 不会因 Shadow 自动切换到目标 receiver
  */
 @AsmMixin("Test")
 class AccessorShadowMixin {
     /**
      * Shadow 字段：在 Mixin 类中引用目标类的字段
-     * 这样可以在注入方法中直接访问这个字段
+     * 在复制到目标的方法体内，直接字段指令会映射到目标字段
      *
-     * 注意：Shadow 字段必须在 class 中声明，不能在 object 中
+     * 本例目标是实例字段，因此声明也必须是实例字段
      */
     @Shadow()
     private val dynamicString: String? = null
 
     /**
      * Shadow 方法：在 Mixin 类中引用目标类的方法
-     * 这样可以在注入方法中调用这个方法
+     * 复制方法体中的直接调用会映射到目标；普通 handler 仍会调用这个占位方法
      */
     @Shadow()
     private fun testA0(): String = throw UnsupportedOperationException("Shadow method should not be called directly")

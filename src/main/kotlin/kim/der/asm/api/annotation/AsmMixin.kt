@@ -283,6 +283,9 @@ annotation class RedirectAllMethods(
  *
  * - 覆写会清空目标方法原有方法体，并移除目标方法的 `abstract` / `native` 标志。
  * - 目标方法签名以 [method] 指定；为空时按 ASM 方法名与描述符匹配。
+ * - 方法体内对 [AddField] / [Shadow] 字段的直接指令会绑定到目标字段，支持别名；
+ *   [Shadow] 方法调用同样按显式名称、`shadow_` 前缀或声明名绑定，并保留重载描述符。
+ * - 字段初始化表达式不会随方法体复制，Kotlin 属性访问边界见 [AddField]。
  * - 当同一个 Mixin 同时使用 [ReplaceAllMethods] 时，类级全方法替换先执行，[Overwrite] 后执行，可覆盖全替换后的方法体。
  *
  * @param method 目标方法签名，格式：`方法名(参数类型)返回类型`，例如 `"methodName(Ljava/lang/String;)V"`
@@ -315,6 +318,8 @@ annotation class Overwrite(
  * 与 [Overwrite] 不同，[Copy] 不会覆盖同名同签名的方法；当目标方法已存在时会跳过并输出 warning。
  * 普通复制方法会作为 `public` 方法写入目标类，同时保留 ASM 方法的 `static`、`synchronized`、`strictfp`
  * 与 `varargs` 等 JVM 调用契约。
+ * 复制体内的 [AddField] / [Shadow] 字段指令及 [Shadow] / [Copy] 方法调用会改写到目标类；
+ * 别名解析与 [Overwrite]、内联 [AsmInject] 一致，字段初始化和 Kotlin 属性边界见 [AddField]。
  *
  * @param method 目标方法签名；为空时使用 ASM 方法名与描述符
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
@@ -1678,9 +1683,11 @@ annotation class Redirect(
  *
  * Shadow 字段/方法会先匹配目标类自身成员；若不存在，会沿可加载父类查找可继承成员。
  * 字段还会查找可加载接口中的 `public static` 字段；方法还会查找可加载接口中的默认方法。
- * 字段引用会额外校验类型。
+ * 字段引用会额外校验类型，字段与方法的 `static` 属性都必须与目标一致，否则转换失败。
  * [Mutable] 只会移除目标类自身字段的 `final` 标志，不会改写继承字段的修饰符。
- * `@Overwrite` 等复制方法体的场景会把对 Shadow 成员的引用改写为目标类对应成员。
+ * [Overwrite]、[Copy] 与 `AsmInject(inline = true)` 使用相同名称规则改写直接字段指令和方法调用；
+ * 方法按名称与完整 JVM 描述符匹配重载。[method] 只填写目标名称，不包含参数描述符。
+ * 普通非内联 handler 仍在 Mixin 上执行，不能靠 Shadow 自动切换到目标 receiver。
  *
  * @param method 目标名称提示；为空时使用声明名，非空时可直接指定目标名或使用 `shadow_` 前缀
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
@@ -1815,8 +1822,9 @@ annotation class Invoker(
  *
  * 标记字段或 [Accessor] setter 为可变。
  *
- * 用于移除目标类自身字段的 `final` 修饰符。该注解可用于 [Shadow] 字段，也可用于写入 final
+ * 用于移除目标类自身字段的 `final` 修饰符。该注解可用于 [AddField]、[Shadow] 字段，也可用于写入 final
  * 字段的 [Accessor] setter；继承字段和接口字段不会被改写修饰符。
+ * [AddField] 按其实际目标名处理，包括复用已有同名字段；与 [Final] 同时使用时最终保留 `final`。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -1831,6 +1839,8 @@ annotation class Mutable
  * 标记字段为最终（为目标字段添加 `final` 修饰符）。
  * 与 [Shadow] 一起使用时，会按 [Shadow.method] 或 `shadow_` 前缀解析出的真实目标字段名生效，
  * 适合 ASM 侧字段名需要避开目标类成员名冲突的场景。
+ * 与 [AddField] 同用时按新增字段的目标名生效；双注解名称冲突时 [AddField] 优先。
+ * 目标字段为 `volatile` 时转换失败，因为 JVM 不允许 `final` / `volatile` 组合。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -1848,11 +1858,16 @@ annotation class Final
  * ## 使用边界
  *
  * - 当 [field] 为空时，使用 ASM 字段名作为目标字段名。
- * - 目标类已存在同名字段时会跳过，不会重复写入 [org.objectweb.asm.tree.ClassNode.fields]。
+ * - 目标类已存在同名字段时复用该声明，不会重复写入 [org.objectweb.asm.tree.ClassNode.fields]；
+ *   类型与 `static` 属性必须一致，否则转换失败。[Mutable] / [Final] 仍会应用到复用字段。
  * - 字段访问标志与类型来自被标注字段；泛型签名与初始值当前不复制。
  * - [Overwrite]、[Copy] 和 `AsmInject(inline = true)` 中的字段指令会改写到目标类，支持 [field] 别名，
  *   无需额外标注 [Shadow]；同时标注两者时，字段名称以 [AddField] 的声明规则为准。
  * - 非内联 [AsmInject] 仍在 Mixin handler 中执行，直接读写的是 Mixin 自身字段。
+ * - 映射仅处理复制体内直接的 `GETFIELD` / `PUTFIELD` / `GETSTATIC` / `PUTSTATIC` 指令，
+ *   不自动迁移 Kotlin getter/setter、委托属性或 lambda 中的间接访问。Kotlin 可用普通 class 的
+ *   `@JvmField var` 明确产生字段指令；object / companion 字段通常是静态字段，不代表目标实例状态。
+ * - 写入目标 `final` 字段仍须遵守 JVM 限制；需要在普通方法中赋值时配合 [Mutable] 移除 `final`。
  *
  * @param field 目标字段名；为空时使用被标注字段名
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）

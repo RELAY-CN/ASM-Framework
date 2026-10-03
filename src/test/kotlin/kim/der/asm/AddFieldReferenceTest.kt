@@ -124,6 +124,7 @@ class AddFieldReferenceTest {
         AsmRegistry.register(mixin)
         val bytes = AsmProcessor().transform(TARGET_NAME, targetBytes(), javaClass.classLoader)
         return object : ClassLoader(javaClass.classLoader) {
+            /** 定义独立目标类，让 JVM 校验映射后的字段指令。 */
             fun defineTarget(): Class<*> = defineClass(TARGET_NAME.replace('/', '.'), bytes, 0, bytes.size)
         }.defineTarget()
     }

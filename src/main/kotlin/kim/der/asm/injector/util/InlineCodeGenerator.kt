@@ -530,15 +530,7 @@ object InlineCodeGenerator {
             if (shadowAnnotation != null) {
                 val methodName = method.name
                 val methodDesc = Type.getMethodDescriptor(method)
-                val prefix = shadowAnnotation.method
-
-                // 如果注解以 [Shadow.prefix] 开头，需要去掉 prefix
-                val targetMethodName =
-                    if (prefix.startsWith(Shadow.prefix)) {
-                        prefix.substring(Shadow.prefix.length)
-                    } else {
-                        methodName
-                    }
+                val targetMethodName = MixinMemberNames.shadowTargetName(shadowAnnotation.method, methodName)
 
                 shadowMethodMap["$methodName$methodDesc"] = targetMethodName
                 shadowMethodNames.add(methodName)

@@ -1877,11 +1877,14 @@ fun staticMethod() { }
 
 ### 7. Shadow 字段使用
 
-Shadow 字段必须在 `class` 中声明，不能在 `object` 中：
+Shadow 字段的类型与 `static` 属性必须匹配目标。引用目标实例字段时使用普通 `class`；
+`object` / `companion` 字段通常编译为静态字段，只适合对应的静态目标字段。
+直接访问目标成员的改写仅发生在 `@Overwrite`、`@Copy` 和 inline `@AsmInject` 复制的方法体中；
+普通 handler 的 `this` 仍属于 Mixin。以下是实例字段占位声明：
 
 ```kotlin
 @AsmMixin("Target")
-class MyMixin {  // ✅ 使用 class
+class MyMixin {
     @Shadow()
     private val field: String? = null
 

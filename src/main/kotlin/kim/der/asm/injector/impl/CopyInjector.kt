@@ -9,6 +9,7 @@ import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
 import kim.der.asm.injector.util.MixinFieldReferences
+import kim.der.asm.injector.util.MixinMemberNames
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -654,14 +655,7 @@ class CopyInjector(
             if (shadowAnnotation != null) {
                 val methodName = method.name
                 val methodDesc = Type.getMethodDescriptor(method)
-                val prefix = shadowAnnotation.method
-
-                val targetMethodName =
-                    if (prefix.startsWith(Shadow.prefix)) {
-                        prefix.substring(Shadow.prefix.length)
-                    } else {
-                        methodName
-                    }
+                val targetMethodName = MixinMemberNames.shadowTargetName(shadowAnnotation.method, methodName)
 
                 shadowMethodMap["$methodName$methodDesc"] = targetMethodName
                 shadowMethodNames.add(methodName)

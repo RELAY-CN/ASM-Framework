@@ -20,18 +20,8 @@ internal object MixinFieldReferences {
     fun remap(instructions: InsnList, mixinClass: Class<*>, targetClassName: String) {
         val targetNames = mutableMapOf<Pair<String, String>, String>()
         for (field in mixinClass.declaredFields) {
-            val added = field.getAnnotation(AddField::class.java)
-            val shadow = field.getAnnotation(Shadow::class.java)
-            // 与 TargetClassContext.applyFields 一致：AddField 决定双注解字段的实际声明名。
-            val targetName = when {
-                added != null -> added.field.ifEmpty { field.name }
-                shadow != null -> when {
-                    shadow.method.isEmpty() -> field.name
-                    shadow.method.startsWith(Shadow.prefix) -> shadow.method.substring(Shadow.prefix.length)
-                    else -> shadow.method
-                }
-                else -> continue
-            }
+            if (!field.isAnnotationPresent(AddField::class.java) && !field.isAnnotationPresent(Shadow::class.java)) continue
+            val targetName = MixinMemberNames.fieldTargetName(field)
             targetNames[field.name to Type.getDescriptor(field.type)] = targetName
         }
 

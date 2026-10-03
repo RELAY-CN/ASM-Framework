@@ -7,6 +7,7 @@ package kim.der.asm
 import kim.der.asm.mixin.*
 import kim.der.asm.transformer.AsmProcessor
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -230,6 +231,7 @@ class TestMixin {
     }
 
     // ========== Shadow 测试 ==========
+    /** 加载转换类并检查静态字段的 final 确已移除，避免仅凭字段存在判定 Mutable 生效。 */
     @Test
     fun testShadow() {
         AsmRegistry.clear()
@@ -238,8 +240,6 @@ class TestMixin {
         val transformed = transformClass(originalBytes)
 
         val clazz = loadClass(transformed, "Test")
-        val instance = clazz.getDeclaredConstructor().newInstance()
-
         // Shadow 字段和方法主要用于在 ASM 类中引用目标类的成员
         // 这里主要验证 Shadow 能够正确应用，特别是 @Mutable 功能
         assertNotNull(clazz, "Shadow 应该能够正确声明")
@@ -250,10 +250,7 @@ class TestMixin {
         val isFinal =
             java.lang.reflect.Modifier
                 .isFinal(staticFinalField.modifiers)
-        // 由于 @Mutable，STATIC_FINAL_STRING 应该不再是 final
-        // 注意：这个测试可能不准确，因为字段可能仍然是 final（取决于实现）
-        // 但至少验证了 Shadow 能够正确应用
-        assertNotNull(staticFinalField, "Shadow 字段应该存在")
+        assertFalse(isFinal, "Mutable 必须移除目标静态字段的 final 标志")
     }
 
     // ========== Accessor 和 Shadow 结合使用测试 ==========
