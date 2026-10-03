@@ -134,8 +134,8 @@ object InlineCodeGenerator {
         // 调整局部变量索引和参数映射
         adjustLocalVariables(il, asmMethodNode, target, asmInfo)
 
-        // 转换 Shadow 字段和方法调用
-        transformShadowReferences(il, asmInfo, targetClassName, copyMethodNames)
+        // 转换目标字段以及 Shadow/Copy 方法引用
+        transformMemberReferences(il, asmInfo, targetClassName, copyMethodNames)
         normalizeInlineReturns(il)
         adaptKotlinObjectSelfReceivers(il, target, asmInfo, targetClassName)
 
@@ -507,11 +507,9 @@ object InlineCodeGenerator {
         }
 
     /**
-     * 转换 Shadow 字段和方法引用
-     * 将访问 Shadow 字段的指令转换为访问目标类字段的指令
-     * 将调用 Shadow 方法的指令转换为调用目标类方法的指令
+     * 将 AddField/Shadow 字段和 Shadow/Copy 方法引用改写到目标类。
      */
-    private fun transformShadowReferences(
+    private fun transformMemberReferences(
         il: InsnList,
         asmInfo: AsmInfo,
         targetClassName: String,
@@ -519,25 +517,7 @@ object InlineCodeGenerator {
     ) {
         val asmClassName = Type.getType(asmInfo.asmClass).internalName
 
-        // 构建 Shadow 字段映射：ASM 字段名 -> 目标字段名
-        val shadowFieldMap = mutableMapOf<String, String>()
-        for (field in asmInfo.asmClass.declaredFields) {
-            val shadowAnnotation = field.getAnnotation(Shadow::class.java)
-            if (shadowAnnotation != null) {
-                val fieldName = field.name
-                val method = shadowAnnotation.method
-
-                // 如果注解以 [Shadow.prefix] 开头，需要去掉 prefix
-                val targetFieldName =
-                    if (method.startsWith(Shadow.prefix)) {
-                        method.substring(Shadow.prefix.length)
-                    } else {
-                        fieldName
-                    }
-
-                shadowFieldMap[fieldName] = targetFieldName
-            }
-        }
+        MixinFieldReferences.remap(il, asmInfo.asmClass, targetClassName)
 
         // 构建 Shadow 方法映射：ASM 方法签名 -> 目标方法名
         val shadowMethodMap = mutableMapOf<String, String>()
@@ -587,19 +567,10 @@ object InlineCodeGenerator {
             }
         }
 
-        // 遍历指令，转换 Shadow 字段和方法引用
+        // 字段引用已统一处理，继续改写 Shadow/Copy 方法调用。
         val insns = il.toArray()
         for (insn in insns) {
             when (insn) {
-                is FieldInsnNode -> {
-                    // 如果是访问 ASM 类的字段，且该字段是 Shadow 字段，转换为目标类字段
-                    if (insn.owner == asmClassName && shadowFieldMap.containsKey(insn.name)) {
-                        val targetFieldName = shadowFieldMap[insn.name]!!
-                        // 保持字段描述符不变，只更改 owner 和 name
-                        insn.owner = targetClassName
-                        insn.name = targetFieldName
-                    }
-                }
                 is MethodInsnNode -> {
                     // 如果是调用 ASM 类的方法
                     if (insn.owner == asmClassName) {

@@ -1850,6 +1850,9 @@ annotation class Final
  * - 当 [field] 为空时，使用 ASM 字段名作为目标字段名。
  * - 目标类已存在同名字段时会跳过，不会重复写入 [org.objectweb.asm.tree.ClassNode.fields]。
  * - 字段访问标志与类型来自被标注字段；泛型签名与初始值当前不复制。
+ * - [Overwrite]、[Copy] 和 `AsmInject(inline = true)` 中的字段指令会改写到目标类，支持 [field] 别名，
+ *   无需额外标注 [Shadow]；同时标注两者时，字段名称以 [AddField] 的声明规则为准。
+ * - 非内联 [AsmInject] 仍在 Mixin handler 中执行，直接读写的是 Mixin 自身字段。
  *
  * @param field 目标字段名；为空时使用被标注字段名
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）

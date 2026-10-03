@@ -8,6 +8,7 @@ import kim.der.asm.api.annotation.Copy
 import kim.der.asm.api.annotation.Shadow
 import kim.der.asm.data.AsmInfo
 import kim.der.asm.injector.AbstractAsmInjector
+import kim.der.asm.injector.util.MixinFieldReferences
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
 import org.objectweb.asm.Type
@@ -65,10 +66,10 @@ class OverwriteInjector(
         // 适配参数和返回值
         adaptMethodSignature(asmMethodNode, target)
 
-        // 转换 Shadow 字段和方法调用
+        // 转换目标字段以及 Shadow/Copy 方法引用
         val targetClassName = (asmInfo.targetClassName ?: asmInfo.targets.firstOrNull())?.replace('.', '/')
         if (targetClassName != null) {
-            transformShadowReferences(target, targetClassName)
+            transformMemberReferences(target, targetClassName)
         }
         recalculateMaxLocals(target)
         adaptKotlinObjectSelfReceivers(target)
@@ -778,27 +779,15 @@ class OverwriteInjector(
     }
 
     /**
-     * 转换 Shadow 字段和方法引用
-     * 将访问 Shadow 字段的指令转换为访问目标类字段的指令
-     * 将调用 Shadow 方法的指令转换为调用目标类方法的指令
+     * 将 AddField/Shadow 字段和 Shadow/Copy 方法引用改写到目标类。
      */
-    private fun transformShadowReferences(
+    private fun transformMemberReferences(
         target: MethodNode,
         targetClassName: String,
     ) {
         val asmClassName = Type.getType(asmInfo.asmClass).internalName
 
-        // 构建 Shadow 字段映射：ASM 字段名 -> 目标字段名
-        val shadowFieldMap = mutableMapOf<String, String>()
-        for (field in asmInfo.asmClass.declaredFields) {
-            val shadowAnnotation = field.getAnnotation(Shadow::class.java)
-            if (shadowAnnotation != null) {
-                val fieldName = field.name
-                val targetFieldName = resolveShadowTargetName(shadowAnnotation.method, fieldName)
-
-                shadowFieldMap[fieldName] = targetFieldName
-            }
-        }
+        MixinFieldReferences.remap(target.instructions, asmInfo.asmClass, targetClassName)
 
         // 构建 Shadow 方法映射：ASM 方法签名 -> 目标方法名
         val shadowMethodMap = mutableMapOf<String, String>()
@@ -840,20 +829,11 @@ class OverwriteInjector(
             }
         }
 
-        // 遍历指令，转换 Shadow 字段和方法引用
+        // 字段引用已统一处理，继续改写 Shadow/Copy 方法调用。
         val instructions = target.instructions
         val insns = instructions.toArray()
         for (insn in insns) {
             when (insn) {
-                is FieldInsnNode -> {
-                    // 如果是访问 ASM 类的字段，且该字段是 Shadow 字段，转换为目标类字段
-                    if (insn.owner == asmClassName && shadowFieldMap.containsKey(insn.name)) {
-                        val targetFieldName = shadowFieldMap[insn.name]!!
-                        // 保持字段描述符不变，只更改 owner 和 name
-                        insn.owner = targetClassName
-                        insn.name = targetFieldName
-                    }
-                }
                 is MethodInsnNode -> {
                     // 如果是调用 ASM 类的方法
                     if (insn.owner == asmClassName) {

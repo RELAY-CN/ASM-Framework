@@ -1108,6 +1108,11 @@ val legacyFlag: Boolean = false
 
 该注解标在 ASM 类字段上，只复制字段声明，不复制字段初始化逻辑。非静态字段使用 JVM 默认值初始化，静态字段也不会自动执行 ASM 类中的初始化代码。若目标类已存在同名字段，会跳过并保持原字段不变。
 
+在 `@Overwrite`、`@Copy` 和 `@AsmInject(inline = true)` 复制的方法体中，直接读写 `@AddField`
+字段会自动改写为目标类字段访问，支持实例字段、静态字段和 `field` 指定的别名，无需额外标注 `@Shadow`。
+同一字段同时标注 `@AddField` 与 `@Shadow` 时，以 `@AddField.field`（为空时为声明名）作为目标名称。
+普通非内联 `@AsmInject` 仍调用 Mixin handler，直接访问的是 Mixin 自身字段，不会同步到目标对象。
+
 **参数：**
 
 - `field: String = ""` - 目标字段名；为空时使用被标注字段名
@@ -1121,6 +1126,21 @@ private var cachedValue: String? = null
 
 @AddField(field = "score")
 private var mixinScore: Int = 0
+```
+
+Java 实例 Mixin 可在内联 handler 中直接赋值：
+
+```java
+@AsmMixin("com/example/Target")
+public class TargetMixin {
+    @AddField
+    private int value;
+
+    @AsmInject(method = "run()V", target = InjectionPoint.HEAD, inline = true)
+    public void onRun() {
+        this.value = 42;
+    }
+}
 ```
 
 ### @RemoveSynchronized
