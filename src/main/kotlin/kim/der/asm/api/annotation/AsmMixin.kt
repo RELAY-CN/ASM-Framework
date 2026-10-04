@@ -18,6 +18,10 @@ package kim.der.asm.api.annotation
  * 用于标记某个 ASM 类需要应用到一个或多个目标类上。
  * 目标类名称使用 JVM internal name（例如 `"com/example/Target"`），并由注册器用于建立“目标类 -> ASM 列表”的索引。
  * 当同一目标类匹配多个 Mixin 时，[priority] 用于控制同一匹配来源内的应用顺序。
+ * Kotlin 属性标记要落在 JVM 实际消费的位置：字段注解可用 `@field:Shadow` / `@field:AddField`，
+ * 复制体需要直接访问字段时用 `@JvmField`；访问器桥接则在普通函数上使用 [Accessor]。
+ * `object` handler 可供运行期调用，但其字段通常是静态状态；目标实例新增状态应放在普通 Mixin class 中。
+ * 完整的注解用途、运行命令与可浏览 class 产物见项目 `src/test/ANNOTATION_USAGE.md`。
  *
  * @param value 单目标类 internal name；为空时可使用 [targets]
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
@@ -65,13 +69,15 @@ annotation class AsmMixin(
  *
  * ```kotlin
  * @Group(name = "version", min = 1, max = 1)
- * @ModifyConstant(method = "oldValue()Ljava/lang/String;", constant = "old")
+ * @ModifyConstant(method = "version()Ljava/lang/String;", constant = "old")
  * fun oldVersion(value: String) = "patched"
  * @Group(name = "version", min = 1, max = 1)
- * @ModifyConstant(method = "newValue()Ljava/lang/String;", constant = "new")
+ * @ModifyConstant(method = "version()Ljava/lang/String;", constant = "new")
  * fun newVersion(value: String) = "patched"
  * ```
- * 以上成员放在同一个 [AsmMixin] 中。与各自必须命中的独立处理器不同，组可允许一个版本候选缺失。
+ * 以上成员放在同一个 [AsmMixin] 中。目标 `version()` 必须存在，组允许其中一种常量候选缺失。
+ * 可执行对照：`AnnotationUsageDifferencesTest.groupAcceptsMissingConstantCandidate`、
+ * `groupDoesNotMakeModifyConstantTargetMethodOptional`。
  * 行为测试：`FrameworkReliabilityTest.GroupInjectionCountScenarios.groupedModifyConstantAllowsFallbackCandidate`。
  *
  * 用于把同一个 Mixin 类中的多个注入、修改或重定向处理器合并为一个命中数契约。
@@ -82,8 +88,8 @@ annotation class AsmMixin(
  *
  * - [name] 必须非空白，同一个 Mixin 类内相同名称的分组会累计实际命中数。
  * - 未分组处理器仍保持原有默认契约：普通处理器默认至少命中一次。
- * - 分组处理器默认允许单个成员 0 命中；例如多版本候选中某个显式目标方法只存在于旧版本时，
- *   当前版本缺失会按 0 命中参与组级累计。如果处理器自身显式配置 `require`、`allow` 或 `expect`，
+ * - 分组处理器默认允许单个成员 0 命中，但不普遍放宽目标方法解析；例如 [ModifyConstant] 的目标方法仍必须存在。
+ *   [WrapMethod] 对显式缺失方法专门按 0 命中参与组级累计。如果处理器自身显式配置 `require`、`allow` 或 `expect`，
  *   该处理器仍会先执行自身命中数校验。
  * - 同一分组内所有处理器的 [min]、[max] 与 [expect] 必须保持一致；[min] 与 [max] 必须非负，
  *   [min] 不得大于 [max]，[expect] 不得小于 `-1`，违反时转换阶段失败。
@@ -1355,6 +1361,8 @@ annotation class ModifyExpressionValue(
  * 位于 [AsmMixin] handler 中；第一次 LOAD 前写回槽位，后续读取也能看到新值。
  * [ModifyExpressionValue] 的 LOAD 不写回，[Local] 只读捕获。
  * STORE 模式在原 xSTORE 之后执行，表达式 STORE 在之前执行，追加目标参数可能因此读到不同值。
+ * Kotlin 的函数参数不可重新赋值，`var local = argument` 会引入另一槽位，不能照搬 Java 参数覆盖示例的 index。
+ * 编译器也可能生成入口空值检查等额外 LOAD；ordinal 计数字节码候选，不是源码中变量出现次数。
  * 行为测试：`AnnotationUsageDifferencesTest.localAnnotationsDifferInSlotWriteback`、`storeAnnotationsObserveDifferentSlotTiming`。
  *
  * 用于修改目标方法中的参数或局部变量（语义参考 Mixin 的 `@ModifyVariable`）。
@@ -1592,6 +1600,9 @@ annotation class ModifyReturnValue(
  * 位于 [AsmMixin] handler 中；这里只选常量加载，不会截获方法计算出的同值结果。
  * [ModifyExpressionValue] 还支持调用结果等表达式；普通 AsmInject CONSTANT REPLACE 的 handler 不接收原常量。
  * 行为测试：`FrameworkReliabilityTest.modifyConstantInTestB0RewritesStaticFinalStringLiteralOnly`。
+ * 需要只改局部片段时可组合 `slice = Slice(from = At(InjectionPoint.INVOKE, target = "example/Target.start()V"),
+ * to = At(InjectionPoint.INVOKE, target = "example/Target.end()V"))`；两个边界调用保留，只有区间内常量参与匹配。
+ * 可浏览示例：`AnnotationUsageDifferencesTest.constantSlicePreservesOutsideValuesAndBoundaryCalls`。
  *
  * 用于修改目标方法中的常量值（语义参考 Mixin 的 `@ModifyConstant`）。
  * 当前实现会遍历字节码中的常量指令，并在匹配时用 ASM 方法返回值替换原常量。
@@ -1976,6 +1987,14 @@ annotation class Accessor(
  * 也不像 [Accessor] 直接读写字段。构造器工厂使用 `@Invoker("<init>")` 并声明静态方法。
  * 行为测试：`FrameworkReliabilityTest.accessorAndInvokerBridgePrivateMembersInTestClass`、`invokerCanGenerateConstructorFactoryMethod`。
  *
+ * ```kotlin
+ * @JvmStatic @Invoker("<init>")
+ * fun create(): Any = error("占位")
+ * ```
+ * 上述工厂放在 Mixin object 中；通过转换后的目标类调用生成工厂，直接调用 Mixin 上的占位方法仍会抛异常。
+ * 返回 `Any` 可避免隔离 ClassLoader 场景把新实例强转为原加载器的同名目标类型。
+ * 可执行示例：`AnnotationUsageDifferencesTest.invokerBridgesPrivateMethodAndConstructor`。
+ *
  * 用于生成“私有/受保护方法或构造器的调用器”（语义参考 Mixin 的 `@Invoker`）。
  *
  * 普通方法调用器会在目标类中生成一个同签名桥接方法，优先匹配目标类自身方法；若不存在，
@@ -2218,6 +2237,8 @@ annotation class RemoveMethod(
  * 位于 [AsmMixin] 类内；保留业务方法体，只移除方法锁和同步块的 monitor 语义，
  * 与 [ReplaceAllMethods] 丢弃原业务实现不同。原代码若依赖持锁才能调用 wait/notify，应先调整调用前提。
  * 行为测试：`FrameworkReliabilityTest.removeSynchronizedInTestClassRemovesFlagsAndKeepsBusinessState`。
+ * `AnnotationUsageDifferencesTest.removeSynchronizedPreservesBodyAndRemovesMonitors` 同时断言方法同步标志、
+ * MONITORENTER/MONITOREXIT 指令消失和业务计数仍递增；移除同步后不再保证多线程互斥。
  *
  * 用于移除目标方法的 `synchronized` 标志与相关的同步指令（例如 `MONITORENTER`）。
  * 目标方法不存在时转换失败，避免同步语义漂移后仍误以为补丁已经生效。

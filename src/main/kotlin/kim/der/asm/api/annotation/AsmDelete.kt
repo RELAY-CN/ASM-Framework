@@ -30,9 +30,12 @@ package kim.der.asm.api.annotation
  * @AsmDelete
  * fun legacyEndpoint() = Unit
  *
- * @AsmDelete("legacyField")
- * val legacyField: String? = null
+ * @JvmField @field:AsmDelete("legacyField")
+ * var legacyField: String? = null
  * ```
+ * 上例放在普通 Mixin class 内。字段删除仅移除声明；目标构造器若仍对它执行 PUTFIELD，实例化仍会失败。
+ * 可执行的安全删除示例：`AnnotationUsageDifferencesTest.deletionAnnotationsRemoveOnlySelectedMembers`，
+ * 其夹具故意不初始化待删字段，并验证剩余业务方法可以正常调用。
  *
  * @param value 目标方法 JVM 签名或字段名；为空时按被标注成员推断
  *

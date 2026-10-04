@@ -16,5 +16,8 @@ class KotlinAnnotationUsageFixtures {
             after++
             return result
         }
+
+        // 可空参数避免编译器在入口插入额外 ALOAD 空值检查，首个读取即业务读取。
+        fun twice(value: String?): String = value + ":" + value
     }
 }

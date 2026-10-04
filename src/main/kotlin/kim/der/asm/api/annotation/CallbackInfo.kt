@@ -78,9 +78,11 @@ open class CallbackInfo
         /**
          * 获取返回值。
          *
-         * 该方法会尝试将内部保存的值转换为目标类型；类型不匹配时返回 `null`。
+         * 泛型参数在 JVM 上被擦除，本方法不会校验调用方要求的具体类型。
+         * 调用方应按目标方法的返回类型读取；类型不匹配可能在调用点的类型转换处抛出 [ClassCastException]。
+         * 行为测试：`HandlerValueContractTest.returnValueTypeMismatchFailsAtCallerCast`。
          *
-         * @return 当前保存的返回值；类型不匹配或值为 `null` 时返回 `null`
+         * @return 当前保存的返回值；仅保存的值本身为 `null` 时返回 `null`
          * @author Dr (dr@der.kim)
          * @date 2025-11-24
          */

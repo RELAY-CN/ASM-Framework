@@ -25,6 +25,9 @@ package kim.der.asm.api.annotation
  * 必须至少设置 [name] / [value] 或 [index] 之一。[name] 与 [value] 语义相同，[name] 优先；
  * 当同时设置名称与 [index] 时，两者必须同时匹配同一个可见局部变量。[index] 只负责槽位过滤，
  * 当前仍通过 LocalVariableTable 判断局部变量作用域和类型。
+ * JVM 槽位不是源码参数序号：实例方法的槽位 0 是 this，long/double 占两个槽位；Kotlin 编译器可能生成额外局部变量。
+ * 可用 `@Local(name = "value", index = 1)` 同时约束名称与槽位，或 `@Local("value")` 只按调试变量名捕获。
+ * 编译时删除 LVT 后即使提供 index 也不能恢复作用域信息；应保留目标调试信息并检查转换后的真实字节码。
  *
  * @param value 局部变量名的简写别名；当 [name] 为空时使用
  * @param name LocalVariableTable 中的局部变量名

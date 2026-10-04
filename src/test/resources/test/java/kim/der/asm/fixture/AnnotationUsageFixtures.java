@@ -57,6 +57,25 @@ public final class AnnotationUsageFixtures {
         public String run() { return value(); }
     }
 
+    /** 成员删除不留下调用引用；私有桥接、同步和常量切片共享一个可反编译目标。 */
+    public static class Structure {
+        public int legacyField;
+        public int calls;
+        private String secret(String input) { return "secret:" + input; }
+        public String legacy() { return "legacy"; }
+        public synchronized int locked() { synchronized (this) { return ++calls; } }
+        public String version() { return "new"; }
+        public String constants() {
+            String before = "raw";
+            start();
+            String inside = "raw";
+            end();
+            return before.concat(inside).concat("raw");
+        }
+        public void start() { calls++; }
+        public void end() { calls++; }
+    }
+
     /** 增删接口应仅改变类型关系，保留已有业务方法。 */
     public static class RunnableTarget implements Runnable {
         public int calls;
