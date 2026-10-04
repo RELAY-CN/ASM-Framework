@@ -6,7 +6,7 @@
 
 - **D**：[AnnotationUsageDifferencesTest](kotlin/kim/der/asm/AnnotationUsageDifferencesTest.kt)，对同一目标比较返回值、调用次数、槽位写回及结构差异；目标见 [Java 夹具](resources/test/java/kim/der/asm/fixture/AnnotationUsageFixtures.java) 与 [Kotlin 夹具](resources/test/kotlin/kim/der/asm/fixture/KotlinAnnotationUsageFixtures.kt)。13 种调用行为和 3 种 LOAD/Local 对照在两种语言编译的目标上各执行一次；每份成功产物都经 ASM 数据流校验和 JVM 加载验证。
 - **R**：[FrameworkReliabilityTest](kotlin/kim/der/asm/FrameworkReliabilityTest.kt)，包含定位、签名、命中数、边界及异常路径；下表方法名可在该文件中直接定位，部分位于嵌套测试类。
-- **M**：[MemberMappingContractTest](kotlin/kim/der/asm/MemberMappingContractTest.kt)，验证复制体的成员映射与普通 handler 的状态归属。
+- **M**：[MemberMappingContractTest](kotlin/kim/der/asm/MemberMappingContractTest.kt)，验证复制体的成员映射与普通 handler 的状态归属；私有成员在 Overwrite/Copy/inline 三条路径中同时检查 ASM owner、方法描述符、私有标志和实际结果，另覆盖 long/double/数组字段默认值与实例隔离。
 - **V**：[HandlerValueContractTest](kotlin/kim/der/asm/api/annotation/HandlerValueContractTest.kt)，独立单测覆盖 CallbackInfo 取消状态、null 返回、泛型擦除，以及 Args 的实时数组/迭代器和空参数组。
 
 ## 类与成员结构
@@ -56,6 +56,17 @@ KDoc 位于 [AsmMixin.kt](../main/kotlin/kim/der/asm/api/annotation/AsmMixin.kt)
 | `At` | `R.modifyArgAtInvokeArgsLdcFiltersDirectStringCallArgument`；`R.fieldInjectByMovesHandlerForwardFromMatchedFieldRead`；`D.unsupportedAtOffsetsFailDuringTransform` | 筛选候选操作；by 只在支持的普通指令点注入中移动，其他实际定位路径拒绝非零偏移 |
 | `Slice` | `D.constantSlicePreservesOutsideValuesAndBoundaryCalls` | 限定候选搜索区间，区间外相同常量与边界调用保持原样 |
 | `Local` | `D.localAnnotationsDifferInSlotWriteback`；`R.asmInjectReturnCanCaptureLocalByNameInTestClassWithoutModifyingReturn` | 只读捕获当前作用域槽位，不写回，可与目标参数混排 |
+
+## Mixin 内部直接访问规则
+
+新增和修改的成员映射示例通过 `@JvmField`、`@Shadow`、`@Copy`、`@Overwrite` 或内联 `@AsmInject` 产生真实字段与方法指令，不在 handler 中用反射绕过映射。测试驱动侧可以使用反射跨 ClassLoader 调用转换类或检查私有字段，但这不能替代 handler 本身的直接访问。
+
+- [AccessorShadowMixin](kotlin/kim/der/asm/mixin/AccessorShadowMixin.kt)：Accessor 写入目标私有字段，内联 HEAD 直接读写同一字段；另一内联入口真正调用 Shadow 方法，占位实现若被误调用就抛异常。`TestMixin.testAccessorShadowCombined` 精确断言字段变化、原业务返回值与实例隔离。
+- `M.copiedBodiesBindPrivateMembersWithDirectInstructions`：三种复制路径必须调用目标私有方法并写入目标私有字段；检查转换后没有残留 Mixin 调用 owner 或反射调用。
+- `M.copiedBodiesPreserveWideAndArrayFieldDescriptors`：直接操作 J/D 宽类型和引用数组；初始化不迁移，重复调用累计，第二个实例保持默认值。
+- `R.modifyReceiverFieldSliceLimitsFieldReadReceiversBetweenFromAndTo` / `modifyReceiverFieldAssignSliceLimitsFieldWriteReceiversBetweenFromAndTo`：动态夹具实现 `ReceiverReplacement` 接口，以直接 GETFIELD 返回替代 receiver；handler 通过接口调用读取，保留切片外原 receiver 的对照。
+
+以上是本轮补强范围，不表示所有历史 handler 已移除反射；依赖动态类构造与独立 ClassLoader 的旧 NEW 重定向用例仍需单独设计类型边界。
 
 ## 运行
 

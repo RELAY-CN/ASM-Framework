@@ -1889,6 +1889,16 @@ annotation class Redirect(
  * 方法按名称与完整 JVM 描述符匹配重载。[method] 只填写目标名称，不包含参数描述符。
  * 普通非内联 handler 仍在 Mixin 上执行，不能靠 Shadow 自动切换到目标 receiver。
  *
+ * ## 直接访问与验证
+ *
+ * Kotlin 字段可用 `@JvmField @Shadow var alias = ...` 明确产生字段指令；目标字段可以是 private，
+ * Mixin 侧声明的可见性不会把目标字段变为 public。复制体已位于目标类内部，合法访问依赖目标 owner、
+ * 字段描述符和方法描述符被正确保留，而不是反射的 `isAccessible = true`。
+ * 不要用 `getDeclaredField` / `getDeclaredMethod` 替代示例中的直接成员访问：反射成功不能证明 Shadow 映射成功。
+ * 可执行验证：`MemberMappingContractTest.copiedBodiesBindPrivateMembersWithDirectInstructions` 同时检查
+ * GETFIELD/PUTFIELD 或方法调用的目标 owner、私有标志及运行结果；`TestMixin.testAccessorShadowCombined`
+ * 验证 Accessor 写入后内联 Shadow 读取和调用使用同一个目标实例。
+ *
  * @param method 目标名称提示；为空时使用声明名，非空时可直接指定目标名或使用 `shadow_` 前缀
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
  * @author Dr (dr@der.kim)
@@ -2100,6 +2110,10 @@ annotation class Final
  * 上例位于 [AsmMixin] 普通 class 内。目标新增字段从 0 开始，运行一次后为 3；
  * Mixin 的初始化值 10 不迁移。普通非内联 AsmInject 访问的是 Mixin 自身字段。
  * 行为测试：`MemberMappingContractTest.copiedBodiesAccessAddedFieldsOnEachTarget`、`ordinaryHandlerRetainsMixinState`。
+ * long/double 等宽类型字段保留 `J`/`D` 描述符，数组字段保留数组描述符；它们也从 JVM 默认值
+ * `0L`、`0.0`、`null` 开始，不能依赖 Mixin 字段初始化表达式创建目标数组。
+ * 需要初始内容时应在目标中的复制或内联方法里显式赋值，参见
+ * `MemberMappingContractTest.copiedBodiesPreserveWideAndArrayFieldDescriptors`。
  *
  * 用于把 ASM 类中的字段声明复制到目标类。该注解只新增字段声明，不会复制字段初始化逻辑；
  * 非静态字段仍由 JVM 默认值初始化，静态字段也不会自动执行 ASM 类中的初始化代码。

@@ -275,11 +275,19 @@ class TestMixin {
         val newValueDynamic = getterDynamic.invoke(instance) as String
         assertEquals("ModifiedViaAccessor", newValueDynamic, "Accessor 应该能够修改 Shadow 字段")
 
-        // 验证注入方法是否正常工作（使用 Shadow 字段）
+        // 精确验证内联体的字段读取和写回，非空返回值无法证明 Shadow 映射有效。
+        setterDynamic.invoke(instance, "DynamicViaAccessor")
         val methodA0 = clazz.getMethod("testA0")
         val resultA0 = methodA0.invoke(instance) as String
-        // 由于 AccessorShadowExampleMixin 中的注入会修改返回值
-        assertNotNull(resultA0, "注入方法应该能够使用 Shadow 字段")
+        assertEquals("Modified via Shadow: DynamicViaAccessor", resultA0)
+        assertEquals(resultA0, getterDynamic.invoke(instance))
+        val second = clazz.getDeclaredConstructor().newInstance()
+        assertEquals("DefaultConstructor", methodA0.invoke(second), "另一个目标实例不得共享字段状态")
+
+        // Shadow 方法必须调用目标实现；Mixin 占位方法一旦被误调用就会抛异常。
+        setterDynamic.invoke(instance, "plain")
+        assertEquals("inputtestC0", clazz.getMethod("testC0", String::class.java).invoke(instance, "input"))
+        assertEquals("Shadow method: plain", getterDynamic.invoke(instance))
     }
 
     // ========== Redirect 测试 ==========
@@ -329,8 +337,7 @@ class TestMixin {
         // 测试 testA0：RETURN 注入会基于 this 的 hashCode 修改返回值
         val methodA0 = clazz.getMethod("testA0")
         val resultA0 = methodA0.invoke(instance) as String
-        assertNotNull(resultA0, "testA0 应该返回修改后的值")
-        assert(resultA0.startsWith("Modified by ThisAccess:"), { "返回值应该包含 'Modified by ThisAccess:'" })
+        assertEquals("Modified by ThisAccess: ${instance.hashCode()}", resultA0, "handler 必须接收当前目标 this")
 
         // 测试 testC0：HEAD 注入会接收 this 和参数
         val methodC0 = clazz.getMethod("testC0", String::class.java)

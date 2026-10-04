@@ -14,7 +14,14 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 import org.objectweb.asm.ClassWriter
+import org.objectweb.asm.ClassReader
 import org.objectweb.asm.Opcodes
+import org.objectweb.asm.tree.ClassNode
+import org.objectweb.asm.tree.FieldInsnNode
+import org.objectweb.asm.tree.MethodInsnNode
+import org.objectweb.asm.util.CheckClassAdapter
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.lang.reflect.Modifier
 
 /**
@@ -55,6 +62,50 @@ class MemberMappingContractTest {
         val instance = target.getDeclaredConstructor().newInstance()
         target.getMethod("run").invoke(instance)
         assertEquals(31, target.getField("actual").getInt(instance))
+    }
+
+    /** 私有成员必须在目标内部直接调用；反射或外部 Mixin owner 都不能替代重映射。 */
+    @ParameterizedTest
+    @MethodSource("shadowMixins")
+    fun copiedBodiesBindPrivateMembersWithDirectInstructions(mixin: Class<*>) {
+        val bytes = transformBytes(mixin, fieldAccess = Opcodes.ACC_PRIVATE, methodAccess = Opcodes.ACC_PRIVATE)
+        val node = ClassNode().also { ClassReader(bytes).accept(it, 0) }
+        val instructions = node.methods.flatMap { it.instructions.toArray().toList() }
+        val writes = instructions.filterIsInstance<FieldInsnNode>().filter { it.opcode == Opcodes.PUTFIELD }
+        assertTrue(writes.any { it.owner == "MemberTarget" && it.name == "actual" && it.desc == "I" })
+        val calls = instructions.filterIsInstance<MethodInsnNode>()
+        assertTrue(calls.any { it.owner == "MemberTarget" && it.name == "actualMethod" && it.desc == "()I" })
+        assertTrue(calls.any { it.owner == "MemberTarget" && it.name == "actualMethod" && it.desc == "(I)I" })
+        assertFalse(calls.any { it.owner == mixin.name.replace('.', '/') || it.owner.startsWith("java/lang/reflect/") })
+
+        val diagnostics = StringWriter()
+        CheckClassAdapter.verify(ClassReader(bytes), javaClass.classLoader, false, PrintWriter(diagnostics))
+        assertEquals("", diagnostics.toString())
+        val target = define(bytes)
+        val instance = target.getDeclaredConstructor().newInstance()
+        target.getMethod("run").invoke(instance)
+        val field = target.getDeclaredField("actual").apply { isAccessible = true }
+        assertEquals(31, field.getInt(instance))
+        assertTrue(Modifier.isPrivate(field.modifiers))
+        assertTrue(Modifier.isPrivate(target.getDeclaredMethod("actualMethod").modifiers))
+    }
+
+    /** J/D 双槽值和引用数组使用真实字段指令，初始化值不迁移，重复调用也不串实例。 */
+    @Test
+    fun copiedBodiesPreserveWideAndArrayFieldDescriptors() {
+        val target = transform(WideState::class.java)
+        val first = target.getDeclaredConstructor().newInstance()
+        val second = target.getDeclaredConstructor().newInstance()
+        assertEquals(0L, target.getField("total").getLong(first))
+        assertEquals(0.0, target.getField("fraction").getDouble(first))
+        assertNull(target.getField("items").get(first))
+        repeat(2) { target.getMethod("run").invoke(first) }
+        assertEquals(4L, target.getField("total").getLong(first))
+        assertEquals(1.0, target.getField("fraction").getDouble(first))
+        assertArrayEquals(arrayOf("target"), target.getField("items").get(first) as Array<*>)
+        assertEquals(0L, target.getField("total").getLong(second))
+        assertEquals(0.0, target.getField("fraction").getDouble(second))
+        assertNull(target.getField("items").get(second))
     }
 
     /** 合法的静态字段和方法在三条路径中都可使用别名，且不会写入 Mixin 自身状态。 */
@@ -171,8 +222,21 @@ class MemberMappingContractTest {
         fieldAccess: Int = Opcodes.ACC_PUBLIC,
         methodAccess: Int = Opcodes.ACC_PUBLIC,
     ): Class<*> {
+        return define(transformBytes(mixin, fieldDesc, fieldAccess, methodAccess))
+    }
+
+    /** 字节码检查与运行测试共用同一转换入口，避免只验证另一份生成产物。 */
+    private fun transformBytes(
+        mixin: Class<*>,
+        fieldDesc: String = "I",
+        fieldAccess: Int = Opcodes.ACC_PUBLIC,
+        methodAccess: Int = Opcodes.ACC_PUBLIC,
+    ): ByteArray {
         AsmRegistry.register(mixin)
-        val bytes = AsmProcessor().transform("MemberTarget", targetBytes(fieldDesc, fieldAccess, methodAccess), javaClass.classLoader)
+        return AsmProcessor().transform("MemberTarget", targetBytes(fieldDesc, fieldAccess, methodAccess), javaClass.classLoader)
+    }
+
+    private fun define(bytes: ByteArray): Class<*> {
         return object : ClassLoader(javaClass.classLoader) {
             /** 由独立加载器定义，避免多个用例的同名目标类互相污染。 */
             fun define(): Class<*> = defineClass("MemberTarget", bytes, 0, bytes.size)
@@ -278,6 +342,22 @@ class MemberMappingContractTest {
             source += 3
             sameName += 2
         }
+    }
+
+    /** 混合宽类型与数组，Copy 内的直接字段访问必须保留各自描述符。 */
+    @AsmMixin("MemberTarget")
+    class WideState {
+        @JvmField @AddField var total = 100L
+        @JvmField @AddField var fraction = 99.0
+        @JvmField @AddField var items: Array<String>? = arrayOf("mixin")
+
+        @Copy fun accumulate() {
+            total += 2L
+            fraction += 0.5
+            items = arrayOf("target")
+        }
+
+        @Overwrite("run()V") fun replace() = accumulate()
     }
 
     /** 覆写路径覆盖三种 Shadow 名称及两个精确重载。 */

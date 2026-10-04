@@ -7,7 +7,6 @@ package kim.der.asm.mixin
 import kim.der.asm.api.annotation.Accessor
 import kim.der.asm.api.annotation.AsmInject
 import kim.der.asm.api.annotation.AsmMixin
-import kim.der.asm.api.annotation.CallbackInfo
 import kim.der.asm.api.annotation.InjectionPoint
 import kim.der.asm.api.annotation.Shadow
 
@@ -38,8 +37,9 @@ class AccessorShadowMixin {
      *
      * 本例目标是实例字段，因此声明也必须是实例字段
      */
-    @Shadow()
-    private val dynamicString: String? = null
+    @JvmField
+    @Shadow
+    var dynamicString: String? = null
 
     /**
      * Shadow 方法：在 Mixin 类中引用目标类的方法
@@ -84,41 +84,37 @@ class AccessorShadowMixin {
     fun setDynamicString(value: String): Unit = throw UnsupportedOperationException("Accessor should not be called directly")
 
     /**
-     * 示例：在 Inject 方法中使用 Shadow 字段
+     * 内联 HEAD 直接读取并写回目标字段，随后原方法读取新状态。
      *
-     * 这个注入方法会在 testA0() 方法返回前执行，
-     * 可以访问和修改 Shadow 字段的值
+     * @JvmField 保证生成 GETFIELD/PUTFIELD；inline 保证 owner 和 this 绑定到目标。
+     * 普通 handler 或 Kotlin 属性访问器调用不能替代这条字段映射路径。
      */
     @AsmInject(
         method = "testA0()Ljava/lang/String;",
-        target = InjectionPoint.RETURN,
+        target = InjectionPoint.HEAD,
+        inline = true,
     )
-    fun injectReturnUsingShadow(callback: CallbackInfo) {
-        // 使用 Shadow 字段访问目标类的字段值
-        // 注意：在 Kotlin 中，Shadow 字段的访问会被 ASM 转换为对目标类字段的直接访问
+    fun injectHeadUsingShadowField() {
+        // 原方法稍后读取同一目标字段；不通过反射或外部 handler 绕过成员映射。
         val currentValue = dynamicString
-        println("Shadow field value: $currentValue")
-
-        // 可以基于 Shadow 字段的值修改返回值
-        if (currentValue != null && currentValue.contains("Dynamic")) {
-            callback.setReturnValue("Modified via Shadow: $currentValue")
+        if (currentValue != null && currentValue.startsWith("Dynamic")) {
+            dynamicString = "Modified via Shadow: $currentValue"
         }
     }
 
     /**
      * 示例：在 Inject 方法中使用 Shadow 方法
      *
-     * 这个注入方法展示了如何调用 Shadow 方法
+     * 直接调用占位方法 testA0；内联后必须改写为目标方法，否则占位实现会抛异常。
      */
     @AsmInject(
         method = "testC0(Ljava/lang/String;)Ljava/lang/String;",
         target = InjectionPoint.HEAD,
+        inline = true,
     )
-    fun injectHeadUsingShadowMethod(callback: CallbackInfo) {
-        // 可以调用 Shadow 方法
-        // 注意：在实际生成的代码中，这会被转换为对目标类方法的直接调用
-        // val result = testA0()  // 调用目标类的 testA0() 方法
-        println("Can call shadow method: testA0()")
+    fun injectHeadUsingShadowMethod() {
+        // 保留 testC0 的原返回值，以目标字段变化证明 Shadow 调用确实执行。
+        dynamicString = "Shadow method: " + testA0()
     }
 }
 
@@ -126,7 +122,7 @@ class AccessorShadowMixin {
  * 总结：Accessor 和 Shadow 的结合使用
  *
  * 在这个示例中：
- * 1. Shadow 字段（dynamicString）：在 Mixin 类内部使用，用于在注入方法中访问目标类的字段
+ * 1. Shadow 字段（dynamicString）：内联方法体中的直接字段指令绑定到目标实例
  * 2. Accessor 方法（getDynamicString/setDynamicString）：在目标类中生成，供外部代码使用
  *
  * 生成的代码结构：
@@ -153,6 +149,6 @@ class AccessorShadowMixin {
  * ```
  *
  * 使用方式：
- * - 在 Mixin 的注入方法中：使用 Shadow 字段（如 `dynamicString`）
+ * - 在 Mixin 的内联注入方法中：直接使用 Shadow 字段（如 `dynamicString`）
  * - 在外部代码中：使用 Accessor 方法（如 `instance.getDynamicString()`）
  */

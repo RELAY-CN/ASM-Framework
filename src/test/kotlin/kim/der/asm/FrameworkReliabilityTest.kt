@@ -22379,6 +22379,11 @@ class FrameworkReliabilityTest {
         }
     }
 
+    /** 动态目标通过真实接口暴露替代 receiver，handler 不依赖反射或目标加载器类名。 */
+    interface ReceiverReplacement {
+        fun replacement(): Any
+    }
+
     @AsmMixin("SliceModifyReceiverFieldTarget")
     object ModifyReceiverFieldReadSliceMixin {
         @ModifyReceiver(
@@ -22393,9 +22398,7 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): Any {
-            val field = original.javaClass.getDeclaredField("replacement")
-            field.isAccessible = true
-            return field.get(original)
+            return (original as ReceiverReplacement).replacement()
         }
     }
 
@@ -22413,9 +22416,7 @@ class FrameworkReliabilityTest {
         )
         @JvmStatic
         fun modify(original: Any): Any {
-            val field = original.javaClass.getDeclaredField("replacement")
-            field.isAccessible = true
-            return field.get(original)
+            return (original as ReceiverReplacement).replacement()
         }
     }
 
@@ -30869,7 +30870,8 @@ class FrameworkReliabilityTest {
 
     private fun sliceModifyReceiverFieldTargetBytes(): ByteArray {
         val cw = ClassWriter(0)
-        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceModifyReceiverFieldTarget", null, "java/lang/Object", null)
+        cw.visit(Opcodes.V11, Opcodes.ACC_PUBLIC, "SliceModifyReceiverFieldTarget", null, "java/lang/Object",
+            arrayOf(org.objectweb.asm.Type.getInternalName(ReceiverReplacement::class.java)))
         cw.visitField(Opcodes.ACC_PRIVATE, "value", "Ljava/lang/String;", null, null).visitEnd()
         cw.visitField(
             Opcodes.ACC_PRIVATE,
@@ -30878,6 +30880,15 @@ class FrameworkReliabilityTest {
             null,
             null,
         ).visitEnd()
+        // 接口实现直接 GETFIELD，字段访问合法性仍由 JVM 校验，不使用反射放宽 private 访问。
+        cw.visitMethod(Opcodes.ACC_PUBLIC, "replacement", "()Ljava/lang/Object;", null, null).apply {
+            visitCode()
+            visitVarInsn(Opcodes.ALOAD, 0)
+            visitFieldInsn(Opcodes.GETFIELD, "SliceModifyReceiverFieldTarget", "replacement", "LSliceModifyReceiverFieldTarget;")
+            visitInsn(Opcodes.ARETURN)
+            visitMaxs(1, 1)
+            visitEnd()
+        }
         cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null).apply {
             visitCode()
             visitVarInsn(Opcodes.ALOAD, 0)

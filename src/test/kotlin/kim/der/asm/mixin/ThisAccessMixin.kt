@@ -17,8 +17,8 @@ import kim.der.asm.api.annotation.InjectionPoint
  * 2. 框架会自动传递目标类的 this 实例作为该参数
  * 3. 可以通过这个参数访问目标类的字段和方法
  *
- * 注意：目标类 Test 没有包名，所以直接使用 Object 类型或者通过反射访问
- * 为了简化，这里使用 Object 类型，然后通过反射访问
+ * 本例只需观察对象身份，因此用 Any 接收目标 this，直接调用 hashCode，不依赖反射查找成员。
+ * 需要访问目标私有状态时可用 inline + Shadow；普通 handler 的 this 仍属于 Mixin。
  */
 @AsmMixin("Test")
 class ThisAccessMixin {
@@ -30,7 +30,7 @@ class ThisAccessMixin {
      * 2. 目标类的 this（如果需要，类型必须是目标类或 Object）
      * 3. 其他参数（如果有）
      *
-     * 由于 Test 类没有包名，我们使用 Object 类型，然后通过反射访问
+     * Any 可跨隔离 ClassLoader 接收目标；这里不访问目标专属字段。
      */
     @AsmInject(
         method = "testA0()Ljava/lang/String;",
@@ -43,7 +43,7 @@ class ThisAccessMixin {
         // test 就是目标类 Test 的 this 实例
         // 由于 Test 类没有包名，我们使用 Any/Object 类型
 
-        // 可以通过反射访问目标类的字段和方法
+        // javaClass 仅用于日志；成员映射由其他直接字段/方法调用用例验证。
         val testClass = test.javaClass
 
         // 示例：记录目标实例的信息

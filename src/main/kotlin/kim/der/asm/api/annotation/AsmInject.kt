@@ -160,6 +160,10 @@ annotation class AsmInject(
      * [AddField] / [Shadow] 字段的直接读写指令及 [Shadow] / [Copy] 方法调用会绑定到目标成员。
      * 普通 class 的实例 handler 内联到实例目标时，直接字段访问使用目标 this；关闭内联时
      * handler 的 this 仍是 Mixin 实例。字段初始值不会复制，Kotlin 属性访问边界见 [AddField]。
+     * 例如普通 class 中声明 `@JvmField @Shadow var count = 0`，在无参 HEAD handler 中执行 `count++`：
+     * `inline = true` 才会让直接字段指令修改目标 count；普通 handler 仍修改 Mixin 自己的 count。
+     * 接收目标 this 参数不会改变 handler 自身的 this，也不会自动改写 Kotlin 属性访问器或反射调用。
+     * 示例与精确状态断言见 `TestMixin.testAccessorShadowCombined`；测试应检查实际字段变化，不能只断言返回非空。
      */
     val inline: Boolean = false,
 )
