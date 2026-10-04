@@ -371,7 +371,8 @@ class FrameworkReliabilityTest {
             .contains("`CallbackInfo` 必须位于第一位")
         assertThat(asmInjectKDoc)
             .`as`("Then: AsmInject KDoc 应锁定参数顺序契约")
-            .contains("可选的 [CallbackInfo] → 可选的目标类 `this` → 目标方法参数前缀 → 可选的 [Local]")
+            .contains("可选的 [CallbackInfo] → 可选的目标类 `this`")
+            .contains("不消耗目标参数的位置")
             .contains("`CallbackInfo` 必须位于第一位")
         assertThat(parameterMapperKDoc)
             .`as`("Then: ParameterMapper KDoc 应提示错误顺序不会自动纠正")
@@ -33542,14 +33543,9 @@ class FrameworkReliabilityTest {
     ): Class<*> {
         val loader =
             object : ClassLoader(Thread.currentThread().contextClassLoader) {
-                override fun findClass(name: String): Class<*> {
-                    if (name == className) {
-                        return defineClass(name, bytes, 0, bytes.size)
-                    }
-                    throw ClassNotFoundException(name)
-                }
+                fun defineTarget(): Class<*> = defineClass(className, bytes, 0, bytes.size)
             }
-        return loader.loadClass(className)
+        return loader.defineTarget()
     }
 
     private fun loadClasses(
@@ -33558,9 +33554,12 @@ class FrameworkReliabilityTest {
     ): Class<*> {
         val loader =
             object : ClassLoader(Thread.currentThread().contextClassLoader) {
-                override fun findClass(name: String): Class<*> {
-                    val bytes = classBytes[name] ?: throw ClassNotFoundException(name)
-                    return defineClass(name, bytes, 0, bytes.size)
+                override fun loadClass(name: String, resolve: Boolean): Class<*> = synchronized(getClassLoadingLock(name)) {
+                    // 显式提供的转换产物优先，避免父加载器直接返回原始夹具而绕过 ASM。
+                    val loaded = findLoadedClass(name) ?: classBytes[name]?.let { defineClass(name, it, 0, it.size) }
+                        ?: super.loadClass(name, false)
+                    if (resolve) resolveClass(loaded)
+                    loaded
                 }
             }
         return loader.loadClass(primaryClassName)
@@ -33601,7 +33600,7 @@ class FrameworkReliabilityTest {
     }
 
     private fun testFixtureClassBytes(className: String): ByteArray {
-        val resourcePath = "test/$className.class"
+        val resourcePath = "test/java/$className.class"
         return javaClass.classLoader.getResourceAsStream(resourcePath)?.use { it.readBytes() }
             ?: error("Missing test fixture class resource: $resourcePath")
     }

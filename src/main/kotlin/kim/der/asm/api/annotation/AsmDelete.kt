@@ -7,6 +7,9 @@ package kim.der.asm.api.annotation
 /**
  * 删除 Mixin 声明对应的目标成员。
  *
+ * 与 [RemoveMethod] / [RemoveField] 在处理声明时删除不同，本注解预先检查冲突，并在同一 Mixin 的最终阶段统一删除。
+ * 行为测试：`FrameworkReliabilityTest.asmDeleteRemovesExplicitTargetMethod`、`asmDeleteRunsAfterInPlaceMethodTransformations`。
+ *
  * 方法级标注按声明方法的 JVM 名称与描述符解析目标方法；字段级标注按声明字段名解析目标字段。
  * [value] 非空时可显式指定目标方法签名或字段名；目标不存在时转换失败。
  * 类级标注仅用于表达不受当前字节码转换模型支持的整类删除意图，转换时会明确失败，

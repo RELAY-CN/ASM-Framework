@@ -66,6 +66,7 @@ class TargetClassContext(
         var transformed = false
         val methodsToProcess = asmInfo.asmClass.declaredMethods.toList()
         val fieldsToProcess = asmInfo.asmClass.declaredFields.toList()
+        validateAtOffsets(methodsToProcess)
         val asmDeletePlan = buildAsmDeletePlan(methodsToProcess, fieldsToProcess)
 
         // 检查是否需要为 class 类型的 Mixin 创建静态字段
@@ -294,6 +295,39 @@ class TargetClassContext(
             transformed = true
         }
         return transformed
+    }
+
+    /** 只有普通指令点注入消费 by；在任何类级改写前拒绝其他路径静默丢弃偏移。 */
+    private fun validateAtOffsets(methods: List<Method>) {
+        for (method in methods) {
+            for (annotation in method.declaredAnnotations) {
+                val at = when (annotation) {
+                    is AsmInject -> {
+                        // 指令点路径自身负责 NEW、CONSTANT REPLACE 和偏移越界等更细的限制。
+                        if (!annotation.inline && annotation.target !in setOf(
+                                InjectionPoint.HEAD, InjectionPoint.TAIL, InjectionPoint.RETURN,
+                                InjectionPoint.INVOKE, InjectionPoint.INVOKE_ASSIGN,
+                            )
+                        ) continue
+                        annotation.at
+                    }
+                    is ModifyArg -> annotation.at
+                    is ModifyArgs -> annotation.at
+                    is ModifyReceiver -> annotation.at
+                    is WrapOperation -> annotation.at
+                    is WrapWithCondition -> annotation.at
+                    is ModifyExpressionValue -> annotation.at
+                    is ModifyVariable -> annotation.at
+                    is Redirect -> annotation.at
+                    else -> continue
+                }
+                if (at.by != 0) {
+                    throw IllegalStateException(
+                        "@${annotation.annotationClass.simpleName} on ${method.name} does not support At.by=${at.by}",
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -756,6 +790,8 @@ class TargetClassContext(
     ): Boolean {
         val targetFieldName = MixinMemberNames.fieldTargetName(field)
         val targetField = classNode.fields.find { it.name == targetFieldName } ?: return false
+        // 接口字段必须保持 public static final；与继承字段一致，Mutable 不改写接口声明。
+        if (classNode.access and Opcodes.ACC_INTERFACE != 0) return false
         val originalAccess = targetField.access
         var access = originalAccess
         if (mutable) access = access and Opcodes.ACC_FINAL.inv()
@@ -1053,7 +1089,7 @@ class TargetClassContext(
             return AccessorTargetField(
                 className,
                 it,
-                isInterfaceOwner = false,
+                isInterfaceOwner = classNode.access and Opcodes.ACC_INTERFACE != 0,
                 wasFinalAtTransformStart = wasFinalAtTransformStart(className, it),
             )
         }
@@ -1304,7 +1340,7 @@ class TargetClassContext(
             }
         } else {
             if (targetField.isInterfaceOwner) {
-                throw IllegalStateException("Accessor setter cannot target inherited interface field $fieldName")
+                throw IllegalStateException("Accessor setter cannot target interface field $fieldName")
             }
             // Setter 必须返回 void 且有一个参数
             val returnType = Type.getReturnType(asmMethod)
@@ -4387,20 +4423,29 @@ class TargetClassContext(
      */
     private fun applyReplaceAllMethods(annotation: ReplaceAllMethods): Boolean {
         val isInterface = (classNode.access and Opcodes.ACC_INTERFACE) != 0
+        var transformed = false
 
         // 如果不是接口，移除 abstract 修饰符
-        if (!isInterface) {
+        if (!isInterface && classNode.access and Opcodes.ACC_ABSTRACT != 0) {
             classNode.access = classNode.access and Opcodes.ACC_ABSTRACT.inv()
+            // 反射的嵌套类修饰符读取自身 InnerClasses 条目；只改类头仍会拒绝反射构造。
+            for (innerClass in classNode.innerClasses) {
+                if (innerClass.name == className) {
+                    innerClass.access = innerClass.access and Opcodes.ACC_ABSTRACT.inv()
+                }
+            }
+            transformed = true
         }
 
         // 将所有非静态字段设为非 final
         for (field in classNode.fields) {
-            if ((field.access and Opcodes.ACC_STATIC) == 0) {
+            if ((field.access and Opcodes.ACC_STATIC) == 0 && field.access and Opcodes.ACC_FINAL != 0) {
                 field.access = field.access and Opcodes.ACC_FINAL.inv()
+                transformed = true
             }
         }
 
-        var transformed = false
+        // 仅类/字段标志变化也需要写回，不能依赖下面是否存在可替换的普通方法。
         val iterator = classNode.methods.listIterator()
 
         for (methodNode in iterator) {

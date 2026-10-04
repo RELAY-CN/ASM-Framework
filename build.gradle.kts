@@ -11,6 +11,7 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -64,6 +65,43 @@ kotlin {
 java {
     withSourcesJar()
 }
+
+// 夹具先在 build 中编译，避免编译器清理输出时删除同目录源码；再仅复制 class 到源码目录。
+val mixinFixtures = sourceSets.create("mixinFixtures") {
+    java.setSrcDirs(listOf("src/test/resources/test/java"))
+    resources.setSrcDirs(emptyList<String>())
+}
+kotlin.sourceSets.getByName("mixinFixtures").kotlin.setSrcDirs(listOf("src/test/resources/test/kotlin"))
+tasks.named<KotlinJvmCompile>("compileMixinFixturesKotlin") {
+    source(mixinFixtures.java.srcDirs)
+}
+dependencies {
+    testImplementation(mixinFixtures.output)
+}
+val prepareMixinFixtures = tasks.register("prepareMixinFixtures") {
+    dependsOn(mixinFixtures.classesTaskName)
+    inputs.files(mixinFixtures.output.classesDirs)
+    outputs.files(provider {
+        listOf("java", "kotlin").flatMap { language ->
+            fileTree("build/classes/$language/mixinFixtures") { include("**/*.class") }.files.map { compiled ->
+                file("src/test/resources/test/$language").resolve(
+                    compiled.relativeTo(file("build/classes/$language/mixinFixtures")),
+                )
+            }
+        }
+    })
+    doLast {
+        for (language in listOf("java", "kotlin")) {
+            copy {
+                from(layout.buildDirectory.dir("classes/$language/mixinFixtures"))
+                include("**/*.class")
+                into(layout.projectDirectory.dir("src/test/resources/test/$language"))
+            }
+        }
+    }
+}
+tasks.named("processTestResources") { dependsOn(prepareMixinFixtures) }
+tasks.named<JavaCompile>(mixinFixtures.compileJavaTaskName) { options.isDebug = true }
 
 configureGradleRes()
 

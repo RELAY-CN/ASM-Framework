@@ -567,7 +567,7 @@ class TestMixin {
     // ========== 生成转换后的 Class 文件 ==========
     @Test
     fun generateTransformedClasses() {
-        val outputDir = Paths.get("d:/home/RELAY-CN_Group/ASM-Framework/src/test/resources/out")
+        val outputDir = Paths.get("src/test/resources/out/java")
         Files.createDirectories(outputDir)
 
         val originalBytes = loadLegacyClass()
@@ -610,26 +610,11 @@ class TestMixin {
 
     // ========== 辅助方法 ==========
     
-    // 创建一个能够从 test/ 目录加载类的 ClassLoader
+    // 从 Java 原始产物目录解析转换器所需的依赖字节码。
     private val testClassLoader = object : ClassLoader(Thread.currentThread().contextClassLoader) {
-        override fun findClass(name: String): Class<*> {
-            // 尝试从 test 目录加载类
-            try {
-                val resourceName = "test/$name.class"
-                val classBytes = getResourceAsStream(resourceName)?.readAllBytes()
-                if (classBytes != null) {
-                    return defineClass(name, classBytes, 0, classBytes.size)
-                }
-            } catch (e: Exception) {
-                // 忽略，让父类加载器处理
-            }
-            throw ClassNotFoundException(name)
-        }
-        
         override fun getResourceAsStream(name: String): java.io.InputStream? {
-            // 如果请求的是 Test.class 或其他测试类，重定向到 test/ 目录
-            if (name.endsWith(".class") && !name.startsWith("test/")) {
-                val testResource = "test/$name"
+            if (name.endsWith(".class") && '/' !in name) {
+                val testResource = "test/java/$name"
                 val stream = super.getResourceAsStream(testResource)
                 if (stream != null) {
                     return stream
@@ -643,7 +628,7 @@ class TestMixin {
         Thread
             .currentThread()
             .getContextClassLoader()
-            .getResourceAsStream("test/Test.class")!!
+            .getResourceAsStream("test/java/Test.class")!!
             .readAllBytes()
 
     private fun transformClass(originalBytes: ByteArray): ByteArray = 
@@ -655,25 +640,17 @@ class TestMixin {
     ): Class<*> {
         val loader =
             object : ClassLoader(Thread.currentThread().contextClassLoader) {
-                override fun findClass(name: String): Class<*> {
-                    // 如果是要加载的转换后的类，使用传入的字节码
-                    if (name == className) {
-                        return defineClass(name, transformedBytes, 0, transformedBytes.size)
-                    }
-                    
-                    // 尝试从 test 目录加载依赖类
-                    try {
-                        val resourceName = "test/$name.class"
-                        val classBytes = javaClass.classLoader.getResourceAsStream(resourceName)?.readAllBytes()
-                        if (classBytes != null) {
-                            return defineClass(name, classBytes, 0, classBytes.size)
+                override fun loadClass(name: String, resolve: Boolean): Class<*> = synchronized(getClassLoadingLock(name)) {
+                    val loaded = findLoadedClass(name) ?: run {
+                        val bytes = if (name == className) transformedBytes else {
+                            javaClass.classLoader.getResourceAsStream("test/java/${name.replace('.', '/')}.class")
+                                ?.use { it.readBytes() }
                         }
-                    } catch (e: Exception) {
-                        // 忽略，让父类加载器处理
+                        // 目标和同包依赖必须优先使用本加载器，不能误用测试 classpath 上的原始类。
+                        if (bytes != null) defineClass(name, bytes, 0, bytes.size) else super.loadClass(name, false)
                     }
-                    
-                    // 让父类加载器处理
-                    throw ClassNotFoundException(name)
+                    if (resolve) resolveClass(loaded)
+                    loaded
                 }
             }
         return loader.loadClass(className)

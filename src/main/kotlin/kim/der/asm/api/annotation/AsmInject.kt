@@ -7,6 +7,15 @@ package kim.der.asm.api.annotation
 /**
  * 方法注入注解。
  *
+ * ```kotlin
+ * @AsmInject(method = "run()Ljava/lang/String;", target = InjectionPoint.RETURN, cancellable = true)
+ * fun change(callback: CallbackInfo) { callback.setReturnValue("changed") }
+ * ```
+ * 位于 [AsmMixin] handler 中。普通 RETURN handler 返回值会被丢弃；在此改目标返回值需使用 CallbackInfo，
+ * 或改用直接消费 handler 返回值的 [ModifyReturnValue]。inline 模式复制方法体，普通模式调用 Mixin。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`、
+ * `MemberMappingContractTest.ordinaryHandlerRetainsMixinState`。
+ *
  * 用于标记某个 ASM 方法需要在目标方法的指定位置执行（或将其字节码内联到目标方法中）。
  * 该注解的语义参考 Mixin 的 `@Inject`，但具体支持范围以当前转换器实现为准。
  *
@@ -22,8 +31,10 @@ package kim.der.asm.api.annotation
  * ## Handler 参数
  *
  * - 普通 `@AsmInject`（HEAD / TAIL / RETURN 与多数指令点观察注入）的参数顺序为：
- *   可选的 [CallbackInfo] → 可选的目标类 `this` → 目标方法参数前缀 → 可选的 [Local] 局部变量。
+ *   可选的 [CallbackInfo] → 可选的目标类 `this` → 目标方法参数前缀。
  *   `CallbackInfo` 必须位于第一位；把它放在末尾会导致参数映射失败或拿到错误值。
+ *   支持局部捕获的注入点允许 [Local] 参数穿插在目标参数前缀之前或之间；Local 不消耗目标参数的位置，
+ *   其后的未标注参数继续依次匹配目标方法参数。具体示例见 [Local]。
  * - HEAD、TAIL、RETURN 与普通指令点注入可在 [CallbackInfo] 后按顺序接收目标方法参数前缀。
  * - [InjectionPoint.TAIL]、[InjectionPoint.RETURN] 与普通指令点注入可在 [CallbackInfo] 后用 [Local]
  *   标记 handler 参数，只读捕获当前注入锚点可见的 LocalVariableTable 局部变量；
@@ -236,6 +247,16 @@ enum class InjectionPoint {
 /**
  * 调用点定位信息。
  *
+ * ```kotlin
+ * @ModifyArg(method = "run()Ljava/lang/String;", index = 0,
+ *     at = At(InjectionPoint.INVOKE, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", args = ["ldc=a"]))
+ * fun change(value: String) = "changed"
+ * ```
+ * 位于 [AsmMixin] 类内；At 筛选单个候选操作，[Slice] 则限定搜索区间，之后 ordinal 再筛选匹配序号。
+ * 字段的消费方式由外层注解决定，不能把普通指令点的 by 能力套用到调用参数修改器。
+ * 行为测试：`FrameworkReliabilityTest.modifyArgAtInvokeArgsLdcFiltersDirectStringCallArgument`、
+ * `AnnotationUsageDifferencesTest.unsupportedAtOffsetsFailDuringTransform`。
+ *
  * 当前用于精确描述 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.INVOKE_STRING]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH] 与 [InjectionPoint.THROW] 的匹配目标，
  * 并通过 [shift] 指定在匹配指令前/后插入 handler。普通 [AsmInject] 的
@@ -316,7 +337,8 @@ enum class InjectionPoint {
  * @param by 额外移动的真实字节码指令数；当前普通 [AsmInject] 的 [InjectionPoint.FIELD] /
  * [InjectionPoint.FIELD_ASSIGN] / [InjectionPoint.LOAD] / [InjectionPoint.STORE] /
  * [InjectionPoint.CAST] / [InjectionPoint.INSTANCEOF] / [InjectionPoint.JUMP] / [InjectionPoint.SWITCH] /
- * [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] 支持正负偏移，0 表示不移动
+ * [InjectionPoint.CONSTANT] / [InjectionPoint.ARRAY_LENGTH] / [InjectionPoint.THROW] / [InjectionPoint.INVOKE_STRING]
+ * 支持正负偏移，0 表示不移动；普通 INVOKE、HEAD/TAIL/RETURN、inline 和参数/表达式/重定向类处理器不支持非零值
  * @param args 附加定位参数；当前 [Redirect] 支持 `array=get`、`array=set`、`array=length`，以及
  * [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
  * [WrapOperation] 支持 `array=get`、`array=set`、`array=length`，以及 [InjectionPoint.LOAD] / [InjectionPoint.STORE] 的 `index=N`、`var=N` 与 `name=localName` 局部变量过滤，
@@ -357,7 +379,8 @@ annotation class At(
     /**
      * 在 [shift] 选定锚点基础上的真实指令偏移量。
      *
-     * 偏移会跳过 label、frame 与 line number 等伪指令；不支持该能力的注入点会在转换阶段拒绝。
+     * 偏移会跳过 label、frame 与 line number 等伪指令；实际定位处理器不支持该能力时会在转换阶段拒绝。
+     * [ModifyReturnValue.at] 为未消费的预留元数据；[Slice] 边界不使用本字段移动锚点。
      */
     val by: Int = 0,
 
@@ -389,6 +412,17 @@ enum class Shift {
 
 /**
  * 注入点切片范围。
+ *
+ * ```kotlin
+ * @ModifyConstant(method = "value()Ljava/lang/String;", constant = "raw",
+ *     slice = Slice(from = At(InjectionPoint.CONSTANT, target = "start"),
+ *                   to = At(InjectionPoint.CONSTANT, target = "end")))
+ * fun change(value: String) = "changed"
+ * ```
+ * 位于 [AsmMixin] 类内；只改两个边界之间的 raw，区间外相同常量保持不变。
+ * 与单独 At 选候选不同，Slice 只收窄范围；边界自身排除，ordinal 在范围内重新计数。
+ * 边界按类型和 target 匹配，不使用 At.shift / At.by / At.args 改变区间；id 也不参与选择。
+ * 行为测试：`FrameworkReliabilityTest.modifyConstantSliceLimitsConstantsBetweenFromAndTo`。
  *
  * 用于描述在某段字节码范围内查找注入点的起止条件。当前普通 [AsmInject] 的
  * [InjectionPoint.INVOKE] / [InjectionPoint.INVOKE_ASSIGN] 注入、普通 [InjectionPoint.INVOKE_STRING] 字符串实参调用点注入、普通 [InjectionPoint.FIELD] / [InjectionPoint.FIELD_ASSIGN] 字段读写指令点注入、

@@ -7,6 +7,14 @@ package kim.der.asm.api.annotation
 /**
  * ASM Mixin 声明注解。
  *
+ * ```kotlin
+ * @AsmMixin("example/Target", priority = 2000)
+ * object TargetMixin
+ * ```
+ * 先注册 Mixin 再转换目标类；这是规则容器，不会自行改变方法。优先级越高越先执行，
+ * 后执行的 [Overwrite] 仍可能覆盖前一次结果。行为测试：
+ * `FrameworkReliabilityTest.registryOrdersExactMixinsByPriorityBeforeRegistrationOrder`。
+ *
  * 用于标记某个 ASM 类需要应用到一个或多个目标类上。
  * 目标类名称使用 JVM internal name（例如 `"com/example/Target"`），并由注册器用于建立“目标类 -> ASM 列表”的索引。
  * 当同一目标类匹配多个 Mixin 时，[priority] 用于控制同一匹配来源内的应用顺序。
@@ -54,6 +62,17 @@ annotation class AsmMixin(
 
 /**
  * 注入处理器分组注解。
+ *
+ * ```kotlin
+ * @Group(name = "version", min = 1, max = 1)
+ * @ModifyConstant(method = "oldValue()Ljava/lang/String;", constant = "old")
+ * fun oldVersion(value: String) = "patched"
+ * @Group(name = "version", min = 1, max = 1)
+ * @ModifyConstant(method = "newValue()Ljava/lang/String;", constant = "new")
+ * fun newVersion(value: String) = "patched"
+ * ```
+ * 以上成员放在同一个 [AsmMixin] 中。与各自必须命中的独立处理器不同，组可允许一个版本候选缺失。
+ * 行为测试：`FrameworkReliabilityTest.GroupInjectionCountScenarios.groupedModifyConstantAllowsFallbackCandidate`。
  *
  * 用于把同一个 Mixin 类中的多个注入、修改或重定向处理器合并为一个命中数契约。
  * 典型场景是多版本目标字节码适配：不同游戏版本可能只有其中一个候选处理器能命中，
@@ -113,6 +132,14 @@ annotation class Group(
 /**
  * 添加接口注解。
  *
+ * ```kotlin
+ * @AsmMixin("example/Target")
+ * @AddInterface("java/lang/Runnable")
+ * object RunnableMixin // 目标类已具有 public void run()
+ * ```
+ * [Copy] 可补方法实现，本注解只建立接口关系；[RemoveInterface] 只移除该关系。
+ * 行为测试：`AnnotationUsageDifferencesTest.interfaceDeclarationsDoNotCreateOrDeleteImplementation`。
+ *
  * 用于为目标类追加一个或多个接口 internal name。该注解只修改 classfile 的接口声明列表，
  * 不会自动生成接口方法实现；调用方必须通过 [Overwrite]、[Copy] 或目标类已有方法保证接口契约可满足。
  *
@@ -157,6 +184,14 @@ annotation class AddInterface(
 
 /**
  * 移除接口注解。
+ *
+ * ```kotlin
+ * @AsmMixin("example/Target")
+ * @RemoveInterface("java/lang/Runnable")
+ * object RemoveRunnableMixin
+ * ```
+ * 与 [RemoveMethod] 不同，目标的 `run()` 仍可调用，但对象不再因这条声明成为 `Runnable`。
+ * 行为测试：`AnnotationUsageDifferencesTest.interfaceDeclarationsDoNotCreateOrDeleteImplementation`。
  *
  * 用于从目标类声明中移除一个或多个接口 internal name。该注解只改写 classfile 的接口声明列表，
  * 不会删除目标类中已经存在的方法实现，也不会检查外部代码是否仍按被移除接口使用该类。
@@ -203,6 +238,15 @@ annotation class RemoveInterface(
 /**
  * 全方法替换注解。
  *
+ * ```kotlin
+ * @AsmMixin("example/Target")
+ * @ReplaceAllMethods
+ * object DefaultsMixin
+ * ```
+ * 与 [Overwrite] 的单方法覆盖不同，本注解批量替换普通方法；即使只有构造器，类和字段标志修改仍会生效。
+ * 行为测试：`AnnotationUsageDifferencesTest.replaceAllWritesStructuralChangesWithoutOrdinaryMethods`、
+ * `FrameworkReliabilityTest.overwriteCanReplaceMethodAfterReplaceAllMethodsInSameMixin`。
+ *
  * 用于将目标类的所有普通方法体替换为调用内部 `DefaultReturnValueProvider` 的兼容实现。
  * 该注解作用于类级别，并会在方法级注解处理前遍历目标类的普通方法列表逐一替换。
  * 后续同一个 Mixin 中的 [Overwrite] 仍可定点覆盖某个方法，用于在全局默认替换后恢复关键方法实现。
@@ -210,10 +254,12 @@ annotation class RemoveInterface(
  * ## 使用边界
  *
  * - 仅处理普通方法；不会改写构造器 `<init>` 或类初始化器 `<clinit>`。
- * - 会移除目标类非接口场景下的 `abstract` 类标志。
+ * - 接口的非静态 abstract 方法保留声明，只替换静态方法和已有实现的方法。
+ * - 会移除目标类非接口场景下的 `abstract` 类标志，并同步自身的 InnerClasses 条目，支持嵌套类的反射构造。
  * - 会移除目标方法的 `abstract` / `native` 标志，并清空原方法体、异常处理块、局部变量表和参数信息。
  * - 非静态字段会被置为非 `final`，以便替换后的方法可按默认运行期策略构造对象状态。
  * - 基本类型、`String` 与 `CharSequence` 返回值优先写入框架默认值；其他非 void 返回值会调用内部 `DefaultReturnValueProvider.defaultValue`。
+ * - `removeSync = false` 保留方法的 synchronized 标志；原同步块随整个旧方法体一起移除。
  *
  * @param removeSync 是否同时移除普通方法的 `synchronized` 语义（移除标志与相关指令）
  * @param remap 是否启用重映射（当前实现未启用，字段仅作为元数据保留）
@@ -241,6 +287,17 @@ annotation class ReplaceAllMethods(
 
 /**
  * 全方法重定向注解。
+ *
+ * ```kotlin
+ * @AsmMixin("example/Target")
+ * @RedirectAllMethods
+ * object TrimMixin {
+ *     @Redirect(at = At(InjectionPoint.INVOKE, target = "java/lang/String.trim()Ljava/lang/String;"))
+ *     fun trim(value: String) = value
+ * }
+ * ```
+ * 保留外围方法体，只替换其中的匹配调用；[ReplaceAllMethods] 则替换整个方法体。
+ * 行为测试：`FrameworkReliabilityTest.redirectAllMethodsDoesNotRequireExplicitMethodTarget`。
  *
  * 用于将目标类所有普通方法（跳过 `<init>` / `<clinit>`）中的指定调用统一重定向到 [Redirect] 标注的方法。
  * 在该模式下，[Redirect.method] 不用于筛选目标方法；转换器会把每个 `@Redirect` 处理器应用到目标类的全部普通方法。
@@ -274,6 +331,13 @@ annotation class RedirectAllMethods(
 
 /**
  * 覆盖方法注解。
+ *
+ * ```kotlin
+ * @Overwrite("value()Ljava/lang/String;")
+ * fun replacement() = "overwrite"
+ * ```
+ * 上例放在 [AsmMixin] 类内。与 [Copy] 的冲突跳过及 [Unique] 的改名保留不同，这里替换目标原实现。
+ * 行为测试：`AnnotationUsageDifferencesTest.copyUniqueAndOverwriteHandleConflictsDifferently`。
  *
  * 用于完全替换目标方法的实现（类似 Mixin 的 `@Overwrite`）。
  * 该注解会复制 ASM 方法体、异常处理块和局部变量信息到目标方法，并保留目标方法的签名。
@@ -314,6 +378,14 @@ annotation class Overwrite(
 /**
  * 复制方法注解。
  *
+ * ```kotlin
+ * @Copy fun value() = "copy"
+ * @Overwrite fun run() = value()
+ * ```
+ * 上例放在 [AsmMixin] 普通 class 内；若目标已有 `value()`，`run()` 调用现存实现。
+ * 需要保留 Mixin helper 时增加 [Unique]，需要覆盖原实现时使用 [Overwrite]。
+ * 行为测试：`AnnotationUsageDifferencesTest.copyUniqueAndOverwriteHandleConflictsDifferently`。
+ *
  * 用于将 ASM 方法复制到目标类中作为一个新方法。
  * 与 [Overwrite] 不同，[Copy] 不会覆盖同名同签名的方法；当目标方法已存在时会跳过并输出 warning。
  * 普通复制方法会作为 `public` 方法写入目标类，同时保留 ASM 方法的 `static`、`synchronized`、`strictfp`
@@ -348,11 +420,19 @@ annotation class Copy(
 /**
  * 唯一成员标记注解。
  *
+ * ```kotlin
+ * @Unique @Copy fun value() = "copy"
+ * @Overwrite fun run() = value()
+ * ```
+ * 上例放在 [AsmMixin] 普通 class 内；目标已有同签名 `value()` 时，保留原方法并为 helper 改名。
+ * 单独标注字段或方法不会自动复制成员。行为测试：
+ * `AnnotationUsageDifferencesTest.copyUniqueAndOverwriteHandleConflictsDifferently`、`uniqueWithoutConflictKeepsPublicCopy`。
+ *
  * 用于标记 ASM 成员在复制到目标类时避免与目标类已有成员冲突（语义参考 Mixin 的 `@Unique`）。
  * 当前实现支持与 [Copy] 配合使用：当目标类已存在同名同描述符方法时，会把被复制方法重命名为私有 synthetic 方法，
  * 并同步改写同一个 ASM 类中 [Overwrite]、[Copy] 与 inline [AsmInject] 方法体内对该 [Copy] 方法的调用。
- * `@Unique @Copy` 会把访问级别调整为 `private synthetic`，但仍保留 `static`、`synchronized` 与 `varargs`
- * 这类 JVM 调用契约。
+ * 发生冲突时 `@Unique @Copy` 才把访问级别调整为 `private synthetic`，无冲突时仍按普通 [Copy] 生成 public 方法；
+ * 两种情况都保留 `static`、`synchronized` 与 `varargs` 这类 JVM 调用契约。
  *
  * @author Dr (dr@der.kim)
  * @date 2025-11-24
@@ -363,6 +443,15 @@ annotation class Unique
 
 /**
  * 修改参数注解。
+ *
+ * ```kotlin
+ * @ModifyArg(method = "run()Ljava/lang/String;", index = 0,
+ *     at = At(InjectionPoint.INVOKE, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+ * fun change(value: String) = "changed"
+ * ```
+ * 位于 [AsmMixin] handler 中；这里只改 `join` 第一个实参，第二个实参及 receiver 保持原值。
+ * 同时改多个实参用 [ModifyArgs]，只换接收对象用 [ModifyReceiver]。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
  *
  * 用于修改目标方法参数，或目标方法内某次方法调用/构造器调用的参数值（语义参考 Mixin 的 `@ModifyArg`）。
  * 默认在目标方法入口直接写回参数槽位；当 [at] 指向 [InjectionPoint.INVOKE] 时，会改写匹配调用点的指定参数。
@@ -474,6 +563,14 @@ annotation class ModifyArg(
 /**
  * 修改调用参数组注解。
  *
+ * ```kotlin
+ * @ModifyArgs(method = "run()Ljava/lang/String;",
+ *     at = At(InjectionPoint.INVOKE, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+ * fun change(args: Args) { args.set(0, "changed"); args.set(1, "both") }
+ * ```
+ * 位于 [AsmMixin] handler 中；[Args] 包含调用实参，不包含 receiver。与 [Redirect] 不同，原调用仍会执行。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
+ *
  * 用于修改目标方法内某次方法调用、构造器调用或 `invokedynamic` 调用的整组参数（语义参考 Mixin 的 `@ModifyArgs`）。当需要同时改写
  * 同一个调用点的多个参数时，优先使用该注解，而不是叠加多个 [ModifyArg]。
  * 可省略 [method]，框架会按 handler 方法名、[At.target] 匹配的调用点、[Args] handler 签名和后续目标方法参数前缀，
@@ -573,6 +670,15 @@ annotation class ModifyArgs(
 
 /**
  * 修改调用 receiver 注解。
+ *
+ * ```kotlin
+ * @ModifyReceiver(method = "run()Ljava/lang/String;",
+ *     at = At(InjectionPoint.INVOKE, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+ * fun change(receiver: Receiver): Receiver = replacement
+ * ```
+ * 上例中 `Receiver` 为目标调用的接收类型，`replacement` 为 Mixin 持有的同类型对象。
+ * 与 [ModifyArg] / [ModifyArgs] 改实参不同，原实参不变，操作在新对象上执行。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
  *
  * 用于修改目标方法内某次实例方法调用、实例字段读取或实例字段写入的 receiver（语义参考 Mixin Extras 的 `@ModifyReceiver`）。
  * handler 接收原 receiver 并返回新的 receiver；原调用参数或字段写入值会保持原顺序继续传给目标操作。
@@ -676,6 +782,16 @@ annotation class ModifyReceiver(
 
 /**
  * 包裹原始操作注解。
+ *
+ * ```kotlin
+ * @WrapOperation(method = "run()Ljava/lang/String;",
+ *     at = At(InjectionPoint.INVOKE, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+ * fun wrap(receiver: Receiver, left: String, right: String, original: Operation<String>): String =
+ *     original.call(receiver, left, right)
+ * ```
+ * 位于 [AsmMixin] 中，`Receiver` 为目标调用类型。这里跳过 `original.call` 只跳过匹配操作，
+ * 外围方法继续执行；[WrapMethod] 跳过原方法则连外围副作用一起跳过。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
  *
  * 用于把目标方法内匹配的方法调用、`invokedynamic` 调用、构造器调用、字段读取、字段写入、数组元素读写、数组长度读取、类型转换、类型判断、局部变量读写、条件跳转、switch selector、常量读取或即将抛出的异常替换为 handler 调用（语义参考
  * Mixin Extras 的 `@WrapOperation`）。handler 会接收原操作的 receiver（实例调用、实例字段读取与
@@ -835,6 +951,15 @@ annotation class WrapOperation(
 /**
  * 包裹目标方法注解。
  *
+ * ```kotlin
+ * @WrapMethod(method = "run()Ljava/lang/String;")
+ * fun wrap(original: Operation<String>) = "skipped"
+ * ```
+ * 位于 [AsmMixin] handler 中；没有调用 `original.call()`，整个原方法及其副作用都会跳过。
+ * 与 [WrapOperation] 不同，这里的 Operation 已绑定目标 this，调用时不传 receiver。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`，
+ * 原方法重复调用的行为见 `FrameworkReliabilityTest.wrapMethodOperationCallReusesBoundReceiverAndDoesNotReenterWrapper`。
+ *
  * 用于把整个目标方法体替换为 handler 调用（语义参考 Mixin Extras 的 `@WrapMethod`）。
  * handler 会接收目标方法参数与 [Operation]，可选择调用原方法、跳过原方法或多次调用原方法。
  * 转换时，原方法体会被迁移到 private synthetic 方法，原方法名与原描述符会保留给新的 wrapper。
@@ -904,6 +1029,16 @@ annotation class WrapMethod(
 
 /**
  * 条件包裹注解。
+ *
+ * ```kotlin
+ * @WrapWithCondition(method = "run()Ljava/lang/String;",
+ *     at = At(InjectionPoint.INVOKE_ASSIGN, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+ * fun keep(result: String) = false
+ * ```
+ * 位于 [AsmMixin] handler 中。INVOKE_ASSIGN 的 false 丢弃结果，但原调用副作用已经发生；
+ * INVOKE 的 false 才会跳过调用。该例的 String 默认结果为 `""`，不是 `null`。
+ * 与 [WrapOperation] 不同，本注解不提供反复执行原操作的句柄。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
  *
  * 用于在目标方法内匹配普通方法调用、`invokedynamic` 调用、调用返回值、字段读取、字段写入、简单数组元素读取、
  * 数组元素写入、数组长度读取、裸数组长度读取、对象构造结果、局部变量读取/写入、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、常量加载、条件跳转、switch selector 或抛异常点插入条件判断（语义参考
@@ -1081,6 +1216,15 @@ annotation class WrapWithCondition(
 /**
  * 修改表达式值注解。
  *
+ * ```kotlin
+ * @ModifyExpressionValue(method = "twice(Ljava/lang/String;)Ljava/lang/String;",
+ *     at = At(InjectionPoint.LOAD, args = ["index=1"]), ordinal = 0)
+ * fun change(value: String) = "$value!"
+ * ```
+ * 位于 [AsmMixin] handler 中；只改第一次读取的栈值，后续读取仍得到原槽位值，
+ * [ModifyVariable] 则会写回槽位。INVOKE 模式保留原调用副作用，[Redirect] 则替换调用。
+ * 行为测试：`AnnotationUsageDifferencesTest.localAnnotationsDifferInSlotWriteback`、`storeAnnotationsObserveDifferentSlotTiming`。
+ *
  * 用于修改目标方法内某个表达式产生的值（语义参考 Mixin Extras 的 `@ModifyExpressionValue`）。
  * 当前实现支持 [InjectionPoint.INVOKE]、[InjectionPoint.INVOKE_ASSIGN]、[InjectionPoint.FIELD]、[InjectionPoint.FIELD_ASSIGN]、
  * [InjectionPoint.NEW]、[InjectionPoint.CAST]、[InjectionPoint.INSTANCEOF]、[InjectionPoint.LOAD]、[InjectionPoint.STORE]、[InjectionPoint.JUMP]、[InjectionPoint.SWITCH]、[InjectionPoint.CONSTANT]、[InjectionPoint.ARRAY_LENGTH] 与 [InjectionPoint.THROW]，可修改匹配普通方法调用或
@@ -1202,6 +1346,16 @@ annotation class ModifyExpressionValue(
 
 /**
  * 修改局部变量注解。
+ *
+ * ```kotlin
+ * @ModifyVariable(method = "twice(Ljava/lang/String;)Ljava/lang/String;",
+ *     at = At(InjectionPoint.LOAD, args = ["index=1"]), ordinal = 0)
+ * fun change(value: String) = "$value!"
+ * ```
+ * 位于 [AsmMixin] handler 中；第一次 LOAD 前写回槽位，后续读取也能看到新值。
+ * [ModifyExpressionValue] 的 LOAD 不写回，[Local] 只读捕获。
+ * STORE 模式在原 xSTORE 之后执行，表达式 STORE 在之前执行，追加目标参数可能因此读到不同值。
+ * 行为测试：`AnnotationUsageDifferencesTest.localAnnotationsDifferInSlotWriteback`、`storeAnnotationsObserveDifferentSlotTiming`。
  *
  * 用于修改目标方法中的参数或局部变量（语义参考 Mixin 的 `@ModifyVariable`）。
  * 当前实现支持在方法入口（[InjectionPoint.HEAD]）修改已有参数槽位，也支持在局部变量读取前
@@ -1333,6 +1487,14 @@ annotation class ModifyVariable(
 /**
  * 修改返回值注解。
  *
+ * ```kotlin
+ * @ModifyReturnValue(method = "run()Ljava/lang/String;")
+ * fun change(value: String) = "changed"
+ * ```
+ * 位于 [AsmMixin] handler 中；目标方法副作用仍发生，handler 返回值成为目标返回值。
+ * 普通 RETURN [AsmInject] 的 handler 返回值会被丢弃，后者需通过 CallbackInfo 改返回。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
+ *
  * 用于在目标方法返回前修改返回值。
  * 当前实现会在非 void 的 RETURN 指令前注入修改逻辑，可用 [ordinal] 只修改第 N 个返回点。
  *
@@ -1422,6 +1584,14 @@ annotation class ModifyReturnValue(
 
 /**
  * 修改常量注解。
+ *
+ * ```kotlin
+ * @ModifyConstant(method = "value()Ljava/lang/String;", constant = "raw")
+ * fun change(value: String) = "changed"
+ * ```
+ * 位于 [AsmMixin] handler 中；这里只选常量加载，不会截获方法计算出的同值结果。
+ * [ModifyExpressionValue] 还支持调用结果等表达式；普通 AsmInject CONSTANT REPLACE 的 handler 不接收原常量。
+ * 行为测试：`FrameworkReliabilityTest.modifyConstantInTestB0RewritesStaticFinalStringLiteralOnly`。
  *
  * 用于修改目标方法中的常量值（语义参考 Mixin 的 `@ModifyConstant`）。
  * 当前实现会遍历字节码中的常量指令，并在匹配时用 ASM 方法返回值替换原常量。
@@ -1524,6 +1694,15 @@ annotation class ModifyConstant(
 
 /**
  * 重定向方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段访问、局部变量读取或待写入值、类型转换、类型判断、条件跳转、switch selector、常量加载或抛异常点注解。
+ *
+ * ```kotlin
+ * @Redirect(method = "run()Ljava/lang/String;",
+ *     at = At(InjectionPoint.INVOKE, target = "join(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"))
+ * fun replace(receiver: Receiver, left: String, right: String) = "redirected"
+ * ```
+ * 位于 [AsmMixin] 中，`Receiver` 为调用接收类型。原 join 调用及副作用被替换；
+ * [ModifyExpressionValue] 保留原调用，[WrapOperation] 则让 handler 选择调用次数。
+ * 行为测试：`AnnotationUsageDifferencesTest.callAnnotationsHaveDifferentSideEffects`。
  *
  * 用于将目标方法中的某个方法调用、`invokedynamic` 调用、构造器调用、NEW 构造表达式、字段读取、字段写入、简单数组元素访问、数组长度读取、裸数组长度读取、
  * 局部变量读取或待写入值、`CHECKCAST` 类型转换、`INSTANCEOF` 类型判断、条件跳转、`tableswitch` / `lookupswitch` selector、常量加载或即将抛出的异常重定向到当前 ASM 方法（语义参考 Mixin 的 `@Redirect`）。
@@ -1674,6 +1853,16 @@ annotation class Redirect(
 /**
  * Shadow 字段/方法注解。
  *
+ * ```kotlin
+ * @JvmField @Shadow("actual") var alias = 0
+ * @Shadow("actualMethod") fun source(): Int = error("占位")
+ * @Overwrite("run()V") fun replace() { alias = source() }
+ * ```
+ * 上例位于 [AsmMixin] 普通 class 内，直接成员指令绑定到目标；占位方法不应被调用。
+ * 与 [AddField] 不同，Shadow 不新增字段；普通非内联 handler 也不会借此切换 this。
+ * `@Shadow("shadow_actual")` 会去前缀，空参数下声明本身名为 `shadow_actual` 则按原名查找。
+ * 行为测试：`MemberMappingContractTest.copiedBodiesResolveExplicitShadowFieldAndMethodAliases`。
+ *
  * 用于在 ASM 类中声明对目标类字段/方法的“引用占位”，以便在转换阶段进行校验或修饰符调整（语义参考 Mixin 的 `@Shadow`）。
  * 当前实现会基于 [method] 与 [prefix] 解析目标名称：
  *
@@ -1724,6 +1913,15 @@ annotation class Shadow(
 /**
  * Accessor 注解。
  *
+ * ```kotlin
+ * @Accessor("name") fun readName(): String = error("占位")
+ * @Accessor("name") @Mutable fun writeName(value: String): Unit = error("占位")
+ * ```
+ * 上例位于 [AsmMixin] 普通 class 内，生成 getter/setter；[Invoker] 生成方法调用桥接。
+ * 原始 final 字段即使已被前置 Mixin 移除 final，setter 仍须声明 Mutable；接口字段始终只允许 getter。
+ * 行为测试：`FrameworkReliabilityTest.AccessorSetterScenarios.instanceFieldSetterUpdatesTargetState`、
+ * `AnnotationUsageDifferencesTest.interfaceAccessorGetterWorksButSetterFailsDuringTransform`。
+ *
  * 用于在目标类上生成字段访问器方法（语义参考 Mixin 的 `@Accessor`）。
  *
  * 无参数且返回字段类型的方法会生成 getter；一个参数且返回 `void` 的方法会生成 setter。
@@ -1769,6 +1967,14 @@ annotation class Accessor(
 
 /**
  * Invoker 注解。
+ *
+ * ```kotlin
+ * @Invoker("privateMethod")
+ * fun callPrivate(): String = error("占位")
+ * ```
+ * 上例位于 [AsmMixin] 普通 class 内，按原方法签名生成调用桥接；它不覆盖原方法实现，
+ * 也不像 [Accessor] 直接读写字段。构造器工厂使用 `@Invoker("<init>")` 并声明静态方法。
+ * 行为测试：`FrameworkReliabilityTest.accessorAndInvokerBridgePrivateMembersInTestClass`、`invokerCanGenerateConstructorFactoryMethod`。
  *
  * 用于生成“私有/受保护方法或构造器的调用器”（语义参考 Mixin 的 `@Invoker`）。
  *
@@ -1820,6 +2026,14 @@ annotation class Invoker(
 /**
  * 可变字段标记注解。
  *
+ * ```kotlin
+ * @JvmField @Shadow("actual") @Mutable var alias = 0
+ * ```
+ * 上例位于 [AsmMixin] 普通 class 内，只移除目标声明的 final，不复制初始值。
+ * 与 [Final] 同时标注最终保留 final；接口字段必须保留 JVM 要求的 final。
+ * 行为测试：`MemberMappingContractTest.reusedAddedFieldAppliesMutableBeforeWriting`、
+ * `AnnotationUsageDifferencesTest.mutableDoesNotInvalidateFieldsOnTargetInterface`、`finalWinsWhenCombinedWithMutable`。
+ *
  * 标记字段或 [Accessor] setter 为可变。
  *
  * 用于移除目标类自身字段的 `final` 修饰符。该注解可用于 [AddField]、[Shadow] 字段，也可用于写入 final
@@ -1836,6 +2050,14 @@ annotation class Mutable
 /**
  * 最终字段标记注解。
  *
+ * ```kotlin
+ * @JvmField @Shadow("actual") @Final var alias = 0
+ * ```
+ * 上例位于 [AsmMixin] 普通 class 内。与 [Mutable] 相反，本注解添加 final；
+ * 只处理目标自身字段，不改写继承字段，接口原有 final 保持不变。二者同时声明时 Final 优先。
+ * 行为测试：`AnnotationUsageDifferencesTest.finalWinsWhenCombinedWithMutable`、
+ * `MemberMappingContractTest.finalRejectsVolatileFieldDuringTransform`。
+ *
  * 标记字段为最终（为目标字段添加 `final` 修饰符）。
  * 与 [Shadow] 一起使用时，会按 [Shadow.method] 或 `shadow_` 前缀解析出的真实目标字段名生效，
  * 适合 ASM 侧字段名需要避开目标类成员名冲突的场景。
@@ -1851,6 +2073,14 @@ annotation class Final
 
 /**
  * 添加字段注解。
+ *
+ * ```kotlin
+ * @JvmField @AddField("added") var source = 10
+ * @Overwrite("run()V") fun replace() { source += 3 }
+ * ```
+ * 上例位于 [AsmMixin] 普通 class 内。目标新增字段从 0 开始，运行一次后为 3；
+ * Mixin 的初始化值 10 不迁移。普通非内联 AsmInject 访问的是 Mixin 自身字段。
+ * 行为测试：`MemberMappingContractTest.copiedBodiesAccessAddedFieldsOnEachTarget`、`ordinaryHandlerRetainsMixinState`。
  *
  * 用于把 ASM 类中的字段声明复制到目标类。该注解只新增字段声明，不会复制字段初始化逻辑；
  * 非静态字段仍由 JVM 默认值初始化，静态字段也不会自动执行 ASM 类中的初始化代码。
@@ -1896,6 +2126,16 @@ annotation class AddField(
 /**
  * 移除字段注解。
  *
+ * ```kotlin
+ * @RemoveField("legacy")
+ * fun removeLegacy() = Unit
+ * ```
+ * 位于 [AsmMixin] 类内。与 [AsmDelete] 的最终阶段删除不同，本注解在处理该字段或方法声明时执行，
+ * 不提供 AsmDelete 的统一冲突预检。只删除声明，不修复剩余引用，仅适用于初次定义前或离线转换。
+ * 推断时仅小写首字母，例如 `removeURL` 得到 `uRL`，不同于 [Accessor] 保留 acronym 的规则；可显式指定名称。
+ * 行为测试：`FrameworkReliabilityTest.removeFieldInfersTargetFieldFromAccessorStyleMethodNames`、
+ * `AnnotationUsageDifferencesTest.removeFieldAndAccessorInferAcronymsDifferently`。
+ *
  * 用于在 ASM 类中标记需要从目标类移除的字段。该注解可标在函数上作为声明式删除入口，
  * 也可标在字段上直接使用字段名作为目标名称。
  *
@@ -1932,6 +2172,15 @@ annotation class RemoveField(
 /**
  * 移除方法注解。
  *
+ * ```kotlin
+ * @RemoveMethod("legacy()V")
+ * fun removeLegacy() = Unit
+ * ```
+ * 位于 [AsmMixin] 类内。删除声明而不是像 [Overwrite] 那样替换实现；
+ * [AsmDelete] 则在所有注入后统一删除并执行额外冲突检查。本注解不重写其他调用点，
+ * 只能用于目标初次定义前或离线转换，不可通过 JVM redefine 删除已加载的方法。
+ * 行为测试：`FrameworkReliabilityTest.removeMethodRemovesTargetMethod`、`asmDeleteRunsAfterInPlaceMethodTransformations`。
+ *
  * 用于在 ASM 类中标记需要移除的目标方法。
  * 目标方法不存在时转换失败，避免删除治理在目标字节码漂移后静默失效。
  *
@@ -1961,6 +2210,14 @@ annotation class RemoveMethod(
 
 /**
  * 移除方法同步注解。
+ *
+ * ```kotlin
+ * @RemoveSynchronized("run()V")
+ * fun removeLock() = Unit
+ * ```
+ * 位于 [AsmMixin] 类内；保留业务方法体，只移除方法锁和同步块的 monitor 语义，
+ * 与 [ReplaceAllMethods] 丢弃原业务实现不同。原代码若依赖持锁才能调用 wait/notify，应先调整调用前提。
+ * 行为测试：`FrameworkReliabilityTest.removeSynchronizedInTestClassRemovesFlagsAndKeepsBusinessState`。
  *
  * 用于移除目标方法的 `synchronized` 标志与相关的同步指令（例如 `MONITORENTER`）。
  * 目标方法不存在时转换失败，避免同步语义漂移后仍误以为补丁已经生效。

@@ -1,3 +1,4 @@
+// 由 prepareMixinFixtures 自动编译到当前目录，供 ASM 读取原始 class。
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;

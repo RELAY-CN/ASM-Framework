@@ -7,6 +7,15 @@ package kim.der.asm.api.annotation
 /**
  * 显式捕获目标方法当前注入点可见的局部变量。
  *
+ * ```kotlin
+ * @AsmInject(method = "twice(Ljava/lang/String;)Ljava/lang/String;", target = InjectionPoint.RETURN)
+ * fun observe(@Local(index = 1) value: String) { println(value) }
+ * ```
+ * 位于 [AsmMixin] handler 中，只观察实例方法第一个参数槽位，不写回。按 index 捕获也需要 LVT。
+ * Local 参数可以出现在未标注的目标参数之前；目标参数仍独立按声明顺序匹配。
+ * 行为测试：`AnnotationUsageDifferencesTest.localAnnotationsDifferInSlotWriteback`；混排参数见
+ * `FrameworkReliabilityTest.asmInjectReturnCanCaptureLocalByNameInTestClassWithoutModifyingReturn`。
+ *
  * 该注解用于普通 [AsmInject] handler 参数。当前实现支持 [InjectionPoint.TAIL]、[InjectionPoint.RETURN]
  * 与普通指令点注入的只读局部变量捕获：框架会在当前注入锚点读取 LocalVariableTable
  * 中仍处于作用域内的变量，并把该槽位的当前值传给被标记的 handler 参数。
