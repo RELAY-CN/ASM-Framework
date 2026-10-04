@@ -351,7 +351,7 @@ class FrameworkReliabilityTest {
         assertThat(readme)
             .`as`("Then: README 应提供可复制的快速开始，并指向 LICENSE")
             .contains("## 快速开始")
-            .contains("implementation(\"kim.der:ASM-Framework:<version>\")")
+            .contains("implementation(\"kim.der.relay-cn:ASM-Framework:<version>\")")
             .contains("参数顺序：CallbackInfo → 目标 this（可选）→ 原方法参数前缀")
             .contains("[LICENSE](LICENSE)")
         assertThat(license)

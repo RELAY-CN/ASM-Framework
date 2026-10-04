@@ -19,16 +19,19 @@ plugins {
     id("org.jetbrains.kotlin.jvm") version "2.3.10"
     id("java-library")
     id("maven-publish")
+    id("com.vanniktech.maven.publish.base") version "0.37.0"
+    id("org.jetbrains.dokka") version "2.1.0"
 }
 
-group = "kim.der"
-version =
+group = "kim.der.relay-cn"
+val buildGitCommit =
     providers
         .exec {
             commandLine("git", "rev-parse", "--short", "HEAD")
         }.standardOutput.asText
         .map(String::trim)
         .get()
+version = providers.gradleProperty("releaseVersion").getOrElse("0.0.1")
 
 repositories {
     maven(url = "https://mirrors.cloud.tencent.com/nexus/repository/maven-public")
@@ -64,6 +67,12 @@ kotlin {
 
 java {
     withSourcesJar()
+}
+
+// Kotlin API 文档由 Dokka 生成，避免发布只有 Java 类型的空文档包。
+val dokkaJavadocJar = tasks.register<Jar>("dokkaJavadocJar") {
+    archiveClassifier.set("javadoc")
+    from(tasks.named("dokkaGeneratePublicationHtml"))
 }
 
 // 夹具先在 build 中编译，避免编译器清理输出时删除同目录源码；再仅复制 class 到源码目录。
@@ -142,17 +151,18 @@ configureGraalVmAgent()
 publishing {
     publications {
         create<MavenPublication>("maven") {
-            groupId = "kim.der"
+            groupId = project.group.toString()
             artifactId = project.name
             version = project.version.toString()
 
             from(project.components.getByName("java"))
+            artifact(dokkaJavadocJar)
 
             pom {
                 scm {
                     url.set("https://github.com/RELAY-CN/ASM-Framework")
-                    connection.set("scm:https://github.com/RELAY-CN/ASM-Framework.git")
-                    developerConnection.set("scm:git@github.com:RELAY-CN/ASM-Framework.git")
+                    connection.set("scm:git:https://github.com/RELAY-CN/ASM-Framework.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/RELAY-CN/ASM-Framework.git")
                 }
 
                 licenses {
@@ -180,17 +190,12 @@ publishing {
         }
     }
 
-    repositories {
-        maven {
-            name = "maven-releases"
-            url = uri((project.findProperty("mavenCentralUrl") ?: "").toString() + "$name/")
+}
 
-            credentials {
-                username = (project.findProperty("mavenCentralUsername") ?: "").toString()
-                password = (project.findProperty("mavenCentralPassword") ?: "").toString()
-            }
-        }
-    }
+// Central Portal 使用专用部署 API，不能把旧 Nexus base URL 拼接成上传地址。
+mavenPublishing {
+    publishToMavenCentral(automaticRelease = false)
+    signAllPublications()
 }
 
 /**
@@ -211,7 +216,7 @@ fun Project.configureGradleRes() {
         }
     val implementationLines = dependencyLines.map { it.first }
     val compileOnlyLines = dependencyLines.map { it.second }
-    val gitCommitHash = version.toString()
+    val gitCommitHash = buildGitCommit
     val fileListFile = generatedDirectory.get().file("FileList.txt").asFile
     val compileOnlyFile = generatedDirectory.get().file("compileOnly.txt").asFile
     val implementationFile = generatedDirectory.get().file("implementation.txt").asFile

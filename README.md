@@ -29,11 +29,12 @@ repositories {
 }
 
 dependencies {
-    implementation("kim.der:ASM-Framework:<version>")
+    implementation("kim.der.relay-cn:ASM-Framework:<version>")
 }
 ```
 
-`<version>` 当前发布以 Git short commit 为准；也可直接依赖本地 `publishToMavenLocal` 产物。
+`<version>` 使用已发布版本号；首个计划发布版本为 `0.0.1`。发布状态以 Maven Central 为准。
+维护者的凭据、签名及发布命令见 [PUBLISHING.md](PUBLISHING.md)。
 
 ### 2. 写第一个 Mixin
 
