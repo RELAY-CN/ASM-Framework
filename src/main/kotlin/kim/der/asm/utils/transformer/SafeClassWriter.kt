@@ -30,6 +30,9 @@ internal class SafeClassWriter(
 ) : ClassWriter(cr, flags) {
     private val loader = loader ?: ClassLoader.getSystemClassLoader()
 
+    // 与 writer 同生命周期：复用本次 frame 计算的只读类型信息，不跨 loader 或后续转换共享。
+    private val typeInfos = HashMap<String, TypeInfo>()
+
     /**
      * 计算两个类型的公共父类。
      *
@@ -49,8 +52,8 @@ internal class SafeClassWriter(
         type2: String,
     ): String {
         try {
-            val info1: ClassReader = typeInfo(type1)
-            val info2: ClassReader = typeInfo(type2)
+            val info1 = typeInfo(type1)
+            val info2 = typeInfo(type2)
             if (info1.access and Opcodes.ACC_INTERFACE != 0) {
                 return if (typeImplements(type2, info2, type1)) {
                     type1
@@ -99,7 +102,7 @@ internal class SafeClassWriter(
      * `typeN` 是 `java/lang/Object` 的直接子类；若传入类型本身就是 `java/lang/Object`，返回空串。
      *
      * @param typeIn 类或接口的 internal name
-     * @param infoIn [typeIn] 对应的 [ClassReader]
+     * @param infoIn [typeIn] 对应的只读继承信息
      * @return 包含继承链 internal name 的字符串构建器
      * @throws IOException 当指定类型或其父类字节码无法读取时抛出
      *
@@ -109,14 +112,14 @@ internal class SafeClassWriter(
     @Throws(IOException::class)
     private fun typeAncestors(
         typeIn: String,
-        infoIn: ClassReader,
+        infoIn: TypeInfo,
     ): StringBuilder {
         var type = typeIn
-        var info: ClassReader = infoIn
+        var info = infoIn
         val b = StringBuilder()
         while (ObjectClassName != type) {
             b.append(';').append(type)
-            type = info.superName
+            type = info.superName!!
             info = typeInfo(type)
         }
         return b
@@ -128,7 +131,7 @@ internal class SafeClassWriter(
      * 会递归检查当前类型声明的接口、接口继承链以及父类继承链。
      *
      * @param typeIn 类或接口的 internal name
-     * @param infoIn [typeIn] 对应的 [ClassReader]
+     * @param infoIn [typeIn] 对应的只读继承信息
      * @param itf 目标接口的 internal name
      * @return 直接或间接实现 [itf] 时返回 `true`
      * @throws IOException 当指定类型、接口或父类字节码无法读取时抛出
@@ -139,11 +142,11 @@ internal class SafeClassWriter(
     @Throws(IOException::class)
     private fun typeImplements(
         typeIn: String,
-        infoIn: ClassReader,
+        infoIn: TypeInfo,
         itf: String,
     ): Boolean {
         var type = typeIn
-        var info: ClassReader = infoIn
+        var info = infoIn
         while (ObjectClassName != type) {
             val itfs: Array<String> = info.interfaces
             for (i in itfs.indices) {
@@ -156,33 +159,43 @@ internal class SafeClassWriter(
                     return true
                 }
             }
-            type = info.superName
+            type = info.superName!!
             info = typeInfo(type)
         }
         return false
     }
 
     /**
-     * 读取指定类型的 [ClassReader]。
+     * 读取指定类型的继承信息。
      *
-     * 该方法先使用当前 writer 的类加载器读取资源，再回退到系统类加载器。
+     * 成功读取的结果只在当前 writer 内复用。先使用当前类加载器读取资源，再回退到系统类加载器；
+     * 读取或解析失败不写入缓存，允许资源补齐后的后续读取重试。
      *
      * @param type 类或接口的 internal name
-     * @return [type] 对应的 [ClassReader]
+     * @return [type] 对应的只读继承信息
      * @throws IOException 当字节码资源无法读取时抛出
      *
      * @author Dr (dr@der.kim)
      * @date 2025-11-24
      */
     @Throws(IOException::class)
-    private fun typeInfo(type: String): ClassReader {
+    private fun typeInfo(type: String): TypeInfo = typeInfos.getOrPut(type) {
         val resource = "$type.class"
         val inputStream =
             this.loader.getResourceAsStream(resource) ?: ClassLoader
                 .getSystemClassLoader()
                 .getResourceAsStream(resource) ?: throw IOException("Cannot create ClassReader for type $type")
-        return inputStream.use {
-            ClassReader(it)
+        inputStream.use {
+            val reader = ClassReader(it)
+            // ClassReader 延迟解析头字段；全部读取成功后再缓存，同时释放原始 class 字节。
+            TypeInfo(reader.access, reader.superName, reader.interfaces)
         }
     }
+
+    /** 仅保存公共父类计算所需的元数据，不持有 Class 或完整 classfile。 */
+    private class TypeInfo(
+        val access: Int,
+        val superName: String?,
+        val interfaces: Array<String>,
+    )
 }

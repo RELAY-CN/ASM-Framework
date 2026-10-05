@@ -5,8 +5,6 @@
 package kim.der.asm.agent
 
 import kim.der.asm.transformer.AsmProcessor
-import kim.der.asm.utils.transformer.AsmUtil
-import org.objectweb.asm.ClassWriter
 import java.lang.instrument.ClassFileTransformer
 import java.lang.instrument.IllegalClassFormatException
 import java.lang.instrument.Instrumentation
@@ -43,8 +41,8 @@ class AsmBootstrap :
     /**
      * 对目标类字节码执行 ASM 改写。
      *
-     * 当 [AsmProcessor.shouldTransform] 返回 `true` 时读取 `classfileBuffer` 为 ASM Tree 的 [org.objectweb.asm.tree.ClassNode]，
-     * 并应用所有匹配的改写；若没有任何改写生效，则返回原始字节码以避免不必要的重写。
+     * 由 [AsmProcessor.transform] 使用一次注册快照完成读取、改写与写回，避免匹配器重入注册时
+     * 同次转换混用不同快照。没有匹配或没有实际改写时，直接返回原始字节码。
      * 当前实现只使用 [loader]、[className] 与 [classfileBuffer]，重定义类与保护域参数仅保留 Java agent 契约。
      *
      * @param loader 定义该类的 [ClassLoader]；当使用 bootstrap loader 时可能为 `null`
@@ -65,19 +63,7 @@ class AsmBootstrap :
         classBeingRedefined: Class<*>?,
         protectionDomain: ProtectionDomain?,
         classfileBuffer: ByteArray,
-    ): ByteArray {
-        // 检查是否需要应用 ASM
-        if (!asmProcessor.shouldTransform(className)) {
-            return classfileBuffer
-        }
-
-        val node = AsmUtil.read(classfileBuffer)
-        return if (asmProcessor.applyAsms(className, node)) {
-            AsmUtil.write(loader, node, ClassWriter.COMPUTE_FRAMES)
-        } else {
-            classfileBuffer
-        }
-    }
+    ): ByteArray = asmProcessor.transform(className, classfileBuffer, loader)
 
     companion object {
         /**
