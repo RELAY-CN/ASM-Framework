@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2026 Dr (dr@der.kim) and contributors.
  */
 
 package kim.der.asm
@@ -345,7 +345,6 @@ class FrameworkReliabilityTest {
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "api", "annotation", "AsmInject.kt"))
         val parameterMapperKDoc =
             Files.readString(Path.of("src", "main", "kotlin", "kim", "der", "asm", "injector", "util", "ParameterMapper.kt"))
-        val license = Files.readString(Path.of("LICENSE"))
 
         // Then
         assertThat(readme)
@@ -354,10 +353,6 @@ class FrameworkReliabilityTest {
             .contains("implementation(\"kim.der.relay-cn:ASM-Framework:<version>\")")
             .contains("参数顺序：CallbackInfo → 目标 this（可选）→ 原方法参数前缀")
             .contains("[LICENSE](LICENSE)")
-        assertThat(license)
-            .`as`("Then: LICENSE 文件应存在且保留版权声明")
-            .contains("Copyright 2020-2025 Dr (dr@der.kim)")
-            .contains("RELAY-CN LICENSE")
         assertThat(guide)
             .`as`("Then: GUIDE 应有独立的 Handler 参数顺序章节，并修正 this FAQ")
             .contains("## Handler 参数顺序")
@@ -378,6 +373,22 @@ class FrameworkReliabilityTest {
             .`as`("Then: ParameterMapper KDoc 应提示错误顺序不会自动纠正")
             .contains("可选 [CallbackInfo] → 可选目标 `this` → 目标方法参数前缀 → 可选 [Local]")
             .contains("若把 [CallbackInfo] 放在末尾，框架不会自动纠正")
+    }
+
+    @Test
+    @DisplayName("公开许可证应声明 Apache 2.0 并保留版权归属")
+    fun publicLicenseDeclaresApache2AndPreservesCopyrightAttribution() {
+        val license = Files.readString(Path.of("LICENSE"))
+        val readme = Files.readString(Path.of("README.md"))
+
+        // 版权年份属于文档维护信息，契约不绑定具体年份或系统时钟。
+        assertThat(license)
+            .`as`("LICENSE 应包含 Apache 2.0 条款与项目版权归属")
+            .contains("Apache License", "Version 2.0, January 2004", "http://www.apache.org/licenses/LICENSE-2.0")
+            .containsPattern("""Copyright \d{4}(?:-\d{4})? Dr \(dr@der\.kim\) and contributors\.""")
+        assertThat(readme)
+            .`as`("README 应与 LICENSE 声明相同的许可证")
+            .contains("License-Apache%202.0", "本项目采用 Apache License 2.0", "[LICENSE](LICENSE)")
     }
 
     @Test

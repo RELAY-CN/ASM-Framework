@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2025 Dr (dr@der.kim) and contributors.
+ * Copyright 2020-2026 Dr (dr@der.kim) and contributors.
  */
 
 import org.gradle.api.artifacts.Configuration
@@ -167,8 +167,8 @@ publishing {
 
                 licenses {
                     license {
-                        name.set("RELAY-CN LICENSE")
-                        url.set("https://github.com/RELAY-CN/ASM-Framework/blob/master/LICENSE")
+                        name.set("Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                     }
                 }
 

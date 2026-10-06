@@ -8,7 +8,7 @@
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3.10-blue.svg)](https://kotlinlang.org)
 [![ASM](https://img.shields.io/badge/ASM-9.9-green.svg)](https://asm.ow2.io)
-[![License](https://img.shields.io/badge/License-Custom-yellow.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -162,6 +162,6 @@ Mixin，按路径匹配命中在前、精确目标命中在后的顺序应用转
 
 ## 许可证
 
-见 [LICENSE](LICENSE)。
+本项目采用 Apache License 2.0，详见 [LICENSE](LICENSE)。
 
-Copyright 2020-2025 Dr (dr@der.kim) and contributors.
+Copyright 2020-2026 Dr (dr@der.kim) and contributors.
