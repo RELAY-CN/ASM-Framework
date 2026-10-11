@@ -39,6 +39,7 @@ object ParameterMapper {
      * @param asmMethod ASM 方法
      * @param skipCallbackInfo 是否跳过 CallbackInfo 参数
      * @param targetClassName 目标类名（用于传递 this 参数）
+     * @param localCaptureContext 局部变量捕获锚点；存在 [Local] 参数时必须提供
      * @throws IllegalStateException ASM 方法参数无法映射到目标方法参数时抛出
      *
      * @author Dr (dr@der.kim)
@@ -58,6 +59,8 @@ object ParameterMapper {
         val targetParamTypes = Type.getArgumentTypes(targetMethod.desc)
 
         var asmParamIndex = 0
+        // 参数序号与 JVM 槽位独立递增，Long/Double 占两个槽位但仍只有一个参数。
+        var targetParamIndex = 0
         var targetVarIndex = if (isStatic) 0 else 1
 
         // 第一个参数可能是 CallbackInfo
@@ -96,12 +99,13 @@ object ParameterMapper {
             }
 
             // 如果 ASM 参数类型与目标参数类型匹配，加载对应的参数
-            if (targetVarIndex - (if (isStatic) 0 else 1) < targetParamTypes.size) {
-                val targetParamType = targetParamTypes[targetVarIndex - (if (isStatic) 0 else 1)]
+            if (targetParamIndex < targetParamTypes.size) {
+                val targetParamType = targetParamTypes[targetParamIndex]
 
                 if (canAssign(asmParamType, targetParamType)) {
                     loadParameter(il, targetParamType, targetVarIndex)
-                    targetVarIndex += if (targetParamType.sort == Type.LONG || targetParamType.sort == Type.DOUBLE) 2 else 1
+                    targetVarIndex += targetParamType.size
+                    targetParamIndex++
                     asmParamIndex++
                 } else {
                     throw IllegalStateException(
@@ -207,8 +211,8 @@ object ParameterMapper {
         targetMethod: MethodNode,
         anchor: AbstractInsnNode,
     ): List<LocalVariableNode> {
-        val insns = targetMethod.instructions.toArray()
-        val anchorIndex = insns.indexOf(anchor)
+        val insns = targetMethod.instructions
+        val anchorIndex = insns.ownedIndexOf(anchor)
         if (anchorIndex < 0) {
             return emptyList()
         }
@@ -219,15 +223,24 @@ object ParameterMapper {
      * 判断局部变量表记录是否覆盖给定指令下标。
      */
     private fun LocalVariableNode.containsInstruction(
-        insns: Array<AbstractInsnNode>,
+        insns: InsnList,
         instructionIndex: Int,
     ): Boolean {
-        val startIndex = insns.indexOf(start)
-        val endIndex = insns.indexOf(end)
+        val startIndex = insns.ownedIndexOf(start)
+        val endIndex = insns.ownedIndexOf(end)
         return startIndex >= 0 &&
             endIndex >= 0 &&
             instructionIndex >= startIndex &&
             instructionIndex < endIndex
+    }
+
+    /**
+     * 复用 InsnList 随结构修改失效的索引缓存，避免每个捕获参数复制并反复扫描整份指令数组。
+     * ASM 的 indexOf 不校验节点所有权，必须用同一缓存中的节点身份拒绝外来或已移除的节点。
+     */
+    private fun InsnList.ownedIndexOf(insn: AbstractInsnNode): Int {
+        val index = indexOf(insn)
+        return if (index >= 0 && index < size() && get(index) === insn) index else -1
     }
 
     private fun localAnnotation(

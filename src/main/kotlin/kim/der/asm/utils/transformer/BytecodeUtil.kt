@@ -191,6 +191,7 @@ object BytecodeUtil {
      *
      * 文本目标支持 `null`、`true` / `false`、数字、字符串、类字面量 internal name 或 binary name、
      * 方法类型描述符、方法句柄 `owner.name(desc)`，以及动态常量的 `name` 或 `name:descriptor`。
+     * 文本按实际常量类型解释，字符串 `"true"` / `"false"` 不会被转为布尔 opcode 匹配。
      *
      * @param insn 常量加载指令
      * @param value 注解中声明的文本目标
@@ -207,6 +208,9 @@ object BytecodeUtil {
         if (constant == null) {
             return value == "null"
         }
+        if (constant is String) {
+            return constant == value
+        }
         if (isBooleanLiteral(value)) {
             return isBooleanConstantInsn(insn, value == "true")
         }
@@ -216,7 +220,6 @@ object BytecodeUtil {
             is Long -> constant.toString() == value
             is Float -> constant.toString() == value
             is Double -> constant.toString() == value
-            is String -> constant == value
             is Type -> {
                 if (constant.sort == Type.METHOD) {
                     constant.descriptor == value
